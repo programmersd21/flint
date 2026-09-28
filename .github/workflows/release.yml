@@ -26,12 +26,25 @@ jobs:
     - name: release build
       run: make clean && make release
 
-    - name: tests
+    - name: language tests
       run: make test
 
+    - name: unit tests
+      run: make unit
+
+    # a release is the one build where the sanitizers are not optional.
+    # `make test` alone is the language suite and never sees asan, so a
+    # regression that only shows up there would ship.
+    - name: gc stress and sanitizers
+      run: make clean && make stress
+
+    # the binary, and enough of the tree to rebuild it and learn the
+    # language. a tarball with a readme and no docs is a binary you cannot
+    # do anything with.
     - name: package
       run: |
-        tar -czvf flint-${{ github.ref_name }}-linux-x86_64.tar.gz flint README.md LICENSE
+        tar -czvf flint-${{ github.ref_name }}-linux-x86_64.tar.gz \
+          flint README.md LICENSE Makefile docs examples tests
 
     - name: publish
       uses: softprops/action-gh-release@v2
