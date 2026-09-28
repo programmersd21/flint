@@ -35,16 +35,15 @@ jobs:
     # a release is the one build where the sanitizers are not optional.
     # `make test` alone is the language suite and never sees asan, so a
     # regression that only shows up there would ship.
+    #
+    # no `make clean` before this. stress builds into its own object tree
+    # and leaves ./flint alone, and a clean here deletes the binary two steps
+    # before it gets packaged. which it did, once.
     - name: gc stress and sanitizers
-      run: make clean && make stress
+      run: make stress
 
-    # the binary, and enough of the tree to rebuild it and learn the
-    # language. a tarball with a readme and no docs is a binary you cannot
-    # do anything with.
     - name: package
-      run: |
-        tar -czvf flint-${{ github.ref_name }}-linux-x86_64.tar.gz \
-          flint README.md LICENSE Makefile docs examples tests
+      run: tar -czvf flint-${{ github.ref_name }}-linux-x86_64.tar.gz flint
 
     - name: publish
       uses: softprops/action-gh-release@v2
