@@ -232,10 +232,11 @@ static void print_flint_value(Value value)
 				printf("inf\n");
 			return;
 		}
-		/* exactly representable as an int64, and in range as a long */
-		if (d == (double)(int64_t)d && d >= -9007199254740992.0 &&
-		        d <= 9007199254740992.0) {
-			printf("%ld\n", (long)d);
+		/* exactly representable as an integer, and in range as a long.
+		 * the range test has to happen inside the helper, before the
+		 * cast: see the note on fl_double_is_printable_int. */
+		if (fl_double_is_printable_int(d)) {
+			printf("%ld\n", fl_double_to_long(d));
 			return;
 		}
 		char buf[64];

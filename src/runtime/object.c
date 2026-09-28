@@ -313,9 +313,8 @@ void print_value(Value value)
 {
 	if (IS_NUMBER(value)) {
 		double d = AS_NUMBER(value);
-		if (d == (double)(int64_t)d && d >= -9007199254740992.0 &&
-		        d <= 9007199254740992.0) {
-			printf("%ld", (long)d);
+		if (fl_double_is_printable_int(d)) {
+			printf("%ld", fl_double_to_long(d));
 			return;
 		}
 		char buf[64];

@@ -101,9 +101,8 @@ static Value str_native(VM *vm, int argc, Value *argv)
 	if (IS_NUMBER(val)) {
 		char buf[64];
 		double d = AS_NUMBER(val);
-		if (d == (double)(int64_t)d && d >= -9007199254740992.0 &&
-		        d <= 9007199254740992.0)
-			snprintf(buf, sizeof(buf), "%ld", (long)d);
+		if (fl_double_is_printable_int(d))
+			snprintf(buf, sizeof(buf), "%ld", fl_double_to_long(d));
 		else
 			snprintf(buf, sizeof(buf), "%.15g", d);
 		return OBJ_VAL(copy_string(vm, buf, (int)strlen(buf)));

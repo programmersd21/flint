@@ -20,9 +20,8 @@ static void print_value_brief(Value value)
 	if (IS_NUMBER(value)) {
 		double d = AS_NUMBER(value);
 		/* integral values print as integers, same rule as print() */
-		if (d == (double)(int64_t)d && d >= -9007199254740992.0 &&
-		        d <= 9007199254740992.0)
-			printf("%ld", (long)d);
+		if (fl_double_is_printable_int(d))
+			printf("%ld", fl_double_to_long(d));
 		else
 			printf("%g", d);
 	} else if (IS_NIL(value)) {

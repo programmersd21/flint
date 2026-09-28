@@ -4,3 +4,20 @@ print(42)
 print(-17)
 print(0)
 print(0.5)
+
+# The boundary of the "is this an integer we can print with %ld" test.
+# 1e21 above is the one that broke: the range check was written after the
+# int64_t cast in the same expression, so the cast happened first, overflowed,
+# and ubsan failed the build. Every value here is between the limits; the
+# ones below the limits are where the old order would have been fine.
+print(9007199254740992)    # 2^53, the largest exact integer double
+print(-9007199254740992)   # -2^53
+print(1e15)                # well inside, still integral
+print(1e300)               # finite, far past any integer range
+print(1e-300)              # tiny, not integral
+print(123456789012345)     # integral, inside the range
+
+# non-finite values take the same path and must not reach a cast either
+print(1 / 0)
+print(-1 / 0)
+print(0 / 0)

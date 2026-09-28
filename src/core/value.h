@@ -90,6 +90,44 @@ static inline double AS_NUMBER(Value v)
 }
 
 /*
+ * Is this double safe to print with %ld?
+ *
+ * The order of the two tests is the whole point. Written the obvious way,
+ *
+ *     d == (double)(int64_t)d && d >= -LIMIT && d <= LIMIT
+ *
+ * evaluates the cast FIRST. For something like 1e21 the cast to int64_t is
+ * out of range, which is undefined behaviour, and ubsan fails the build
+ * before the range check that would have rejected the value ever runs. The
+ * guard has to come first, and the cast has to be a separate statement so
+ * nothing can reorder it.
+ *
+ * 2^53 is the limit because that is where a double stops representing every
+ * integer; above it, "integral" stops being a useful thing to ask about.
+ */
+#define FL_INT_EXACT_LIMIT 9007199254740992.0 /* 2^53 */
+
+static inline bool fl_double_is_printable_int(double d)
+{
+	/* the range test first, so the cast below is only reached when it is
+	 * defined. d is already known to be finite by every caller. */
+	if (d < -FL_INT_EXACT_LIMIT || d > FL_INT_EXACT_LIMIT)
+		return false;
+
+	long as_long = (long)d;
+
+	/* round-trip: a double that does not come back bit-identical is not
+	 * an integer we are willing to print as one */
+	return (double)as_long == d;
+}
+
+/* the printable form of a double that passes the test above */
+static inline long fl_double_to_long(double d)
+{
+	return (long)d;
+}
+
+/*
  * A NaN may carry a payload, and IEEE 754 declines to say whether the
  * hardware preserves it. In practice it does. We do not rely on it. Every
  * NaN becomes the canonical one, which costs one compare and removes a
