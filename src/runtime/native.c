@@ -274,9 +274,45 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		return NIL_VAL;
 	}
 
+	/*
+	 * The cache. The key is the resolved path, interned, so two imports
+	 * of the same file spelled the same way are the same key, and two
+	 * files that are actually different are different keys even if one
+	 * is a symlink to the other only in a way flint cannot see. That is
+	 * the correct definition of "the same module": same resolved name.
+	 *
+	 * TRUE means loaded, NIL means in flight. The NIL case is a cycle:
+	 * this file is already being executed further up the stack, so
+	 * running it again would recurse forever.
+	 */
+	ObjString *key = copy_string(vm, path, (int)strlen(path));
+	vm_push(vm, OBJ_VAL(key)); /* rooted: every call below can collect */
+
+	Value cached;
+	if (table_get(&vm->modules, key, &cached)) {
+		vm_pop(vm); /* the key */
+		free(path);
+		if (IS_NIL(cached)) {
+			vm_runtime_error(vm,
+			        "Import cycle: '%s' is already being "
+			        "loaded.",
+			        raw);
+			return NIL_VAL;
+		}
+		return TRUE_VAL; /* already loaded. nothing to do. */
+	}
+
+	/* mark it in flight before running, so a cycle inside sees this */
+	table_set(vm, &vm->modules, key, NIL_VAL);
+
 	FILE *file = fopen(path, "rb");
 	if (file == NULL) {
 		vm_runtime_error(vm, "Could not open module file '%s'.", raw);
+		/* remove the in-flight marker: the file did not load, and
+		 * leaving it marked would make a later attempt look like a
+		 * cycle rather than a missing file. */
+		table_delete(&vm->modules, key);
+		vm_pop(vm);
 		free(path);
 		return NIL_VAL;
 	}
@@ -353,9 +389,19 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	InterpretResult res = vm_interpret(vm, buffer);
 	free(buffer);
 	free(path);
-	if (res != INTERPRET_OK)
+	if (res != INTERPRET_OK) {
+		/* a module that failed partway is not "loaded". drop the
+		 * marker so a retry re-runs it rather than looking like
+		 * a cycle. its partial globals stay, which is flint's
+		 * documented behaviour for a failed import. */
+		table_delete(&vm->modules, key);
+		vm_pop(vm);
 		return NIL_VAL;
+	}
 
+	/* now genuinely loaded */
+	table_set(vm, &vm->modules, key, TRUE_VAL);
+	vm_pop(vm); /* the key */
 	return TRUE_VAL;
 }
 

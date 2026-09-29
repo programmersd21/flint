@@ -263,6 +263,7 @@ void vm_init(VM *vm)
 
 	table_init(&vm->globals);
 	table_init(&vm->strings);
+	table_init(&vm->modules);
 
 	register_natives(vm);
 }
@@ -271,6 +272,7 @@ void vm_free(VM *vm)
 {
 	table_free(vm, &vm->globals);
 	table_free(vm, &vm->strings);
+	table_free(vm, &vm->modules);
 	free_objects(vm);
 }
 

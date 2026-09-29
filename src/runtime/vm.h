@@ -55,6 +55,22 @@ struct VM {
 	Table globals; /* name -> value, for top-level variables */
 	Table strings; /* weak. the intern table. */
 
+	/*
+	 * Modules already loaded, keyed by resolved path.
+	 *
+	 * The value is a marker, not data: TRUE means loaded, NIL means
+	 * currently being loaded. That distinction is what detects a cycle
+	 * without a second table, and it is the whole reason the value
+	 * exists rather than being a plain set.
+	 *
+	 * A module runs once per VM. Importing it again is a no-op, which
+	 * means a library's top-level side effects happen once no matter
+	 * how many files pull it in, and a mutual import between two files
+	 * is an error naming the file already in flight rather than a
+	 * stack overflow.
+	 */
+	Table modules;
+
 	ObjUpvalue *open_upvalues; /* sorted by descending stack address */
 	Obj *objects; /* every live object, for sweeping */
 
