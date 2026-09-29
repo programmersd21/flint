@@ -15,22 +15,25 @@ binary. if that takes more than a second, check your machine.
 ./flint -e 'print(1 + 2)'
 ```
 
-# flint
+## install
 
-a small bytecode interpreter and scripting language, in portable c11. no
-dependencies beyond libc and libm.
-
-```sh
-make release
-```
-
-that's the whole build. no llvm, no cmake, no configure step, no code
-generator. the compiler runs once, most of it in parallel, and you get a
-binary. if that takes more than a second, check your machine.
+from source, which is two commands and works anywhere with a c11 compiler:
 
 ```sh
-./flint -e 'print(1 + 2)'
+git clone https://github.com/programmersd21/flint
+cd flint && make release
 ```
+
+on arch, there is an aur package. it is community-maintained, not owned by
+this repo, so it may trail the releases here by a version:
+
+```sh
+yay -S flint-bin
+```
+
+if `yay` reports a version older than the latest tag above, build from source.
+a package manager that installs last month's interpreter is a package manager
+doing its best, and the build takes less than a second anyway.
 
 ## what it is
 
