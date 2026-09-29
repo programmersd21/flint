@@ -72,6 +72,22 @@ a runtime error stops the script. there is no `try`, no `catch`, and no error
 value. the one exception is a module that fails to import, which reports and
 lets the importer continue. see [modules.md](modules.md).
 
+## structured formats
+
+the default output is one line per error and is deliberately unchanged, so
+anything already comparing stderr keeps working. the rest is opt in:
+
+```sh
+flint --error-format=human script.fl   # excerpt, caret, and a label
+flint --error-format=short script.fl   # error[CODE]: message at file:line:col
+flint --error-format=json script.fl    # one object per diagnostic
+flint --color=never script.fl          # auto (default) | always | never
+flint --explain E0102                  # what a code means
+```
+
+see [diagnostics.md](diagnostics.md) for the code groups, the span rules, and
+`--fix`.
+
 ## the messages
 
 they are lowercase, they end with a period, and they name the thing that

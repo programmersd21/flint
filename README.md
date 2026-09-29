@@ -57,6 +57,7 @@ make release    # -O2, no asserts. the one you ship.
 make debug      # -O0 -g3, dumps the bytecode and traces every instruction
 make stress     # gc on every allocation, under asan and ubsan
 make test       # builds release, runs the language suite
+make diagnostic-test # checks human, short, json, and fix output
 make unit       # the value and chunk unit tests
 make lint       # clang-tidy, policy in .clang-tidy
 make fmt        # clang-format, policy in .clang-format
@@ -73,6 +74,7 @@ use-after-free immediately rather than on a thursday.
 ./flint                    # repl, one line at a time
 ./flint path/to/script.fl  # run a file
 ./flint -e 'print(1 + 2)'  # run one expression
+./flint -                  # read a script from stdin
 ```
 
 exit codes follow sysexits, so a shell can tell the failures apart: 64 for
@@ -189,52 +191,86 @@ import "math.fl"
 print(square(6))
 ```
 
-**paths resolve against the working directory, not the importing file.** this
-bites everyone once, and it bites in the direction you would not guess:
+**imports resolve against the importing file**, so a script runs from any
+directory:
 
 ```sh
-$ flint myproject/main.fl                 # works. cwd is already myproject's parent
-$ cd myproject && flint main.fl           # cannot open module file 'math.fl'
+$ flint myproject/main.fl     # works
+$ cd myproject && flint main.fl   # also works
 ```
 
-the second one is the surprise. you are *in* the directory and it still cannot
-find the file next to the script, because "math.fl" is looked up as
-`./math.fl` and your cwd is now `myproject`, where the file does not live.
+a relative path is joined to the directory of the file doing the import, not
+to wherever you happen to be standing. an absolute path is used as given. that
+is the whole change, and it is the difference between a script that works and
+a script that works only from one place.
 
-so a script only finds its imports if you run it from the directory the paths
-were written for. there is no search path and no `private` -- all files share
-one global table, so two modules defining the same name is a collision that
-import order decides. see [docs/modules.md](docs/modules.md).
+modules run once per VM. importing one again is a no-op, so a library's
+top-level code happens once however many files pull it in, and a repeated
+import is not a redeclaration of its constants. a file that imports itself is
+an error naming the file, not a stack overflow.
+
+there is still no `private` and no namespace: all files share one global
+table, so two modules defining the same name is a collision that import order
+decides. see [docs/modules.md](docs/modules.md).
 
 ### the whole library
 
-seven functions. that is deliberate, and the size is the point: anything else
-you reach for before you write a loop is a runtime nobody can hold in their
-head.
+thirteen functions. small on purpose -- the point is that a script needs
+nothing installed and nothing built to read a file and call a program.
 
 ```flint
-print(len("abc"))   # 3. string or list.
-print(len({a: 1}))  # error. tables have no len.
-print(str(42))      # "42"
-print(type([1]))    # "list"
-```
-
-the one that talks back:
-
-```flint
-let name = input("What is your name? ")
-print("hello, " + name)
+let name = input("What is your name? ")   # a prompt, a line, no trailing \n
+let path = args()                        # arguments after the script name
+let home = env("HOME")                   # nil if it is not set
+let text = read_file("in.txt")           # the whole file, as a string
+print(write_file("out.txt", text))
+exit(exec("grep", "-c", "error", "app.log"))   # no shell, ever
 ```
 
 `input()` writes its prompt with no newline and reads one line, so the typing
 starts where the prompt ends. an empty line gives `""` and end of file gives
 `nil`, which are different values on purpose: the script has to be able to
-tell "the user typed nothing" from "there is nothing left to read". see
-[docs/library.md](docs/library.md).
+tell "the user typed nothing" from "there is nothing left to read".
 
-`clock()` returns process cpu time. `push` and `pop` work on lists. no
-`map`, no `sort`, no file io, no random -- see
-[docs/library.md](docs/library.md) for the list and why.
+`exec()` calls `execvp` and never a shell. there is no path from this API to
+`/bin/sh`, so a filename with a space or a semicolon in it is an argument
+rather than an injection.
+
+the string primitives a text script spends its time in:
+
+```flint
+print(split("a,b,c", ","))        # ["a", "b", "c"]
+print(join(["a", "b"], "-"))      # "a-b"
+print(trim("  hi  "))             # "hi"
+print(contains("hello", "ell"))   # true
+print(replace("a-b", "-", "+"))   # "a+b"
+```
+
+still absent on purpose: no `sort`, no random, no environment listing, no
+process spawning beyond `exec`, and no regex. each is a portability question
+or a design argument, and the answer so far has been no. see
+[docs/library.md](docs/library.md) for the full list and the reasoning.
+
+### errors
+
+the default output is one line per error, and it is what scripts that compare
+stderr already expect. when you want more:
+
+```sh
+$ flint --error-format=human bad.fl
+error[E0100]: Expect expression.
+ --> <command line>:1:8
+  |
+1 | let x =
+  |        ^ expected here
+  |
+```
+
+`short` prints one location line; `json` emits one object per diagnostic.
+`--fix` applies the machine-applicable closing-delimiter edits currently
+supported. `--explain E0102` prints a short explanation. Runtime spans still
+underline the executing source line, and the compiler does not yet collect
+multiple independent errors. See [docs/diagnostics.md](docs/diagnostics.md).
 
 ## two things that catch everyone
 

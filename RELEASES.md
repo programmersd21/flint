@@ -1,5 +1,79 @@
 # releases
 
+## v0.3.0
+
+a language for small unix programs. one binary, no dependencies, and a script
+that reads stdin, calls a program, and writes a line is the whole toolchain.
+
+**new: the standard library a script actually needs**
+
+- `args()`, `env()`, `exit()`, `read_file()`, `write_file()`, `exec()`
+- `split` `join` `trim` `contains` `starts_with` `ends_with` `replace` `lower`
+  `upper`
+- `exec` calls `execvp` and never a shell. there is no path from the API to
+  `/bin/sh`, so a filename with a semicolon in it is an argument, not an
+  injection
+- arguments pass through to the script: `flint x.fl -v` runs `x.fl` with `-v`
+  as an argument
+
+**new: diagnostics**
+
+- rustc-style errors, opt in: `--error-format=human|short|json`
+- stable codes by origin, `--explain E0102`, `--color=`
+- `--fix` for machine-applicable closing-delimiter insertions
+- JSON includes source spans and structured delimiter replacements; runtime
+  spans currently identify the executing line
+
+**new: cli**
+
+- `flint -` reads a script from stdin, next to `-e` and the repl
+- `flint script.fl args...` passes everything after the script to the script
+
+**modules**
+
+- imports resolve against the importing file, not the working directory. a
+  script runs from any directory now, which it did not
+- a module runs once per VM; a repeat import is a no-op
+- an import cycle reports the in-flight module path instead of overflowing
+
+**fixed**
+
+- `split` pushed every piece on the value stack. past 65536 separators that
+  wrote off the end of the array, silently, with no bounds check to catch it
+- the growing-read loops in `read_file` and the stdin reader left no byte for
+  the terminator when a read landed exactly on a capacity boundary, which is
+  every file whose size is a power of two
+- those loops also called the read again after a zero-byte read, which is
+  undefined behaviour on a stream in an error state
+
+**measured**
+
+against CPython 3.14.7 on an i5-1235U, best of 7, matched `.fl`/`.py` pairs
+whose outputs are compared before the timing is reported. full numbers and
+method in [bench/RESULTS.md](bench/RESULTS.md).
+
+| case | flint | python | |
+|---|---|---|---|
+| startup | 0.41 ms | 10.6 ms | **26x** |
+| hello | 0.57 ms | 10.1 ms | **18x** |
+| arith | 1.39 s | 2.62 s | **1.88x** |
+| closures | 107 ms | 203 ms | **1.89x** |
+| lists | 119 ms | 196 ms | **1.65x** |
+| fib | 19.2 ms | 31.6 ms | **1.64x** |
+| calls | 178 ms | 266 ms | **1.49x** |
+| strings | 160 ms | 61 ms | **0.38x** |
+
+startup is the result that matters for this language. the others are honest
+but modest, and `strings` is a loss that stays in the table.
+
+## current development notes
+
+`--error-format=human` and `short` render the diagnostics currently emitted by
+the compiler and VM. They do not yet provide multiple source labels, multiline
+underlines, or full parser recovery. `--fix` is limited to supported closing
+delimiters. See [docs/diagnostics.md](docs/diagnostics.md) for the actual
+coverage.
+
 ## v0.2.0
 
 the same flint, substantially more correct. no new language, one new
