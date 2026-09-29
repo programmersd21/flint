@@ -1,0 +1,21 @@
+# closures, and the shared-upvalue path. two closures over one local is the
+# case that shows whether capture is cheap or not.
+fn make_pair() {
+    let n = 0
+    fn bump() {
+        n += 1
+        return n
+    }
+    fn read() {
+        return n
+    }
+    return [bump, read]
+}
+
+let pair = make_pair()
+let i = 0
+while i < 2000000 {
+    pair[0]()
+    i += 1
+}
+print(pair[1]())

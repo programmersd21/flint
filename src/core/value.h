@@ -10,9 +10,7 @@
 #ifndef FL_VALUE_H
 #define FL_VALUE_H
 
-// clang-format off: the tagged-union bits below are a bitfield diagram, and a
-// table of masks is only readable as a table. Wrapping any of these lines
-// destroys the column, and nothing here is long enough to need wrapping.
+/* clang-format off: keep the masks and shifts aligned. */
 
 #include <assert.h>
 #include <math.h>
@@ -34,9 +32,9 @@ typedef uint64_t Value;
 #define FL_TAG_OBJ   UINT64_C(4)
 
 /* one expression, not a function, so it stays usable in a static initializer */
-#define FL_MAKE_BOXED(tag, payload)                                        \
-	(FL_BOX_MASK | ((tag) << FL_TAG_SHIFT) |                           \
-	 ((uint64_t)(payload) & FL_PAYLOAD_MASK))
+#define FL_MAKE_BOXED(tag, payload)                                            \
+	(FL_BOX_MASK | ((tag) << FL_TAG_SHIFT) |                               \
+	        ((uint64_t)(payload) & FL_PAYLOAD_MASK))
 
 #define NIL_VAL   ((Value)FL_MAKE_BOXED(FL_TAG_NIL, 0))
 #define FALSE_VAL ((Value)FL_MAKE_BOXED(FL_TAG_FALSE, 0))
@@ -122,9 +120,47 @@ static inline bool fl_double_is_printable_int(double d)
 }
 
 /* the printable form of a double that passes the test above */
-static inline long fl_double_to_long(double d)
+static inline long fl_double_to_long(double d) { return (long)d; }
+
+/*
+ * Write a small integer into buf as decimal, without snprintf.
+ *
+ * snprintf("%.15g") costs about 250ns per call, which sounds like nothing
+ * until you notice a loop that builds a hundred thousand strings is then
+ * dominated by it. Most values a script ever prints are small integers, and
+ * for those the whole job is a digit loop and a reversal.
+ *
+ * Returns the number of bytes written, not counting the NUL. Returns 0 when
+ * the value is out of the range this handles, and the caller is expected to
+ * fall back to snprintf rather than print something wrong.
+ */
+static inline int fl_itoa(long value, char *buf, size_t buflen)
 {
-	return (long)d;
+	/* enough for "-9223372036854775808" and its NUL */
+	if (buflen < 21)
+		return 0;
+	/* the cheap path is only worth taking for values that certainly
+	 * round-trip through long, which is what fl_double_is_printable_int
+	 * already established for the caller. */
+	if (value < -1000000000L || value > 1000000000L)
+		return 0;
+
+	char digits[20];
+	size_t n = 0;
+	unsigned long u = value < 0 ? (unsigned long)(-(value + 1)) + 1
+	                            : (unsigned long)value;
+	do {
+		digits[n++] = (char)('0' + (u % 10));
+		u /= 10;
+	} while (u != 0);
+
+	size_t out = 0;
+	if (value < 0)
+		buf[out++] = '-';
+	while (n > 0)
+		buf[out++] = digits[--n];
+	buf[out] = '\0';
+	return (int)out;
 }
 
 /*

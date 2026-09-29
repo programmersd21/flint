@@ -1,0 +1,12 @@
+# many small calls. the cost here is the call path, not the body.
+fn noop(x) {
+    return x
+}
+
+let acc = 0
+let i = 0
+while i < 3000000 {
+    acc = noop(acc + 1)
+    i += 1
+}
+print(acc)

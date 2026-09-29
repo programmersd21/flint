@@ -1,0 +1,16 @@
+# build and then tear apart strings. the built-in primitives should make this
+# cheaper here than in a language that has to loop for them.
+let parts = []
+let i = 0
+while i < 200000 {
+    push(parts, "item" + str(i))
+    i += 1
+}
+let line = join(parts, ",")
+
+print(len(split(line, ",")))
+print(contains(line, "item42"))
+print(starts_with(line, "item0,item1"))
+
+# a replace over a big string, which is the kind of scrubbing a filter does
+print(len(replace(line, "item", "ITEM")))

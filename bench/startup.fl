@@ -1,0 +1,3 @@
+# the whole program is a no-op. what this measures is everything flint does
+# before the first statement: process start, vm init, native registration,
+# read, compile, run, free. it is the cost a shell pays per invocation.

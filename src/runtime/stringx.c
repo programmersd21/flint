@@ -74,74 +74,115 @@ static Value split_native(VM *vm, int argc, Value *argv)
 	ObjString *sep = AS_STRING(argv[1]);
 
 	ObjList *out = new_list(vm);
-	vm_push(vm, OBJ_VAL(out)); /* the list, across every allocation below */
-	Value *out_stack_base = vm->stack_top; /* strings go above here */
+	vm_push(vm, OBJ_VAL(out)); /* the list is a root for everything below */
 
-	/* an empty separator: one character per element */
+	/*
+	 * Append each piece as it is found, and pop it immediately.
+	 *
+	 * The obvious implementation pushes every piece on the stack and
+	 * moves them into the array at the end. That is wrong: the value
+	 * stack is 65536 slots, so splitting a string with more than
+	 * that many separators wrote straight off the end of vm.stack and
+	 * into the caller's frame. There was no bounds check on vm_push to
+	 * catch it, so a large split was a silent memory corruption and
+	 * a segfault somewhere unrelated.
+	 *
+	 * One value on the stack at a time has no such limit, which is
+	 * also the right shape: a list of a million items costs a list,
+	 * not a stack.
+	 */
+	/*
+	 * Find the separators.
+	 *
+	 * memchr for the first byte, then memcmp to confirm. Scanning byte
+	 * by byte and calling memcmp at every position is quadratic in the
+	 * separator length and does a call per character; memchr is
+	 * vectorised by the compiler, so the common case -- a separator
+	 * that almost never matches -- costs a few instructions per
+	 * *candidate* rather than a function call per byte. This is what
+	 * CPython does and it is why its split beats ours by about 3x
+	 * before this change.
+	 *
+	 * An empty separator is one character per element, handled
+	 * separately because there is nothing to memchr for.
+	 */
+	int start = 0;
 	if (sep->length == 0) {
 		for (int i = 0; i < s->length; i++) {
-			char c[2] = {s->chars[i], '\0'};
-			vm_push(vm, OBJ_VAL(make_string(vm, c, 1)));
+			char one = s->chars[i];
+			ObjString *piece = make_string(vm, &one, 1);
+			vm_push(vm, OBJ_VAL(piece));
+			if (out->count == out->capacity) {
+				int old_cap = out->capacity;
+				out->capacity = GROW_CAPACITY(old_cap);
+				out->items = GROW_ARRAY(vm,
+				        Value,
+				        out->items,
+				        old_cap,
+				        out->capacity);
+			}
+			out->items[out->count++] = vm->stack_top[-1];
+			vm_pop(vm);
 		}
-		int n = (int)(vm->stack_top - out_stack_base);
-		if (n > 0) {
-			Value *items = ALLOCATE(vm, Value, (size_t)n);
-			for (int k = 0; k < n; k++)
-				items[k] = vm->stack_top[-n + k];
-			out->items = items;
-			out->capacity = n;
-			out->count = n;
-			vm->stack_top -= n;
-		}
-		vm_pop(vm); /* the list */
-		return OBJ_VAL(out);
+		goto emit_tail;
 	}
 
-	/* the common case: search forward, emit the gap, skip the separator.
-	 * memmem is not portable C11 and glibc-specific, so this is a plain
-	 * scan. a quadratic search over one line of text is not the thing
-	 * that makes a text script slow; allocation is. */
-	int start = 0;
-	int i = 0;
-	while (i <= s->length - sep->length) {
-		bool hit = true;
-		for (int k = 0; k < sep->length; k++) {
-			if (s->chars[i + k] != sep->chars[k]) {
-				hit = false;
+	{
+		char first = sep->chars[0];
+		int limit = s->length - sep->length;
+		int i = 0;
+		while (i <= limit) {
+			const char *hit = memchr(
+			        s->chars + i, first, (size_t)(limit - i + 1));
+			if (hit == NULL)
 				break;
+			int at = (int)(hit - s->chars);
+			/* memchr found the first byte. confirm the rest.
+			 * sep->length == 1 needs no confirm. */
+			if (sep->length == 1 ||
+			        memcmp(hit + 1,
+			                sep->chars + 1,
+			                (size_t)sep->length - 1) == 0) {
+				ObjString *piece = make_string(
+				        vm, s->chars + start, at - start);
+				vm_push(vm, OBJ_VAL(piece));
+				if (out->count == out->capacity) {
+					int old_cap = out->capacity;
+					out->capacity = GROW_CAPACITY(old_cap);
+					out->items = GROW_ARRAY(vm,
+					        Value,
+					        out->items,
+					        old_cap,
+					        out->capacity);
+				}
+				out->items[out->count++] = vm->stack_top[-1];
+				vm_pop(vm);
+				start = at + sep->length;
+				i = start;
+			} else {
+				/* first byte matched, rest did not. resume just
+				 * past it so the same position is not retried
+				 * forever. */
+				i = at + 1;
 			}
 		}
-		if (hit) {
-			vm_push(vm,
-			        OBJ_VAL(make_string(
-			                vm, s->chars + start, i - start)));
-			start = i + sep->length;
-			i = start;
-		} else {
-			i++;
-		}
 	}
 
+emit_tail:;
 	/* the tail. always emitted, so "a,b" gives two elements and "a"
-	 * gives one, and a script never has to distinguish "no separator"
-	 * from "trailing separator". */
-	vm_push(vm,
-	        OBJ_VAL(make_string(vm, s->chars + start, s->length - start)));
-
-	/* Move the pushed strings into the list, then drop them. The count is
-	 * however many we pushed, which is the number of stack slots above
-	 * the list we rooted first. I track it explicitly rather than
-	 * scanning, because the list is one slot below them. */
-	int n = (int)(vm->stack_top - out_stack_base);
-	if (n > 0) {
-		Value *items = ALLOCATE(vm, Value, (size_t)n);
-		for (int k = 0; k < n; k++)
-			items[k] = vm->stack_top[-n + k];
-		out->items = items;
-		out->capacity = n;
-		out->count = n;
-		vm->stack_top -= n;
+	 * gives one, and a script never has to tell "no separator" from
+	 * "trailing separator". */
+	ObjString *tail = make_string(vm, s->chars + start, s->length - start);
+	vm_push(vm, OBJ_VAL(tail));
+	if (out->count == out->capacity) {
+		int old_cap = out->capacity;
+		out->capacity = GROW_CAPACITY(old_cap);
+		out->items = GROW_ARRAY(
+		        vm, Value, out->items, old_cap, out->capacity);
 	}
+	out->items[out->count++] = vm->stack_top[-1];
+	vm_pop(vm); /* the piece */
+
 	vm_pop(vm); /* the list */
 	return OBJ_VAL(out);
 }
@@ -274,9 +315,26 @@ static Value contains_native(VM *vm, int argc, Value *argv)
 	if (sub->length > s->length)
 		return FALSE_VAL;
 
-	for (int i = 0; i <= s->length - sub->length; i++) {
-		if (memcmp(s->chars + i, sub->chars, (size_t)sub->length) == 0)
+	/*
+	 * memchr for the first byte, memcmp to confirm. a call per byte was
+	 * the bottleneck here: for a needle that does not occur, the naive
+	 * loop makes s->length memcmp calls, and each one is a real call.
+	 * memchr is vectorised, so this is a few instructions per
+	 * *candidate*.
+	 */
+	int limit = s->length - sub->length;
+	int i = 0;
+	while (i <= limit) {
+		const char *hit = memchr(
+		        s->chars + i, sub->chars[0], (size_t)(limit - i + 1));
+		if (hit == NULL)
+			return FALSE_VAL;
+		int at = (int)(hit - s->chars);
+		if (sub->length == 1 || memcmp(hit + 1,
+		                                sub->chars + 1,
+		                                (size_t)sub->length - 1) == 0)
 			return TRUE_VAL;
+		i = at + 1;
 	}
 	return FALSE_VAL;
 }
@@ -342,15 +400,35 @@ static Value replace_native(VM *vm, int argc, Value *argv)
 	                        0))
 		return argv[0];
 
-	/* count the hits first, for the length of the result. a miss is the
-	 * common case in a filtering loop, so the count is also the test
-	 * for "did we match at all". */
+	/*
+	 * Count the hits first, for the length of the result. a miss is the
+	 * common case in a filtering loop, so the count is also the test for
+	 * "did we match at all", and returning s unchanged is then free.
+	 *
+	 * memchr for the first byte, memcmp to confirm, for the same
+	 * reason as contains(): a memcmp call per byte is what made this
+	 * three times slower than the python it is being compared to.
+	 */
 	int hits = 0;
-	for (int i = 0; i <= s->length - from->length; i++) {
-		if (memcmp(s->chars + i, from->chars, (size_t)from->length) ==
-		        0) {
-			hits++;
-			i += from->length - 1; /* skip past this match */
+	{
+		int limit = s->length - from->length;
+		int i = 0;
+		while (i <= limit) {
+			const char *hit = memchr(s->chars + i,
+			        from->chars[0],
+			        (size_t)(limit - i + 1));
+			if (hit == NULL)
+				break;
+			int at = (int)(hit - s->chars);
+			if (from->length == 1 ||
+			        memcmp(hit + 1,
+			                from->chars + 1,
+			                (size_t)from->length - 1) == 0) {
+				hits++;
+				i = at + from->length;
+			} else {
+				i = at + 1;
+			}
 		}
 	}
 	if (hits == 0)
@@ -371,19 +449,49 @@ static Value replace_native(VM *vm, int argc, Value *argv)
 		return NIL_VAL;
 	}
 
+	/*
+	 * The second pass. Same shape as the counting pass, but copying
+	 * runs of non-matching bytes with memcpy rather than one byte at a
+	 * time: between two matches, the bytes are copied wholesale, and
+	 * that is the bulk of the work in a string that mostly matches.
+	 */
 	int used = 0;
+	int copied_from = 0;
 	int i = 0;
-	while (i < s->length) {
-		if (i <= s->length - from->length &&
-		        memcmp(s->chars + i,
-		                from->chars,
-		                (size_t)from->length) == 0) {
-			memcpy(buffer + used, to->chars, (size_t)to->length);
-			used += to->length;
-			i += from->length;
-		} else {
-			buffer[used++] = s->chars[i++];
+	int limit = s->length - from->length;
+	while (i <= limit) {
+		const char *hit = memchr(
+		        s->chars + i, from->chars[0], (size_t)(limit - i + 1));
+		if (hit == NULL)
+			break;
+		int at = (int)(hit - s->chars);
+		if (from->length != 1 &&
+		        memcmp(hit + 1,
+		                from->chars + 1,
+		                (size_t)from->length - 1) != 0) {
+			i = at + 1;
+			continue;
 		}
+
+		/* the run before this match, in one copy */
+		int run = at - copied_from;
+		if (run > 0) {
+			memcpy(buffer + used,
+			        s->chars + copied_from,
+			        (size_t)run);
+			used += run;
+		}
+		/* the replacement */
+		memcpy(buffer + used, to->chars, (size_t)to->length);
+		used += to->length;
+		i = at + from->length;
+		copied_from = i;
+	}
+	/* whatever is after the last match */
+	int tail_len = s->length - copied_from;
+	if (tail_len > 0) {
+		memcpy(buffer + used, s->chars + copied_from, (size_t)tail_len);
+		used += tail_len;
 	}
 	buffer[used] = '\0';
 
