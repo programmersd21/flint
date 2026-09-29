@@ -5,7 +5,7 @@
 # limitation; see import_declaration() in src/frontend/compiler.c.
 
 # the basic case: a name from another file is just a global afterwards
-import "tests/language/modules/helper.fl"
+import "helper.fl"
 print(square(6))
 
 # an exported constant and an exported variable
@@ -19,14 +19,14 @@ print(counter)
 print(hypotenuse_sq(3, 4))
 
 # two modules in one script, with work after each import
-import "tests/language/modules/geometry.fl"
+import "geometry.fl"
 print(describe())
 print(square(9))
 
 # import inside a function. the import reenters the interpreter with a frame
 # already on the stack, which is the case run() has to unwind correctly.
 fn load_and_use() {
-	import "tests/language/modules/helper.fl"
+	import "helper.fl"
 	return square(5)
 }
 print(load_and_use())
@@ -37,7 +37,7 @@ print(square(7))
 # local variables before and after an import must survive it
 let before = 1
 print(before)
-import "tests/language/modules/helper.fl"
+import "helper.fl"
 let after = 2
 print(after)
 print(before + after)

@@ -4,8 +4,8 @@
 # a second time with the same value. That is idempotent and must not be an
 # error, otherwise no module exporting a constant could be imported more than
 # once.
-import "tests/language/modules/const_source.fl"
-import "tests/language/modules/const_source.fl"
+import "const_source.fl"
+import "const_source.fl"
 
 print(LIMIT)
 print(doubled())

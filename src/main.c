@@ -1,30 +1,23 @@
 /* SPDX-License-Identifier: MIT */
 /*
- * Entry point: argument handling, the repl, and file loading.
+ * Command line entry point, file loading, the repl, and the CLI.
  *
- * Exit codes follow sysexits, so scripts can tell the difference between
- * "you called me wrong", "your file does not compile", and "your program
- * blew up": 64, 65, 70.
+ * Exit codes follow sysexits, so a script can be checked by a shell without
+ * parsing its output: 64 usage, 65 did not compile, 70 blew up at run time,
+ * 74 could not read the file.
  */
+#include "common.h"
+#include "chunk.h"
+#include "debug.h"
+#include "sys.h"
 #include "vm.h"
-#include "object.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * The version comes from the build, not from here. The Makefile passes
- * -DFLINT_VERSION="$(git describe)" on every compile, so the binary always
- * reports the tag that produced it. A version string edited by hand in this
- * file is how v0.2.0 shipped identifying as v0.1.0, and that only needs to
- * happen once.
- *
- * Building outside a git checkout (from a tarball, for example) defines
- * nothing, so this fallback is what those binaries report.
- */
 #ifndef FLINT_VERSION
-#define FLINT_VERSION "dev"
+#	define FLINT_VERSION "dev"
 #endif
 
 /*
@@ -40,6 +33,7 @@ static void repl(VM *vm)
 	char line[1024];
 	for (;;) {
 		printf("> ");
+		fflush(stdout);
 
 		/* fgets returns NULL on EOF and on error alike. either way
 		 * we are done. */
@@ -61,14 +55,6 @@ static char *read_file(const char *path)
 		exit(74);
 	}
 
-	/*
-	 * ftell reports the size as a long, and returns -1 on failure. A
-	 * pipe, a socket or /dev/stdin is not seekable, so the fseek below
-	 * fails and that -1 arrives here. It must be tested before it is
-	 * stored: assigned to a size_t it becomes SIZE_MAX, and the +1 in
-	 * the malloc then wraps to 0, leaving a zero byte allocation that
-	 * the fread writes straight past.
-	 */
 	if (fseek(file, 0L, SEEK_END) != 0) {
 		fprintf(stderr, "Could not seek in \"%s\".\n", path);
 		fclose(file);
@@ -80,60 +66,53 @@ static char *read_file(const char *path)
 		fclose(file);
 		exit(74);
 	}
-	size_t file_size = (size_t)length;
-	/* rewind() swallows the seek error; fseek() does not */
+	/* a length of 0 is a real file, an empty one. the +1 is for the NUL.
+	 * checked, because a length near SIZE_MAX wraps the sum to 0 and the
+	 * fread then writes past a zero byte allocation. */
+	if ((unsigned long)length >= (unsigned long)-1) {
+		fprintf(stderr, "\"%s\" is too large.\n", path);
+		fclose(file);
+		exit(74);
+	}
+	size_t size = (size_t)length;
 	if (fseek(file, 0L, SEEK_SET) != 0) {
 		fprintf(stderr, "Could not rewind \"%s\".\n", path);
 		fclose(file);
 		exit(74);
 	}
 
-	/*
-	 * malloc rather than ALLOCATE: this buffer is not an object and
-	 * nothing else points at it, so a collection does not need to know
-	 * about it. The compiler roots tokens by pointing into it, which
-	 * works because tokens are only live during compile().
-	 *
-	 * file_size is at most LONG_MAX, so this +1 cannot wrap.
-	 */
-	char *buffer = (char *)malloc(file_size + 1);
+	char *buffer = (char *)malloc(size + 1);
 	if (buffer == NULL) {
 		fprintf(stderr, "Not enough memory to read \"%s\".\n", path);
 		fclose(file);
 		exit(74);
 	}
 
-	/* a short read means a directory, a pipe, or a race. treat it as an
-	 * error rather than running half a file */
-	size_t bytes_read = fread(buffer, sizeof(char), file_size, file);
-	if (bytes_read < file_size) {
-		fprintf(stderr, "Could not read file \"%s\".\n", path);
+	/* a short read means a directory, a pipe, or a race. an unterminated
+	 * buffer would be handed to the compiler as a truncated script */
+	size_t got = fread(buffer, 1, size, file);
+	if (got < size) {
+		fprintf(stderr, "Could not read \"%s\".\n", path);
 		free(buffer);
 		fclose(file);
 		exit(74);
 	}
-
-	/*
-	 * The NUL lands in the byte the +1 above was allocated for, so this
-	 * is the last index the buffer owns. bytes_read is equal to
-	 * file_size here, proven by the check above; indexing with
-	 * file_size says that directly, where indexing with the fread
-	 * result would leave the bound to be inferred.
-	 *
-	 * The analyser still reports this as a tainted index, because
-	 * file_size arrives from ftell on a stream opened with a
-	 * user-supplied path, and it does not relate the index back to the
-	 * malloc that sized the buffer. It is the same value in both.
-	 */
-	/* NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) */
-	buffer[file_size] = '\0';
-
+	buffer[size] = '\0';
 	fclose(file);
 	return buffer;
 }
 
+/* run one file, with the imports resolved relative to *its* directory */
 static void run_file(VM *vm, const char *path)
 {
+	/*
+	 * Set the source directory so `import "lib/x.fl"` inside this file
+	 * resolves next to it, not relative to wherever the user is standing.
+	 * this is what makes a script runnable from any directory. see
+	 * sys_resolve_module().
+	 */
+	sys_set_source_dir_for_file(path);
+
 	char *source = read_file(path);
 	InterpretResult result = vm_interpret(vm, source);
 	free(source);
@@ -144,18 +123,72 @@ static void run_file(VM *vm, const char *path)
 		exit(70);
 }
 
+/* read the whole of stdin as a script. used by `flint -` and `flint` with a
+ * pipe. the buffer grows, because a piped script has no size. */
+static char *read_stdin(void)
+{
+	size_t capacity = 8192;
+	size_t used = 0;
+	char *buffer = malloc(capacity);
+	if (buffer == NULL) {
+		fprintf(stderr, "Not enough memory to read stdin.\n");
+		exit(74);
+	}
+
+	for (;;) {
+		if (used == capacity) {
+			if (capacity > (size_t)-1 / 2) {
+				free(buffer);
+				fprintf(stderr, "stdin is too large.\n");
+				exit(74);
+			}
+			size_t grown = capacity * 2;
+			char *bigger = realloc(buffer, grown);
+			if (bigger == NULL) {
+				free(buffer);
+				fprintf(stderr,
+				        "Not enough memory to read stdin.\n");
+				exit(74);
+			}
+			buffer = bigger;
+			capacity = grown;
+		}
+		size_t got = fread(buffer + used, 1, capacity - used, stdin);
+		used += got;
+		if (got == 0)
+			break;
+	}
+	buffer[used] = '\0';
+	return buffer;
+}
+
 static void print_usage(FILE *stream)
 {
-	fprintf(stream, "Usage: flint [options] [path]\n");
+	fprintf(stream, "Usage: flint [options] [script.fl] [args...]\n");
+	fprintf(stream, "\n");
+	fprintf(stream,
+	        "Run a script, read one from stdin, or start a repl.\n");
+	fprintf(stream, "Anything after the script path is passed to the\n");
+	fprintf(stream, "script and read back with args().\n");
+	fprintf(stream, "\n");
 	fprintf(stream, "Options:\n");
 	fprintf(stream, "  -h, --help       show this help and exit\n");
 	fprintf(stream, "  -v, --version    show the version and exit\n");
-	fprintf(stream, "  -e <code>        execute code directly\n");
+	fprintf(stream, "  -e <code>        execute code and exit\n");
+	fprintf(stream, "  -                read a script from stdin\n");
+	fprintf(stream, "\n");
+	fprintf(stream, "With no arguments, starts a repl.\n");
 }
 
 int main(int argc, char *argv[])
 {
-	/* options first, and only in the first argument position */
+	/*
+	 * Hand the whole command line to the runtime before anything else.
+	 * args() reads from this, and a script run by `flint x.fl a b` should
+	 * see [a, b] regardless of which of the code paths below runs it.
+	 */
+	sys_set_args(argc, argv);
+
 	if (argc > 1) {
 		const char *flag = argv[1];
 
@@ -168,8 +201,6 @@ int main(int argc, char *argv[])
 			return 0;
 		}
 		if (strcmp(flag, "-e") == 0) {
-			/* a whole VM for one expression, then out. the
-			 * repl and the file path both need a longer life */
 			if (argc < 3) {
 				fprintf(stderr, "-e requires an argument\n");
 				print_usage(stderr);
@@ -177,7 +208,27 @@ int main(int argc, char *argv[])
 			}
 			VM vm;
 			vm_init(&vm);
+			/* code has no file, so imports resolve against the
+			 * working directory, which is the only thing they can
+			 * sensibly mean */
 			InterpretResult result = vm_interpret(&vm, argv[2]);
+			vm_free(&vm);
+			if (result == INTERPRET_COMPILE_ERROR)
+				return 65;
+			if (result == INTERPRET_RUNTIME_ERROR)
+				return 70;
+			return 0;
+		}
+		if (strcmp(flag, "-") == 0) {
+			/* the script comes from stdin. imports inside it
+			 * resolve against the working directory, because
+			 * stdin has no path of its own to be relative
+			 * to. */
+			VM vm;
+			vm_init(&vm);
+			char *source = read_stdin();
+			InterpretResult result = vm_interpret(&vm, source);
+			free(source);
 			vm_free(&vm);
 			if (result == INTERPRET_COMPILE_ERROR)
 				return 65;
@@ -192,14 +243,16 @@ int main(int argc, char *argv[])
 
 	if (argc == 1) {
 		repl(&vm);
-	} else if (argc == 2) {
-		run_file(&vm, argv[1]);
 	} else {
-		/* more than one path. there is only one path. */
-		print_usage(stderr);
-		exit(64);
+		/* one path plus any number of arguments. the arguments belong
+		 * to the script, not to flint, so they are not parsed here:
+		 * `flint x.fl -v` runs x.fl with "-v" as an argument rather
+		 * than printing the version and running nothing. that is what
+		 * a script author expects, and it is what args() is for. */
+		run_file(&vm, argv[1]);
 	}
 
 	vm_free(&vm);
+	sys_free_args();
 	return 0;
 }

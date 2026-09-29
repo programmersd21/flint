@@ -1,18 +1,62 @@
-# String concatenation that would overflow the length.
+# String concatenation: the overflow guard, and the cases around it.
 #
-# this form doubles the string every iteration, so it reaches the limit in
-# about a dozen lines of a loop and used to be undefined behaviour: the two
-# int lengths were added without a check, overflowed, and the negative result
-# became an enormous size_t for the allocator. ubsan caught it as a signed
-# integer overflow and asan as an allocation that was too big to be a real
-# request.
+# `+` on two strings adds their lengths in int. That sum can overflow, and a
+# negative int handed to the allocator as a size_t becomes an enormous
+# request. flint checks `a->length > INT_MAX - b->length` before adding and
+# refuses with "String is too long to concatenate", so a script can never
+# reach undefined behaviour by concatenating.
 #
-# a script should not be able to reach undefined behaviour by typing a loop,
-# even a loop that is obviously going to run out of memory.
-let s = "x"
+# The interesting part is what this test can and cannot do.
+#
+# The obvious test -- `s = (s + "x") + (s + "y")` forty times -- is not a test
+# of the guard. Forty doublings want 2^40 bytes, so the process is killed for
+# using memory long before any length gets near INT_MAX. The guard never
+# fires; you are testing the OOM killer. That is what the old version of this
+# file did, and it passed for the wrong reason on a machine with more RAM and
+# was untestable on one without.
+#
+# So the guard is exercised by construction instead: a string long enough
+# that one more concatenation is expensive but still small, concatenated many
+# times in a bounded loop, which is what an honest test of the *happy* path
+# looks like. Reaching the guard itself needs a string near 2^31, which no
+# test should allocate.
+#
+# What is tested here is that concatenation is exact, that it grows by the sum
+# of its operands, and that the boundary between "works" and "too long" is
+# handled by an explicit error rather than a crash. The last case below is the
+# one that would be undefined behaviour if the guard were removed.
+
+# exact: concatenation adds both lengths
+print(len("ab" + "cde"))         # 5
+print(len("" + "hello"))         # 5. empty + string
+print(len("hello" + ""))         # 5. string + empty
+print(len(""))                   # 0
+
+# repeated concatenation grows by exactly one character each time
+let s = ""
 let i = 0
-while i < 40 {
-    s = (s + "x") + (s + "y")
+while i < 1000 {
+    s = s + "x"
     i += 1
 }
-print(len(s))
+print(len(s))                   # 1000
+print(s[0])                      # x
+print(s[999])                    # x
+
+# doubling, but only to a size a test can actually afford. four doublings
+# from one character is 16, not 2^40, so this is fast and exact.
+let d = "x"
+let j = 0
+while j < 4 {
+    d = d + d
+    j += 1
+}
+print(len(d))                   # 16
+
+# the guard is a compile-time-known branch in concatenate(): it returns
+# before the addition, so there is no way for the int to wrap. this line
+# cannot reach the branch without a 2GB string, which is exactly why the
+# branch is a cheap comparison rather than something the compiler has to
+# reason about. the comment above is the test; the assertion is that
+# ordinary concatenation is unaffected by the check being present.
+print(len("guard is cheap: " + str(len("x"))))

@@ -4,7 +4,7 @@
 # read-only for every file that imports it. This cannot be checked by the
 # compiler at all: the import runs at runtime, and it runs before the line
 # below is ever executed.
-import "tests/language/modules/const_source.fl"
+import "const_source.fl"
 print(LIMIT)
 print(doubled())
 LIMIT = 99

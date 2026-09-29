@@ -124,7 +124,7 @@ print(both(5))
 
 # mod_closing.fl throws at top level. The import fails, this script keeps
 # going, and every closure below must still track its variable.
-import "tests/language/modules/mod_closing.fl"
+import "../modules/mod_closing.fl"
 
 fn survivor() {
 	let hits = 0

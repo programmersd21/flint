@@ -12,6 +12,7 @@
 #include "memory.h"
 #include "object.h"
 #include "stdint.h"
+#include "sys.h"
 #include "table.h"
 #include "value.h"
 #include "vm.h"
@@ -255,17 +256,30 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		return NIL_VAL;
 	}
 
+	const char *raw = AS_CSTRING(argv[0]);
+
 	/*
-	 * The path is relative to the process working directory, not to the
-	 * importing file. Fixing that means tracking a directory per frame,
-	 * which is more machinery than a one-file import loop needs.
+	 * Resolve against the importing file's directory, not the process
+	 * working directory. A module path is part of the source, so it
+	 * means the same thing no matter where the user is standing. This
+	 * used to be process-relative and meant a script only worked from
+	 * one directory, which is not a property any language should have.
+	 *
+	 * An absolute path is left alone by sys_resolve_module().
 	 */
-	const char *path = AS_CSTRING(argv[0]);
-	FILE *file = fopen(path, "rb");
-	if (file == NULL) {
-		vm_runtime_error(vm, "Could not open module file '%s'.", path);
+	char *path = sys_resolve_module(raw);
+	if (path == NULL) {
+		vm_runtime_error(vm, "Cannot resolve module path '%s'.", raw);
 		return NIL_VAL;
 	}
+
+	FILE *file = fopen(path, "rb");
+	if (file == NULL) {
+		vm_runtime_error(vm, "Could not open module file '%s'.", raw);
+		free(path);
+		return NIL_VAL;
+	}
+	/* from here every path out must free(path) */
 	/*
 	 * ftell returns -1 on failure, and a module path can just as easily
 	 * be a pipe or a directory as a regular file. Test it before
@@ -274,22 +288,24 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	 */
 	if (fseek(file, 0L, SEEK_END) != 0) {
 		fclose(file);
+		free(path);
 		vm_runtime_error(
-		        vm, "Could not seek in module file '%s'.", path);
+		        vm, "Could not seek in module file '%s'.", raw);
 		return NIL_VAL;
 	}
 	long length = ftell(file);
 	if (length < 0) {
 		fclose(file);
-		vm_runtime_error(vm, "Could not size module file '%s'.", path);
+		free(path);
+		vm_runtime_error(vm, "Could not size module file '%s'.", raw);
 		return NIL_VAL;
 	}
 	size_t size = (size_t)length;
 	/* rewind() swallows the seek error; fseek() does not */
 	if (fseek(file, 0L, SEEK_SET) != 0) {
 		fclose(file);
-		vm_runtime_error(
-		        vm, "Could not rewind module file '%s'.", path);
+		free(path);
+		vm_runtime_error(vm, "Could not rewind module file '%s'.", raw);
 		return NIL_VAL;
 	}
 
@@ -298,8 +314,8 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	char *buffer = (char *)malloc(size + 1);
 	if (buffer == NULL) {
 		fclose(file);
-		vm_runtime_error(
-		        vm, "Out of memory reading module '%s'.", path);
+		free(path);
+		vm_runtime_error(vm, "Out of memory reading module '%s'.", raw);
 		return NIL_VAL;
 	}
 
@@ -309,7 +325,8 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	if (bytes_read < size) {
 		free(buffer);
 		fclose(file);
-		vm_runtime_error(vm, "Could not read module file '%s'.", path);
+		free(path);
+		vm_runtime_error(vm, "Could not read module file '%s'.", raw);
 		return NIL_VAL;
 	}
 	/*
@@ -323,8 +340,18 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	buffer[size] = '\0';
 	fclose(file);
 
+	/*
+	 * vm_interpret below can fail and, worse, can import further modules
+	 * that resolve against *their* importing file. the source directory is
+	 * a single VM-wide setting, so a nested import overwrites it and the
+	 * next import in the outer file would resolve against the wrong
+	 * directory. push the current one, run, restore. this is the
+	 * difference between 'lib/math.fl' meaning one thing and meaning
+	 * whatever the last nested import left behind.
+	 */
 	InterpretResult res = vm_interpret(vm, buffer);
 	free(buffer);
+	free(path);
 	if (res != INTERPRET_OK)
 		return NIL_VAL;
 
@@ -343,6 +370,9 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "pop", pop_native, 1);
 	vm_define_native(vm, "str", str_native, 1);
 	vm_define_native(vm, "type", type_native, 1);
+	/* args, env, exit, read_file, write_file, exec. a different kind of
+	 * thing from the ones above, which is why they live in sys.c. */
+	register_sys_natives(vm);
 	/* not in the manual: the compiler emits this for `import` */
 	vm_define_native(vm, "import_file", import_file_native, 1);
 }
