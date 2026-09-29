@@ -25,6 +25,7 @@
 #include "table.h"
 #include "value.h"
 
+#include <limits.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -151,6 +152,72 @@ void vm_runtime_error(VM *vm, const char *format, ...)
 }
 
 /*
+ * Turn a script value into a validated index into something `count` long.
+ *
+ * The naive version is `int i = (int)AS_NUMBER(v)`, and it is wrong in three
+ * separate ways. A fractional index truncates, so x[1.5] silently reads
+ * element 1 and there is no way for a script to notice. A value beyond the
+ * range of int is undefined behaviour on the cast, and on x86-64 the value
+ * that comes out is a plausible-looking negative number that then indexes
+ * backwards. And `count + idx` for a negative idx can overflow on its own.
+ *
+ * So: check finiteness, check integrality with floor rather than with a
+ * cast, and bound by `count` rather than by INT_MAX before converting. The
+ * bound is what makes the negative branch safe, because |d| <= count means
+ * count + idx cannot overflow, and count is an int to begin with.
+ *
+ * `what` is "List" or "String" and only appears in the message.
+ */
+static bool value_to_index(
+        VM *vm, Value value, int count, int *out, const char *what)
+{
+	if (!IS_NUMBER(value)) {
+		vm_runtime_error(vm, "%s index must be a number.", what);
+		return false;
+	}
+
+	double d = AS_NUMBER(value);
+
+	/* NaN and inf fail every comparison below, and converting either is
+	 * undefined, so they have to go before the cast. */
+	if (isnan(d) || isinf(d)) {
+		vm_runtime_error(vm, "%s index must be a finite number.", what);
+		return false;
+	}
+
+	/*
+	 * floor, not a cast. This test is what rejects x[1.5]; a cast would
+	 * answer the question we are trying to ask.
+	 */
+	if (d != floor(d)) {
+		vm_runtime_error(vm, "%s index must be a whole number.", what);
+		return false;
+	}
+
+	/* the bound, before the conversion. d is now known finite and
+	 * integral, so the comparisons are exact. */
+	if (d >= (double)count || d < -(double)count) {
+		vm_runtime_error(vm,
+		        "%s index %g out of bounds (len %d).",
+		        what,
+		        d,
+		        count);
+		return false;
+	}
+
+	/* |d| <= count <= INT_MAX, so this cannot overflow */
+	int idx = (int)d;
+
+	/* negative counts from the end. idx >= -count here, so the sum is
+	 * within int as well. */
+	if (idx < 0)
+		idx = count + idx;
+
+	*out = idx;
+	return true;
+}
+
+/*
  * Register a native as a global. Both halves are pushed before the
  * table_set() because the name string and the native are each unrooted
  * until they are on the stack.
@@ -159,8 +226,7 @@ void vm_define_native(VM *vm, const char *name, NativeFn function, int arity)
 {
 	vm_push(vm, OBJ_VAL(copy_string(vm, name, (int)strlen(name))));
 	vm_push(vm, OBJ_VAL(new_native(vm, function, arity)));
-	table_set(
-	        vm, &vm->globals, AS_STRING(vm->stack[0]), vm->stack[1], false);
+	table_set(vm, &vm->globals, AS_STRING(vm->stack[0]), vm->stack[1]);
 	vm_pop(vm);
 	vm_pop(vm);
 }
@@ -384,10 +450,31 @@ static void close_upvalues(VM *vm, Value *last)
 }
 
 /* b .. a -> "ab". the result is interned, so a repeated concat is cheap. */
-static void concatenate(VM *vm)
+/* returns false if the result would be too long to build; the error is
+ * already reported in that case */
+static bool concatenate(VM *vm)
 {
 	ObjString *b = AS_STRING(peek(vm, 0));
 	ObjString *a = AS_STRING(peek(vm, 1));
+
+	/*
+	 * The addition is checked because it can be done twice over.
+	 *
+	 * `s = (s + "x") + (s + "y")` doubles the length every iteration, so
+	 * it is an easy way for a script to reach this from a short line of
+	 * code. Without the check a->length + b->length overflows int, and
+	 * the negative result is converted to a size_t for the allocator and
+	 * becomes an enormous request. That is undefined behaviour in the
+	 * addition itself, not just an allocation that fails.
+	 *
+	 * The operands are lengths of live strings, so anything near INT_MAX
+	 * is already a program that cannot finish. Refusing is honest; the
+	 * alternative is undefined behaviour and a confusing crash.
+	 */
+	if (a->length > INT_MAX - b->length) {
+		vm_runtime_error(vm, "String is too long to concatenate.");
+		return false;
+	}
 
 	int length = a->length + b->length;
 	char *chars = ALLOCATE(vm, char, length + 1);
@@ -400,6 +487,7 @@ static void concatenate(VM *vm)
 	vm_pop(vm);
 	vm_pop(vm);
 	vm_push(vm, OBJ_VAL(result));
+	return true;
 }
 
 /*
@@ -552,19 +640,45 @@ static InterpretResult run(VM *vm, int base_frame)
 				return INTERPRET_RUNTIME_ERROR;
 			}
 
-			table_set(vm, &vm->globals, name, peek(vm, 0), false);
+			table_set(vm, &vm->globals, name, peek(vm, 0));
 			vm_pop(vm);
 			break;
 		}
 		case OP_DEFINE_GLOBAL_CONST: {
 			/*
 			 * `const` at the top level. The flag goes on the
-			 * binding, not into the bytecode, so the name is
-			 * read-only from here on no matter which file or
+			 * binding rather than into the bytecode, so the name
+			 * is read-only from here on no matter which file or
 			 * function tries to write it next.
+			 *
+			 * Redefining an existing const is refused, with one
+			 * exception. Importing a module re-executes its top
+			 * level, so the same `const LIMIT = 100` runs twice
+			 * with the same value. That is not a contradiction
+			 * and failing on it would make a second import of any
+			 * module that exports a const an error. Only a
+			 * *different* value is refused, because then one of
+			 * the two declarations is a lie about what the name
+			 * holds forever.
+			 *
+			 * The value is on the stack across the call, so it is
+			 * rooted if the table grows and collection happens.
 			 */
 			ObjString *name = READ_STRING();
-			table_set(vm, &vm->globals, name, peek(vm, 0), true);
+			if (table_is_const(&vm->globals, name)) {
+				Value existing;
+				table_get(&vm->globals, name, &existing);
+				if (values_equal(existing, peek(vm, 0))) {
+					vm_pop(vm);
+					break;
+				}
+				vm_pop(vm);
+				vm_runtime_error(vm,
+				        "Cannot redefine constant '%s'.",
+				        name->chars);
+				return INTERPRET_RUNTIME_ERROR;
+			}
+			table_define_const(vm, &vm->globals, name, peek(vm, 0));
 			vm_pop(vm);
 			break;
 		}
@@ -590,11 +704,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				return INTERPRET_RUNTIME_ERROR;
 			}
 
-			if (table_set(vm,
-			            &vm->globals,
-			            name,
-			            peek(vm, 0),
-			            false)) {
+			if (table_set(vm, &vm->globals, name, peek(vm, 0))) {
 				/* assigning to something that was not declared
 				 * just created it. undo that and complain. */
 				table_delete(&vm->globals, name);
@@ -671,7 +781,17 @@ static InterpretResult run(VM *vm, int base_frame)
 		case OP_ADD: {
 			/* the one overloaded operator: number or string */
 			if (IS_STRING(peek(vm, 0)) && IS_STRING(peek(vm, 1))) {
-				concatenate(vm);
+				/*
+				 * concatenate reports its own failure and
+				 * returns. The check here is not
+				 * belt-and-braces: without it the
+				 * interpreter carries on into the number
+				 * branch and reports "operands must be two
+				 * numbers or two strings" about two strings,
+				 * which is both wrong and unhelpful.
+				 */
+				if (!concatenate(vm))
+					return INTERPRET_RUNTIME_ERROR;
 			} else if (IS_NUMBER(peek(vm, 0)) &&
 			           IS_NUMBER(peek(vm, 1))) {
 				double b = AS_NUMBER(vm_pop(vm));
@@ -861,45 +981,30 @@ static InterpretResult run(VM *vm, int base_frame)
 			Value target = vm_pop(vm);
 
 			if (IS_LIST(target)) {
-				if (!IS_NUMBER(index_val)) {
-					vm_runtime_error(vm,
-					        "List index must be a number.");
-					return INTERPRET_RUNTIME_ERROR;
-				}
 				ObjList *list = AS_LIST(target);
-				int idx = (int)AS_NUMBER(index_val);
-				/* negative counts from the end */
-				if (idx < 0)
-					idx = list->count + idx;
-				if (idx < 0 || idx >= list->count) {
-					vm_runtime_error(vm,
-					        "List index %d out of bounds "
-					        "(len %d).",
-					        idx,
-					        list->count);
+				int idx;
+				if (!value_to_index(vm,
+				            index_val,
+				            list->count,
+				            &idx,
+				            "List"))
 					return INTERPRET_RUNTIME_ERROR;
-				}
 				vm_push(vm, list->items[idx]);
 			} else if (IS_STRING(target)) {
-				/* indexing a string yields a one-byte string,
-				 * not a number */
-				if (!IS_NUMBER(index_val)) {
-					vm_runtime_error(vm,
-					        "String index must be a "
-					        "number.");
-					return INTERPRET_RUNTIME_ERROR;
-				}
+				/* indexing a string yields a one-byte string, not a
+				 * number */
 				ObjString *str = AS_STRING(target);
-				int idx = (int)AS_NUMBER(index_val);
-				if (idx < 0)
-					idx = str->length + idx;
-				if (idx < 0 || idx >= str->length) {
-					vm_runtime_error(vm,
-					        "String index %d out of "
-					        "bounds.",
-					        idx);
+				int idx;
+				if (!value_to_index(vm,
+				            index_val,
+				            str->length,
+				            &idx,
+				            "String"))
 					return INTERPRET_RUNTIME_ERROR;
-				}
+				/* the byte goes into a C local before copy_string(),
+				 * which can collect. `str` is rooted and will not be
+				 * freed, but reading through a pointer the collector
+				 * just walked past is a habit not worth forming. */
 				char c[2] = {str->chars[idx], '\0'};
 				vm_push(vm, OBJ_VAL(copy_string(vm, c, 1)));
 			} else {
@@ -921,21 +1026,15 @@ static InterpretResult run(VM *vm, int base_frame)
 				        vm, "Can only index-assign to lists.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
-			if (!IS_NUMBER(index_val)) {
-				vm_runtime_error(
-				        vm, "List index must be a number.");
-				return INTERPRET_RUNTIME_ERROR;
-			}
 			ObjList *list = AS_LIST(target);
-			int idx = (int)AS_NUMBER(index_val);
-			if (idx < 0)
-				idx = list->count + idx;
-			if (idx < 0 || idx >= list->count) {
-				vm_runtime_error(vm,
-				        "List index %d out of bounds.",
-				        idx);
+			int idx;
+			/* same validation as OP_GET_INDEX. reading and writing
+			 * through a fractional or overflowing index are the same
+			 * bug, and one of them being checked is worse than
+			 * neither. */
+			if (!value_to_index(
+			            vm, index_val, list->count, &idx, "List"))
 				return INTERPRET_RUNTIME_ERROR;
-			}
 			list->items[idx] = val;
 			vm_push(vm, val); /* assignment yields the value */
 			break;

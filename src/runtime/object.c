@@ -79,7 +79,7 @@ static ObjString *allocate_string(
 	if (vm != NULL) {
 		/* root before the table_set, which can collect */
 		vm_push(vm, OBJ_VAL(string));
-		table_set(vm, &vm->strings, string, NIL_VAL, false);
+		table_set(vm, &vm->strings, string, NIL_VAL);
 		vm_pop(vm);
 	}
 

@@ -29,6 +29,108 @@ static Value clock_native(VM *vm, int argc, Value *argv)
 	return NUMBER_VAL((double)clock() / CLOCKS_PER_SEC);
 }
 
+/*
+ * input([prompt])
+ *
+ * Write the prompt if there is one, read one line, return it without the
+ * newline. Returns nil at end of file, so `if line == nil` is how a script
+ * tells "the user pressed enter" from "there is nothing left to read".
+ *
+ * Three things here are not the obvious version.
+ *
+ * The buffer grows. A fixed size would silently truncate a long line, and a
+ * script that reads a file-like amount of text through stdin has no way to
+ * know it happened. Starting at 64 and doubling is the same shape as every
+ * other array in the runtime.
+ *
+ * The buffer is malloc, not ALLOCATE. It is raw bytes on the way in and a
+ * flint string on the way out, and it never needs to be traced by the
+ * collector. Using ALLOCATE would mean the GC could collect while a C
+ * pointer into the middle of it is still live, and the only way to be right
+ * there is to keep it out of the heap the collector walks entirely.
+ *
+ * The return value is interned, and copy_string() can collect, so nothing
+ * derived from the buffer is read after that point. The NUL is written before
+ * the copy for the same reason: a value that lives only in a C local while
+ * the collector runs is a value that can be freed under your feet.
+ */
+static Value input_native(VM *vm, int argc, Value *argv)
+{
+	/* the prompt is optional. arity is checked by the caller for a
+	 * fixed-arity native, so with two forms we check it here. */
+	if (argc > 1) {
+		vm_runtime_error(
+		        vm, "Expected 0 or 1 arguments but got %d.", argc);
+		return NIL_VAL;
+	}
+
+	if (argc == 1) {
+		if (!IS_STRING(argv[0])) {
+			vm_runtime_error(
+			        vm, "Argument to input() must be a string.");
+			return NIL_VAL;
+		}
+		/* no newline. the user is standing there waiting. */
+		fputs(AS_CSTRING(argv[0]), stdout);
+		fflush(stdout);
+	}
+
+	size_t capacity = 64;
+	size_t length = 0;
+	char *buffer = malloc(capacity);
+	if (buffer == NULL) {
+		vm_runtime_error(vm, "Out of memory reading input.");
+		return NIL_VAL;
+	}
+
+	/* read byte by byte: fgets would cap the line and getline is not
+	 * portable C11. one getchar per byte is the only version that
+	 * cannot truncate and the only one that works everywhere. */
+	int c;
+	while ((c = getchar()) != EOF) {
+		if (c == '\n')
+			break;
+
+		/* tolerate CRLF from a windows terminal, or a file written on
+		 * one. without this a script sees a trailing \r in every
+		 * line and the user does not. */
+		if (c == '\r')
+			continue;
+
+		if (length + 1 >= capacity) {
+			capacity *= 2;
+			char *grown = realloc(buffer, capacity);
+			if (grown == NULL) {
+				free(buffer);
+				vm_runtime_error(vm,
+				        "Out of memory reading "
+				        "input.");
+				return NIL_VAL;
+			}
+			buffer = grown;
+		}
+
+		buffer[length++] = (char)c;
+	}
+
+	/* a read that ended at EOF rather than at a newline. a final line
+	 * with no trailing newline is still a line, not nothing. */
+	if (c == EOF && length == 0) {
+		free(buffer);
+		return NIL_VAL;
+	}
+
+	buffer[length] = '\0';
+
+	/* copy_string() interns and can collect. buffer is malloc'd and is
+	 * not a gc object, so it survives, but nothing below this point
+	 * reads it again once the copy is in flight. */
+	ObjString *line = copy_string(vm, buffer, (int)length);
+	free(buffer);
+
+	return OBJ_VAL(line);
+}
+
 /* strings and lists. byte length for strings, element count for lists. */
 static Value len_native(VM *vm, int argc, Value *argv)
 {
@@ -233,6 +335,9 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 void register_natives(VM *vm)
 {
 	vm_define_native(vm, "clock", clock_native, 0);
+	/* -1 for the arity because input() takes zero or one argument, and
+	 * a fixed-arity native cannot express that. the check is inside. */
+	vm_define_native(vm, "input", input_native, -1);
 	vm_define_native(vm, "len", len_native, 1);
 	vm_define_native(vm, "push", push_native, 2);
 	vm_define_native(vm, "pop", pop_native, 1);
