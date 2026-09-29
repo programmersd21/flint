@@ -26,50 +26,40 @@
  * with the core.
  */
 
-double fl_math_floor(double x) {
-    return floor(x);
+double fl_math_floor(double x) { return floor(x); }
+
+double fl_math_sqrt(double x) { return sqrt(x); }
+
+double fl_math_fma(double a, double b, double c) { return fma(a, b, c); }
+
+double fl_math_ldexp(double x, int n) { return ldexp(x, n); }
+
+double fl_math_logb(double x) { return logb(x); }
+
+uint64_t fl_math_bits(double x)
+{
+	uint64_t u;
+	memcpy(&u, &x, sizeof u);
+	return u;
 }
 
- double fl_math_sqrt(double x) {
-    return sqrt(x);
+double fl_math_double(uint64_t u)
+{
+	double x;
+	memcpy(&x, &u, sizeof x);
+	return x;
 }
 
- double fl_math_fma(double a, double b, double c) {
-    return fma(a,b, c);
+double fl_math_hi32(double x)
+{
+	return (double)(uint32_t)(fl_math_bits(x) >> 32);
 }
 
- double fl_math_ldexp(double x, int n) {
-    return ldexp(x, n);
+double fl_math_lo32(double x)
+{
+	return (double)(uint32_t)(fl_math_bits(x) & 0xFFFFFFFFu);
 }
 
- double fl_math_logb(double x) {
-    return logb(x);
-}
+double fl_math_fabs(double x) { return fabs(x); }
 
- uint64_t fl_math_bits(double x) {
-    uint64_t u;
-    memcpy(&u, &x, sizeof u);
-    return u;
-}
-
-double fl_math_double(uint64_t u) {
-    double x;
-    memcpy(&x, &u, sizeof x);
-    return x;
-}
-
- double fl_math_hi32(double x) {
-    return (double)(uint32_t)(fl_math_bits(x) >> 32);
-}
-
- double fl_math_lo32(double x) {
-    return (double)(uint32_t)(fl_math_bits(x) & 0xFFFFFFFFu);
-}
-
- double fl_math_fabs(double x) {
-    return fabs(x);
-}
-
- double fl_math_copysign(double x, double y) {
-    return copysign(x, y);
-}
+double fl_math_copysign(double x, double y) { return copysign(x, y); }
