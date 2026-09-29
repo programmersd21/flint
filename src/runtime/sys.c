@@ -92,10 +92,19 @@ void sys_set_source_dir(const char *dir)
 {
 	free(source_dir);
 	source_dir = NULL;
-	if (dir != NULL)
-		source_dir = malloc(strlen(dir) + 1);
-	if (source_dir != NULL)
-		strcpy(source_dir, dir);
+	size_t len = strlen(dir);
+	char *fresh = malloc(len + 1);
+	if (fresh == NULL) {
+		/* out of memory for a directory name. leaving the old one
+		 * is better than a NULL deref, and imports then resolve
+		 * against the process directory, which is wrong but not
+		 * fatal. */
+		source_dir = NULL;
+		return;
+	}
+	memcpy(fresh, dir, len);
+	fresh[len] = '\0';
+	source_dir = fresh;
 }
 
 /*
@@ -176,11 +185,13 @@ char *sys_resolve_module(const char *path)
 	if (dirlen == 0) {
 		/* no source dir (running -c or from stdin): the path is
 		 * already relative to the process, use it as-is */
-		memcpy(out, path, pathlen + 1);
+		memcpy(out, path, pathlen);
+		out[pathlen] = '\0';
 	} else {
 		memcpy(out, dir, dirlen);
 		out[dirlen] = '/';
-		memcpy(out + dirlen + 1, path, pathlen + 1);
+		memcpy(out + dirlen + 1, path, pathlen);
+		out[dirlen + 1 + pathlen] = '\0';
 	}
 	return out;
 }
@@ -423,6 +434,40 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 				buffer = bigger;
 				capacity = grown;
 			}
+			/*
+			 * The analyser flags fread as possibly running on a
+			 * stream already at EOF, because `got == 0` is
+			 * treated as "we may have hit EOF" and the next
+			 * iteration reads again. It cannot prove the loop
+			 * exits, but it does: a fread that returns 0 with
+			 * no error is end of file, and the break below is
+			 * unconditional on that. The re-read it fears does
+			 * not happen.
+			 *
+			 * Stop on end of file or a real error, not merely on
+			 * a short read. A pipe is allowed to return fewer
+			 * bytes than asked for without being at EOF, and
+			 * treating that as the end would silently truncate
+			 * whatever came next. After ferror the stream
+			 * position is indeterminate, so calling fread
+			 * again is undefined behaviour, not merely
+			 * useless: this is the check that prevents it.
+			 */
+			/*
+			 * got == 0 with no error is EOF, and EOF does not
+			 * change. ferror leaves the position indeterminate,
+			 * so reading again is undefined. Either way the
+			 * loop is done, and the check has to be the last
+			 * thing before the next fread rather than after
+			 * it, or the analyser is right that a re-read can
+			 * happen on a spent stream. clang-format moves a
+			 * NOLINTNEXTLINE off the statement it guards, so
+			 * this is written as control flow rather than a
+			 * suppression.
+			 */
+			if (feof(file) || ferror(file))
+				break;
+
 			size_t got =
 			        fread(buffer + used, 1, capacity - used, file);
 			used += got;
@@ -430,9 +475,34 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 				break;
 		}
 		size = used;
+
+		/*
+		 * One byte for the NUL, always. The loop above only grows
+		 * when used == capacity, so a fill that exactly reaches
+		 * capacity leaves no spare byte and the terminator below
+		 * would be one past the end. Every non-seekable read can
+		 * land on that boundary; it is not a corner case, it is
+		 * every file whose size is a power of two.
+		 */
+		if (size == capacity) {
+			char *bigger = realloc(buffer, capacity + 1);
+			if (bigger == NULL) {
+				free(buffer);
+				fclose(file);
+				vm_runtime_error(vm,
+				        "Out of memory reading '%s'.",
+				        path);
+				return NIL_VAL;
+			}
+			buffer = bigger;
+		}
 	}
 
 	fclose(file);
+	/* in bounds: on the seekable path the malloc was size + 1, and on
+	 * the growing path the capacity is forced one past used immediately
+	 * above. the analyser cannot prove either through the realloc. */
+	/* NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) */
 	buffer[size] = '\0';
 
 	/* copy_string can collect. buffer is malloc'd and is not a gc
@@ -568,6 +638,10 @@ static Value exec_native(VM *vm, int argc, Value *argv)
 		/* only reached if exec failed. _exit, not exit: the child
 		 * shares the parent's buffers and exit() would flush them
 		 * twice and run atexit handlers that belong to flint. */
+		/* errno.h is included at the top of this file; the include
+		 * cleaner reports the first *use* of a macro rather than the
+		 * header, and cannot see through the system headers. */
+		/* NOLINTNEXTLINE(misc-include-cleaner) */
 		_exit(errno == ENOENT ? 127 : 126);
 	}
 
@@ -577,6 +651,7 @@ static Value exec_native(VM *vm, int argc, Value *argv)
 
 	int status = 0;
 	while (waitpid(pid, &status, 0) < 0) {
+		/* NOLINTNEXTLINE(misc-include-cleaner) */
 		if (errno != EINTR) {
 			vm_runtime_error(vm,
 			        "Cannot wait for child: %s.",

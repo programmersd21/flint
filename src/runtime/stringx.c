@@ -11,7 +11,10 @@
  * between push and pop is allowed to allocate freely; that is what the roots
  * on the stack are for.
  */
-#include "string.h"
+/* our own header first, which is the rule and also what makes
+ * register_string_natives() have external linkage */
+#include "stringx.h"
+
 #include "memory.h"
 #include "object.h"
 #include "value.h"
