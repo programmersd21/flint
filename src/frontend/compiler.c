@@ -126,25 +126,45 @@ typedef struct {
 	bool panic_mode;
 } Parser;
 
-static Parser parser;
-static Compiler *current = NULL;
-static VM *current_vm = NULL;
-static LoopContext *current_loop = NULL;
+/*
+ * Everything one in-progress compilation owns.
+ *
+ * These were four separate file-scope globals. Bundling them is not tidiness:
+ * they are four views of the same thing, and the reason they can be one
+ * struct is that they are all saved and restored together.
+ *
+ * The scanner in scanner.c is still a global, and cannot be otherwise
+ * without a much larger change. What that costs is reentrancy: a compile
+ * inside a compile would clobber it. That cannot happen today, because
+ * compiling and executing are separate phases and an outer compile has
+ * always finished before any execution nests. compile() saving and
+ * restoring this struct makes that an enforced property rather than an
+ * argument in a comment, so the day import becomes eager the parser breaks
+ * loudly instead of quietly.
+ */
+typedef struct {
+	Parser parser; /* token position, error state */
+	Compiler *current; /* innermost function being compiled */
+	VM *vm; /* for allocation, and the GC's view */
+	LoopContext *loop; /* innermost loop, for break and continue */
+} CompilerState;
 
-static Chunk *current_chunk(void) { return &current->function->chunk; }
+static CompilerState state;
+
+static Chunk *current_chunk(void) { return &state.current->function->chunk; }
 
 /* error reporting */
 
 /*
  * Report once, then set panic mode. One syntax error usually means the
- * parser is about to produce fifty more, all of them consequences. The flag
+ * state.parser is about to produce fifty more, all of them consequences. The flag
  * makes error_at() silent until synchronize() clears it.
  */
 static void error_at(Token *token, const char *message)
 {
-	if (parser.panic_mode)
+	if (state.parser.panic_mode)
 		return;
-	parser.panic_mode = true;
+	state.parser.panic_mode = true;
 
 	fprintf(stderr, "[line %d] Error", token->line);
 	if (token->type == TOKEN_EOF)
@@ -153,46 +173,49 @@ static void error_at(Token *token, const char *message)
 		fprintf(stderr, " at '%.*s'", token->length, token->start);
 
 	fprintf(stderr, ": %s\n", message);
-	parser.had_error = true;
+	state.parser.had_error = true;
 }
 
-static void error(const char *message) { error_at(&parser.previous, message); }
+static void error(const char *message)
+{
+	error_at(&state.parser.previous, message);
+}
 
 static void error_at_current(const char *message)
 {
-	error_at(&parser.current, message);
+	error_at(&state.parser.current, message);
 }
 
 /* scanner wrappers */
 
 /*
- * Pull the next token into current, moving the old current to previous.
+ * Pull the next token into state.current, moving the old state.current to previous.
  *
  * Scanner errors are not returned to the caller: they are reported here and
  * then we scan again, so malformed source produces one message at the right
- * line instead of an error token the parser has to understand.
+ * line instead of an error token the state.parser has to understand.
  */
 static void advance(void)
 {
-	parser.previous = parser.current;
+	state.parser.previous = state.parser.current;
 	for (;;) {
-		parser.current = scan_token();
-		if (parser.current.type != TOKEN_ERROR)
+		state.parser.current = scan_token();
+		if (state.parser.current.type != TOKEN_ERROR)
 			break;
-		error_at_current(parser.current.start);
+		error_at_current(state.parser.current.start);
 	}
 }
 
 static void consume(TokenType type, const char *message)
 {
-	if (parser.current.type == type) {
+	if (state.parser.current.type == type) {
 		advance();
 		return;
 	}
 	error_at_current(message);
 }
 
-static bool check(TokenType type) { return parser.current.type == type; }
+static bool check(TokenType type) { return state.parser.current.type == type; }
 
 /* consume if present. this is lookahead without a token buffer. */
 static bool match(TokenType type)
@@ -212,7 +235,8 @@ static bool match(TokenType type)
  */
 static void emit_byte(uint8_t byte)
 {
-	chunk_write(current_vm, current_chunk(), byte, parser.previous.line);
+	chunk_write(
+	        state.vm, current_chunk(), byte, state.parser.previous.line);
 }
 
 static void emit_bytes(uint8_t byte1, uint8_t byte2)
@@ -243,9 +267,9 @@ static void emit_return(void)
  */
 static int make_constant(Value value)
 {
-	vm_push(current_vm, value);
-	int constant = chunk_add_constant(current_vm, current_chunk(), value);
-	vm_pop(current_vm);
+	vm_push(state.vm, value);
+	int constant = chunk_add_constant(state.vm, current_chunk(), value);
+	vm_pop(state.vm);
 	if (constant < 0) {
 		error("Too many constants in one chunk.");
 		return 0; /* unreachable in practice: needs 16M constants */
@@ -311,28 +335,28 @@ static void emit_loop(int loop_start)
 /* scope management */
 
 /*
- * Push a compiler onto the chain. The new compiler becomes current, and
+ * Push a compiler onto the chain. The new compiler becomes state.current, and
  * `enclosing` is how resolve_upvalue() walks outward.
  */
 static void init_compiler(Compiler *compiler, FunctionType type)
 {
-	compiler->enclosing = current;
+	compiler->enclosing = state.current;
 	compiler->function = NULL;
 	compiler->type = type;
 	compiler->local_count = 0;
 	compiler->scope_depth = 0;
-	compiler->function = new_function(current_vm);
-	current = compiler;
+	compiler->function = new_function(state.vm);
+	state.current = compiler;
 
 	/* the top-level script has no name */
 	if (type != TYPE_SCRIPT)
-		current->function->name = copy_string(current_vm,
-		        parser.previous.start,
-		        parser.previous.length);
+		state.current->function->name = copy_string(state.vm,
+		        state.parser.previous.start,
+		        state.parser.previous.length);
 
 	/* slot 0 is the callee. unnamed, and never resolved, because the
 	 * index lines up with the call frame's base. */
-	Local *local = &current->locals[current->local_count++];
+	Local *local = &state.current->locals[state.current->local_count++];
 	local->depth = 0;
 	local->is_captured = false;
 	local->is_const = false;
@@ -344,22 +368,22 @@ static void init_compiler(Compiler *compiler, FunctionType type)
 static ObjFunction *end_compiler(void)
 {
 	emit_return();
-	ObjFunction *function = current->function;
+	ObjFunction *function = state.current->function;
 
 	/* dumping half-compiled code after an error is just noise */
 #ifdef FL_DEBUG_PRINT_CODE
-	if (!parser.had_error) {
+	if (!state.parser.had_error) {
 		chunk_disassemble(current_chunk(),
 		        function->name != NULL ? function->name->chars
 		                               : "<script>");
 	}
 #endif
 
-	current = current->enclosing;
+	state.current = state.current->enclosing;
 	return function;
 }
 
-static void begin_scope(void) { current->scope_depth++; }
+static void begin_scope(void) { state.current->scope_depth++; }
 
 /*
  * Leave a scope. Every local declared in it is still on the stack and has to
@@ -369,16 +393,17 @@ static void begin_scope(void) { current->scope_depth++; }
  */
 static void end_scope(void)
 {
-	current->scope_depth--;
+	state.current->scope_depth--;
 
-	while (current->local_count > 0 &&
-	        current->locals[current->local_count - 1].depth >
-	                current->scope_depth) {
-		if (current->locals[current->local_count - 1].is_captured)
+	while (state.current->local_count > 0 &&
+	        state.current->locals[state.current->local_count - 1].depth >
+	                state.current->scope_depth) {
+		if (state.current->locals[state.current->local_count - 1]
+		                .is_captured)
 			emit_byte(OP_CLOSE_UPVALUE);
 		else
 			emit_byte(OP_POP);
-		current->local_count--;
+		state.current->local_count--;
 	}
 }
 
@@ -389,7 +414,7 @@ static void end_scope(void)
 static uint8_t identifier_constant(Token *name)
 {
 	return make_constant(
-	        OBJ_VAL(copy_string(current_vm, name->start, name->length)));
+	        OBJ_VAL(copy_string(state.vm, name->start, name->length)));
 }
 
 static bool identifiers_equal(Token *a, Token *b)
@@ -410,7 +435,7 @@ static Token token_string(const char *text)
 	token.type = TOKEN_IDENTIFIER;
 	token.start = text;
 	token.length = (int)strlen(text);
-	token.line = parser.previous.line;
+	token.line = state.parser.previous.line;
 	token.newline_before = false;
 	return token;
 }
@@ -419,7 +444,7 @@ static Token token_string(const char *text)
 static bool identifier_is(const char *word)
 {
 	Token known = token_string(word);
-	return identifiers_equal(&parser.previous, &known);
+	return identifiers_equal(&state.parser.previous, &known);
 }
 
 /*
@@ -500,12 +525,12 @@ static int resolve_upvalue(Compiler *compiler, Token *name)
 /* take a stack slot for a new local. depth -1: not initialized yet. */
 static void add_local(Token name, bool is_const)
 {
-	if (current->local_count == MAX_LOCALS) {
+	if (state.current->local_count == MAX_LOCALS) {
 		error("Too many local variables in function.");
 		return;
 	}
 
-	Local *local = &current->locals[current->local_count++];
+	Local *local = &state.current->locals[state.current->local_count++];
 	local->name = name;
 	local->depth = -1;
 	local->is_captured = false;
@@ -519,13 +544,14 @@ static void add_local(Token name, bool is_const)
 static void declare_variable(bool is_const)
 {
 	/* at depth 0 there are no stack slots, so no shadowing to check */
-	if (current->scope_depth == 0)
+	if (state.current->scope_depth == 0)
 		return;
 
-	Token *name = &parser.previous;
-	for (int i = current->local_count - 1; i >= 0; i--) {
-		Local *local = &current->locals[i];
-		if (local->depth != -1 && local->depth < current->scope_depth)
+	Token *name = &state.parser.previous;
+	for (int i = state.current->local_count - 1; i >= 0; i--) {
+		Local *local = &state.current->locals[i];
+		if (local->depth != -1 &&
+		        local->depth < state.current->scope_depth)
 			break;
 		if (identifiers_equal(name, &local->name))
 			error("Already a variable with this name in this "
@@ -537,9 +563,10 @@ static void declare_variable(bool is_const)
 /* the initializer has been compiled, so the slot exists now */
 static void mark_initialized(void)
 {
-	if (current->scope_depth == 0)
+	if (state.current->scope_depth == 0)
 		return;
-	current->locals[current->local_count - 1].depth = current->scope_depth;
+	state.current->locals[state.current->local_count - 1].depth =
+	        state.current->scope_depth;
 }
 
 /*
@@ -553,10 +580,10 @@ static uint8_t parse_variable(const char *message, bool is_const)
 	consume(TOKEN_IDENTIFIER, message);
 
 	declare_variable(is_const);
-	if (current->scope_depth > 0)
+	if (state.current->scope_depth > 0)
 		return 0;
 
-	return identifier_constant(&parser.previous);
+	return identifier_constant(&state.parser.previous);
 }
 
 /* the initializer is on the stack: store it, in a slot or in globals. */
@@ -571,7 +598,7 @@ static uint8_t parse_variable(const char *message, bool is_const)
  */
 static void define_variable(uint8_t global, bool is_const)
 {
-	if (current->scope_depth > 0) {
+	if (state.current->scope_depth > 0) {
 		mark_initialized();
 		return;
 	}
@@ -602,14 +629,14 @@ static void parse_precedence(Precedence precedence);
 /*
  * Pratt's algorithm, and the core of the compiler. Parse a prefix, then
  * keep consuming infix operators that bind at least as tightly as the
- * current precedence. That is the whole thing: a table lookup and a loop,
+ * state.current precedence. That is the whole thing: a table lookup and a loop,
  * which is why this language has no operator precedence table written out
  * by hand and no shift/reduce conflicts.
  */
 static void parse_precedence(Precedence precedence)
 {
 	advance();
-	ParseFn prefix_rule = get_rule(parser.previous.type)->prefix;
+	ParseFn prefix_rule = get_rule(state.parser.previous.type)->prefix;
 	if (prefix_rule == NULL) {
 		error("Expect expression.");
 		return;
@@ -623,16 +650,17 @@ static void parse_precedence(Precedence precedence)
 	bool can_assign = precedence <= PREC_ASSIGNMENT;
 	prefix_rule(can_assign);
 
-	while (precedence <= get_rule(parser.current.type)->precedence) {
+	while (precedence <= get_rule(state.parser.current.type)->precedence) {
 		advance();
-		ParseFn infix_rule = get_rule(parser.previous.type)->infix;
+		ParseFn infix_rule =
+		        get_rule(state.parser.previous.type)->infix;
 		infix_rule(can_assign);
 	}
 
 	/*
 	 * Having just parsed a full expression with no assignment in it, an
 	 * `=` here is a syntax error. Catching it here gives a decent
-	 * message instead of failing somewhere in the statement parser.
+	 * message instead of failing somewhere in the statement state.parser.
 	 */
 	if (can_assign &&
 	        (match(TOKEN_EQUAL) || match(TOKEN_PLUS_EQUAL) ||
@@ -645,18 +673,18 @@ static void number(bool can_assign)
 {
 	(void)can_assign;
 	/*
-	 * strtod, not a hand-written parser. The scanner has already
+	 * strtod, not a hand-written state.parser. The scanner has already
 	 * validated the shape, and strtod is required to be correct by
 	 * the standard, which is worth more than the microseconds.
 	 */
-	double value = strtod(parser.previous.start, NULL);
+	double value = strtod(state.parser.previous.start, NULL);
 	emit_constant(NUMBER_VAL(value));
 }
 
 static void literal(bool can_assign)
 {
 	(void)can_assign;
-	switch (parser.previous.type) {
+	switch (state.parser.previous.type) {
 	case TOKEN_FALSE:
 		emit_byte(OP_FALSE);
 		break;
@@ -681,8 +709,8 @@ static void literal(bool can_assign)
 static void string(bool can_assign)
 {
 	(void)can_assign;
-	const char *src = parser.previous.start + 1; /* skip the quote */
-	int len = parser.previous.length - 2; /* and the far quote */
+	const char *src = state.parser.previous.start + 1; /* skip the quote */
+	int len = state.parser.previous.length - 2; /* and the far quote */
 
 	/* the decoded form is never longer than the source */
 	char *chars = (char *)malloc(len + 1);
@@ -718,7 +746,7 @@ static void string(bool can_assign)
 		}
 	}
 
-	ObjString *str = copy_string(current_vm, chars, out);
+	ObjString *str = copy_string(state.vm, chars, out);
 	free(chars);
 	emit_constant(OBJ_VAL(str));
 }
@@ -732,11 +760,11 @@ static void string(bool can_assign)
 static void named_variable(Token name, bool can_assign)
 {
 	uint8_t get_op, set_op;
-	int arg = resolve_local(current, &name);
+	int arg = resolve_local(state.current, &name);
 	if (arg != -1) {
 		get_op = OP_GET_LOCAL;
 		set_op = OP_SET_LOCAL;
-	} else if ((arg = resolve_upvalue(current, &name)) != -1) {
+	} else if ((arg = resolve_upvalue(state.current, &name)) != -1) {
 		get_op = OP_GET_UPVALUE;
 		set_op = OP_SET_UPVALUE;
 	} else {
@@ -749,7 +777,8 @@ static void named_variable(Token name, bool can_assign)
 		/* const is enforced here, at compile time, and only for
 		 * locals. a global const is not protected: OP_SET_GLOBAL
 		 * has no way to know. that is a bug. */
-		if (get_op == OP_GET_LOCAL && current->locals[arg].is_const) {
+		if (get_op == OP_GET_LOCAL &&
+		        state.current->locals[arg].is_const) {
 			error("Can't assign to constant.");
 			return;
 		}
@@ -759,11 +788,12 @@ static void named_variable(Token name, bool can_assign)
 	           (match(TOKEN_PLUS_EQUAL) || match(TOKEN_MINUS_EQUAL) ||
 	                   match(TOKEN_STAR_EQUAL) ||
 	                   match(TOKEN_SLASH_EQUAL))) {
-		if (get_op == OP_GET_LOCAL && current->locals[arg].is_const) {
+		if (get_op == OP_GET_LOCAL &&
+		        state.current->locals[arg].is_const) {
 			error("Can't assign to constant.");
 			return;
 		}
-		TokenType op = parser.previous.type;
+		TokenType op = state.parser.previous.type;
 		/* read, modify, write. no in-place bytecode for this, so the
 		 * value is loaded, combined and stored. */
 		emit_bytes(get_op, (uint8_t)arg);
@@ -792,7 +822,7 @@ static void named_variable(Token name, bool can_assign)
 
 static void variable(bool can_assign)
 {
-	named_variable(parser.previous, can_assign);
+	named_variable(state.parser.previous, can_assign);
 }
 
 static void grouping(bool can_assign)
@@ -806,7 +836,7 @@ static void grouping(bool can_assign)
 static void unary(bool can_assign)
 {
 	(void)can_assign;
-	TokenType op = parser.previous.type;
+	TokenType op = state.parser.previous.type;
 	parse_precedence(PREC_UNARY);
 
 	switch (op) {
@@ -832,7 +862,7 @@ static void unary(bool can_assign)
 static void binary(bool can_assign)
 {
 	(void)can_assign;
-	TokenType op = parser.previous.type;
+	TokenType op = state.parser.previous.type;
 	ParseRule *rule = get_rule(op);
 	parse_precedence((Precedence)(rule->precedence + 1));
 
@@ -1021,7 +1051,7 @@ static void subscript(bool can_assign)
 static void dot(bool can_assign)
 {
 	consume(TOKEN_IDENTIFIER, "Expect field name after '.'.");
-	uint8_t name = identifier_constant(&parser.previous);
+	uint8_t name = identifier_constant(&state.parser.previous);
 
 	if (can_assign && match(TOKEN_EQUAL)) {
 		expression();
@@ -1055,7 +1085,8 @@ static void table_literal(bool can_assign)
 		do {
 			consume(TOKEN_IDENTIFIER,
 			        "Expect key name in table literal.");
-			uint8_t name = identifier_constant(&parser.previous);
+			uint8_t name =
+			        identifier_constant(&state.parser.previous);
 			consume(TOKEN_COLON,
 			        "Expect ':' after key in table literal.");
 
@@ -1154,7 +1185,7 @@ static void consume_terminator(void)
 {
 	if (match(TOKEN_SEMICOLON))
 		return;
-	if (parser.current.newline_before)
+	if (state.parser.current.newline_before)
 		return;
 	if (check(TOKEN_EOF) || check(TOKEN_RIGHT_BRACE))
 		return;
@@ -1177,8 +1208,8 @@ static void block(void)
  */
 static void emit_close_upvalues_to(int depth)
 {
-	for (int i = current->local_count - 1; i >= 0; i--) {
-		Local *local = &current->locals[i];
+	for (int i = state.current->local_count - 1; i >= 0; i--) {
+		Local *local = &state.current->locals[i];
 		if (local->depth <= depth)
 			break;
 		if (local->is_captured)
@@ -1247,13 +1278,13 @@ static void if_statement(void)
 static void while_statement(void)
 {
 	LoopContext loop;
-	loop.enclosing = current_loop;
-	loop.scope_depth = current->scope_depth;
+	loop.enclosing = state.loop;
+	loop.scope_depth = state.current->scope_depth;
 	loop.start = current_chunk()->count;
 	loop.continue_target = loop.start; /* re-test the condition */
 	loop.break_count = 0;
 	loop.continue_count = 0;
-	current_loop = &loop;
+	state.loop = &loop;
 
 	expression();
 	int exit_jump = emit_jump(OP_JUMP_IF_FALSE);
@@ -1276,7 +1307,7 @@ static void while_statement(void)
 	for (int i = 0; i < loop.break_count; i++)
 		patch_jump(loop.break_jumps[i]);
 
-	current_loop = loop.enclosing;
+	state.loop = loop.enclosing;
 }
 
 /*
@@ -1291,7 +1322,7 @@ static void for_statement(void)
 	begin_scope();
 
 	consume(TOKEN_IDENTIFIER, "Expect variable name after 'for'.");
-	Token var_name = parser.previous;
+	Token var_name = state.parser.previous;
 	consume(TOKEN_IN, "Expect 'in' after for variable.");
 
 	/*
@@ -1302,7 +1333,7 @@ static void for_statement(void)
 	 * has to be updated every time a prefix rule is added, and forgetting
 	 * is a syntax error in one construct and nowhere else.
 	 */
-	if (get_rule(parser.current.type)->prefix != NULL) {
+	if (get_rule(state.parser.current.type)->prefix != NULL) {
 		expression();
 
 		/* a range if a ".." followed the first expression */
@@ -1323,18 +1354,18 @@ static void for_statement(void)
 			mark_initialized();
 
 			LoopContext loop;
-			loop.enclosing = current_loop;
-			loop.scope_depth = current->scope_depth;
+			loop.enclosing = state.loop;
+			loop.scope_depth = state.current->scope_depth;
 			loop.start = current_chunk()->count;
 			/* the increment is emitted below, so no single offset
 			 * is known yet; continue waits for a patch */
 			loop.continue_target = -1;
 			loop.break_count = 0;
 			loop.continue_count = 0;
-			current_loop = &loop;
+			state.loop = &loop;
 
-			int var_slot = current->local_count - 2;
-			int end_slot = current->local_count - 1;
+			int var_slot = state.current->local_count - 2;
+			int end_slot = state.current->local_count - 1;
 
 			/* condition: var < end */
 			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
@@ -1367,7 +1398,7 @@ static void for_statement(void)
 			for (int i = 0; i < loop.break_count; i++)
 				patch_jump(loop.break_jumps[i]);
 
-			current_loop = loop.enclosing;
+			state.loop = loop.enclosing;
 			end_scope();
 			return;
 		}
@@ -1392,18 +1423,18 @@ static void for_statement(void)
 		add_local(var_name, false);
 		mark_initialized();
 
-		int list_slot = current->local_count - 3;
-		int idx_slot = current->local_count - 2;
-		int var_slot = current->local_count - 1;
+		int list_slot = state.current->local_count - 3;
+		int idx_slot = state.current->local_count - 2;
+		int var_slot = state.current->local_count - 1;
 
 		LoopContext loop;
-		loop.enclosing = current_loop;
-		loop.scope_depth = current->scope_depth;
+		loop.enclosing = state.loop;
+		loop.scope_depth = state.current->scope_depth;
 		loop.start = current_chunk()->count;
 		loop.continue_target = -1;
 		loop.break_count = 0;
 		loop.continue_count = 0;
-		current_loop = &loop;
+		state.loop = &loop;
 
 		/*
 		 * Condition: idx < len(list).
@@ -1459,7 +1490,7 @@ static void for_statement(void)
 		for (int i = 0; i < loop.break_count; i++)
 			patch_jump(loop.break_jumps[i]);
 
-		current_loop = loop.enclosing;
+		state.loop = loop.enclosing;
 	}
 
 	end_scope();
@@ -1468,20 +1499,19 @@ static void for_statement(void)
 /* break: retire the locals of the blocks being left, then jump out. */
 static void break_statement(void)
 {
-	if (current_loop == NULL) {
+	if (state.loop == NULL) {
 		error("Can't use 'break' outside of a loop.");
 		return;
 	}
 
-	emit_close_upvalues_to(current_loop->scope_depth);
+	emit_close_upvalues_to(state.loop->scope_depth);
 
 	/* the offsets are patched once the loop body is complete */
-	if (current_loop->break_count >= 256) {
+	if (state.loop->break_count >= 256) {
 		error("Too many break statements in loop.");
 		return;
 	}
-	current_loop->break_jumps[current_loop->break_count++] =
-	        emit_jump(OP_JUMP);
+	state.loop->break_jumps[state.loop->break_count++] = emit_jump(OP_JUMP);
 	consume_terminator();
 }
 
@@ -1493,21 +1523,21 @@ static void break_statement(void)
  */
 static void continue_statement(void)
 {
-	if (current_loop == NULL) {
+	if (state.loop == NULL) {
 		error("Can't use 'continue' outside of a loop.");
 		return;
 	}
 
-	emit_close_upvalues_to(current_loop->scope_depth);
-	if (current_loop->continue_target == -1) {
-		if (current_loop->continue_count >= 256) {
+	emit_close_upvalues_to(state.loop->scope_depth);
+	if (state.loop->continue_target == -1) {
+		if (state.loop->continue_count >= 256) {
 			error("Too many continue statements in loop.");
 			return;
 		}
-		current_loop->continue_jumps[current_loop->continue_count++] =
+		state.loop->continue_jumps[state.loop->continue_count++] =
 		        emit_jump(OP_JUMP);
 	} else {
-		emit_loop(current_loop->continue_target);
+		emit_loop(state.loop->continue_target);
 	}
 	consume_terminator();
 }
@@ -1515,12 +1545,12 @@ static void continue_statement(void)
 static void return_statement(void)
 {
 	/* the top level is a function too, but it has no caller */
-	if (current->type == TYPE_SCRIPT)
+	if (state.current->type == TYPE_SCRIPT)
 		error("Can't return from top-level code.");
 
 	/* `return` with nothing after it is return nil */
 	if (check(TOKEN_SEMICOLON) || check(TOKEN_RIGHT_BRACE) ||
-	        parser.current.newline_before || check(TOKEN_EOF)) {
+	        state.parser.current.newline_before || check(TOKEN_EOF)) {
 		emit_return();
 	} else {
 		expression();
@@ -1592,8 +1622,8 @@ static void fn_declaration(void)
 	if (!check(TOKEN_RIGHT_PAREN)) {
 		do {
 			/* one stack slot per parameter, in order */
-			current->function->arity++;
-			if (current->function->arity > 255)
+			state.current->function->arity++;
+			if (state.current->function->arity > 255)
 				error_at_current(
 				        "Can't have more than 255 parameters.");
 			uint8_t param =
@@ -1655,12 +1685,12 @@ static void const_declaration(void)
  */
 static void synchronize(void)
 {
-	parser.panic_mode = false;
+	state.parser.panic_mode = false;
 
-	while (parser.current.type != TOKEN_EOF) {
-		if (parser.previous.type == TOKEN_SEMICOLON)
+	while (state.parser.current.type != TOKEN_EOF) {
+		if (state.parser.previous.type == TOKEN_SEMICOLON)
 			return;
-		switch (parser.current.type) {
+		switch (state.parser.current.type) {
 		case TOKEN_FN:
 		case TOKEN_LET:
 		case TOKEN_CONST:
@@ -1691,7 +1721,7 @@ static void synchronize(void)
 static void import_declaration(void)
 {
 	consume(TOKEN_STRING, "Expect module file path string after 'import'.");
-	Token path_token = parser.previous;
+	Token path_token = state.parser.previous;
 	consume_terminator();
 
 	Token import_fn = {
@@ -1701,7 +1731,7 @@ static void import_declaration(void)
 
 	const char *src = path_token.start + 1;
 	int len = path_token.length - 2;
-	ObjString *str = copy_string(current_vm, src, len);
+	ObjString *str = copy_string(state.vm, src, len);
 	emit_constant(OBJ_VAL(str));
 
 	emit_bytes(OP_CALL, 1);
@@ -1744,7 +1774,7 @@ static void declaration(void)
 		statement();
 
 	/* one error per statement, then resynchronize */
-	if (parser.panic_mode)
+	if (state.parser.panic_mode)
 		synchronize();
 }
 
@@ -1754,19 +1784,40 @@ static void declaration(void)
  * Compile a whole source string into a top-level function.
  *
  * Returns NULL if anything failed, and the caller must not run or free the
- * result in that case. current_vm is saved rather than restored: compile()
+ * result in that case. state.vm is saved rather than restored: compile()
  * can be reentered by import, and the reentrant call shares the same VM.
  */
 ObjFunction *compile(VM *vm, const char *source)
 {
-	current_vm = vm;
+	/*
+	 * Own the compiler state for the duration of this compile.
+	 *
+	 * The save and the restore are the whole point of bundling the four
+	 * globals into a struct. A nested compile -- an import that compiles
+	 * while this one is still on the stack -- now starts from a clean
+	 * slate and puts the outer state back exactly as it was on the way
+	 * out, instead of inheriting a half-finished token position and a
+	 * dangling compiler chain.
+	 *
+	 * A nested compile cannot actually happen today, because compiling
+	 * and executing are separate phases and `import` runs at execution
+	 * time. That is an argument, not a guarantee, and this makes it a
+	 * guarantee. The cost is a struct copy on entry and exit, which is
+	 * a few hundred bytes and about forty instructions.
+	 */
+	CompilerState saved = state;
+
+	/* a fresh compile does not inherit the previous one's error state */
+	state.parser.had_error = false;
+	state.parser.panic_mode = false;
+	state.loop = NULL;
+	state.current = NULL;
+
+	state.vm = vm;
 	scanner_init(source);
 
 	Compiler compiler;
 	init_compiler(&compiler, TYPE_SCRIPT);
-
-	parser.had_error = false;
-	parser.panic_mode = false;
 
 	advance();
 
@@ -1774,14 +1825,23 @@ ObjFunction *compile(VM *vm, const char *source)
 		declaration();
 
 	/*
-	 * end_compiler() pops the chain, which leaves `current` NULL. That
+	 * end_compiler() pops the chain, which leaves state.current NULL. That
 	 * is what tells the collector there is nothing in flight, so it must
 	 * happen before the function is returned: after this point the only
 	 * reference to `function` is the caller's, and the caller has not
 	 * rooted it yet.
 	 */
 	ObjFunction *function = end_compiler();
-	return parser.had_error ? NULL : function;
+	bool failed = state.parser.had_error;
+
+	/*
+	 * restore before returning. note that the returned ObjFunction is
+	 * already a live heap object, so dropping the compiler chain does
+	 * not lose it: the caller roots it on the next line.
+	 */
+	state = saved;
+
+	return failed ? NULL : function;
 }
 
 /*
@@ -1800,18 +1860,18 @@ ObjFunction *compile(VM *vm, const char *source)
 void compiler_mark_roots(VM *vm)
 {
 	/*
-	 * `current`, not something the VM holds. `current` is the innermost
+	 * `state.current`, not something the VM holds. `state.current` is the innermost
 	 * compiler, so walking its enclosing chain visits every function
 	 * currently being built, including the ones inside a nested `fn`.
 	 * A pointer cached in the VM would go stale the moment a nested
 	 * function pushed a frame of its own, and the function being
 	 * compiled right now would be invisible to the collector.
 	 *
-	 * Outside a compile `current` is NULL and this is a no-op, which is
+	 * Outside a compile `state.current` is NULL and this is a no-op, which is
 	 * why it does not need a flag to say whether a compile is in
 	 * progress.
 	 */
-	for (Compiler *compiler = current; compiler != NULL;
+	for (Compiler *compiler = state.current; compiler != NULL;
 	        compiler = compiler->enclosing) {
 		if (compiler->function != NULL)
 			mark_object(vm, (Obj *)compiler->function);
