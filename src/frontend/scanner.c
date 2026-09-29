@@ -291,7 +291,7 @@ static Token number(void)
 		if (peek() == '+' || peek() == '-')
 			advance();
 		if (!is_digit(peek()))
-			return error_token("Unterminated scientific notation.");
+			return error_token("unterminated scientific notation.");
 		while (is_digit(peek()))
 			advance();
 	}
@@ -313,13 +313,13 @@ static Token string(void)
 		if (peek() == '\\') {
 			advance();
 			if (is_at_end())
-				return error_token("Unterminated string.");
+				return error_token("unterminated string.");
 		}
 		advance();
 	}
 
 	if (is_at_end())
-		return error_token("Unterminated string.");
+		return error_token("unterminated string.");
 
 	advance();
 	return make_token(TOKEN_STRING);
@@ -396,5 +396,5 @@ Token scan_token(void)
 		return string();
 	}
 
-	return error_token("Unexpected character.");
+	return error_token("unexpected character.");
 }

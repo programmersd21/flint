@@ -40,13 +40,15 @@ static void repl(VM *vm)
 {
 	char line[1024];
 	for (;;) {
-		printf("> ");
+		if (!vm->quiet)
+			printf("> ");
 		fflush(stdout);
 
 		/* fgets returns NULL on EOF and on error alike. either way
 		 * we are done. */
 		if (!fgets(line, sizeof(line), stdin)) {
-			printf("\n");
+			if (!vm->quiet)
+				printf("\n");
 			break;
 		}
 
@@ -384,8 +386,19 @@ static void print_usage(FILE *stream)
 	fprintf(stream,
 	        "  --fix                  apply machine-applicable fixes\n");
 	fprintf(stream, "\n");
+	fprintf(stream, "Output:\n");
+	fprintf(stream, "\n");
+	fprintf(stream, "  --quiet                no repl prompt\n");
 	fprintf(stream,
-	        "These work before or after the script path. Everything "
+	        "  --warnings=default     errors, and warnings once there "
+	        "are any\n");
+	fprintf(stream, "  --warnings=none       errors only\n");
+	fprintf(stream,
+	        "  --warnings=all         everything the compiler can "
+	        "produce\n");
+	fprintf(stream, "\n");
+	fprintf(stream,
+	        "these work before or after the script path. Everything "
 	        "else\n");
 	fprintf(stream,
 	        "after it belongs to the script. Use -- to end flint's own\n");
@@ -401,17 +414,17 @@ static int explain_code(const char *code)
 		const char *text;
 	} entries[] = {
 	        {"E0001",
-	                "Unexpected source character. Remove it or replace it "
+	                "unexpected source character. Remove it or replace it "
 	                "with a valid token."},
 	        {"E0002",
-	                "The exponent has no digits. Add digits after the "
+	                "the exponent has no digits. Add digits after the "
 	                "exponent marker."},
 	        {"E0003",
-	                "The string literal is unterminated. Add its closing "
+	                "the string literal is unterminated. Add its closing "
 	                "quote."},
 	        {"E0100",
-	                "The parser could not use the token at this location. "
-	                "Check the surrounding expression."},
+	                "the parser could not use the token at this location. "
+	                "check the surrounding expression."},
 	        {"E0102",
 	                "A required delimiter is missing. Add the delimiter "
 	                "named by the diagnostic."},
@@ -419,7 +432,7 @@ static int explain_code(const char *code)
 	                "A name is not defined in the current scope. Check its "
 	                "spelling or define it before use."},
 	        {"E0301",
-	                "An operator received incompatible operands. Check the "
+	                "an operator received incompatible operands. Check the "
 	                "operator and operand types."},
 	        {"E0302", "A value did not match the required type."},
 	        {"E0401",
@@ -430,11 +443,11 @@ static int explain_code(const char *code)
 	                "A module operation failed. Check the import path and "
 	                "module state."},
 	        {"E0601",
-	                "An index operation failed. Check the index and "
+	                "an index operation failed. Check the index and "
 	                "indexed "
 	                "value."},
 	        {"E0600",
-	                "Execution failed. Read the message and source "
+	                "execution failed. Read the message and source "
 	                "location for the failing operation."},
 	};
 	for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {
@@ -453,6 +466,8 @@ int main(int argc, char *argv[])
 	FlColorMode diag_color = FL_COLOR_AUTO;
 	int arg = 1;
 	bool apply_fixes = false;
+	bool quiet = false;
+	FlWarnMode warnings = FL_WARN_DEFAULT;
 
 	/*
 	 * Pull flint's own options out of the whole command line, wherever
@@ -540,6 +555,30 @@ int main(int argc, char *argv[])
 				apply_fixes = true;
 				continue;
 			}
+			if (strcmp(a, "--quiet") == 0) {
+				quiet = true;
+				continue;
+			}
+			if (strncmp(a, "--warnings=", 11) == 0) {
+				const char *value = a + 11;
+				if (strcmp(value, "default") == 0)
+					warnings = FL_WARN_DEFAULT;
+				else if (strcmp(value, "none") == 0)
+					warnings = FL_WARN_NONE;
+				else if (strcmp(value, "all") == 0)
+					warnings = FL_WARN_ALL;
+				else {
+					fprintf(stderr,
+					        "error: unknown warning mode "
+					        "'%s'\n"
+					        "  expected default, none or "
+					        "all\n",
+					        value);
+					free(kept);
+					return 64;
+				}
+				continue;
+			}
 			kept[nkept++] = (char *)a;
 		}
 
@@ -602,6 +641,8 @@ int main(int argc, char *argv[])
 			VM vm;
 			vm_init(&vm);
 			vm_set_diagnostics(&vm, diag_format, diag_color);
+			vm.warnings = warnings;
+			vm.quiet = quiet;
 			/* code has no file, so imports resolve against the
 			 * working directory, which is the only thing they can
 			 * sensibly mean */
@@ -622,6 +663,8 @@ int main(int argc, char *argv[])
 			VM vm;
 			vm_init(&vm);
 			vm_set_diagnostics(&vm, diag_format, diag_color);
+			vm.warnings = warnings;
+			vm.quiet = quiet;
 			char *source = read_stdin();
 			InterpretResult result =
 			        vm_interpret_named(&vm, source, "<stdin>");
@@ -638,6 +681,8 @@ int main(int argc, char *argv[])
 	VM vm;
 	vm_init(&vm);
 	vm_set_diagnostics(&vm, diag_format, diag_color);
+	vm.warnings = warnings;
+	vm.quiet = quiet;
 
 	if (arg == argc) {
 		repl(&vm);

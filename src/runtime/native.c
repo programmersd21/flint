@@ -62,14 +62,14 @@ static Value input_native(VM *vm, int argc, Value *argv)
 	 * fixed-arity native, so with two forms we check it here. */
 	if (argc > 1) {
 		vm_runtime_error(
-		        vm, "Expected 0 or 1 arguments but got %d.", argc);
+		        vm, "expected 0 or 1 arguments but got %d.", argc);
 		return NIL_VAL;
 	}
 
 	if (argc == 1) {
 		if (!IS_STRING(argv[0])) {
 			vm_runtime_error(
-			        vm, "Argument to input() must be a string.");
+			        vm, "argument to input() must be a string.");
 			return NIL_VAL;
 		}
 		/* no newline. the user is standing there waiting. */
@@ -81,7 +81,7 @@ static Value input_native(VM *vm, int argc, Value *argv)
 	size_t length = 0;
 	char *buffer = malloc(capacity);
 	if (buffer == NULL) {
-		vm_runtime_error(vm, "Out of memory reading input.");
+		vm_runtime_error(vm, "out of memory reading input.");
 		return NIL_VAL;
 	}
 
@@ -105,7 +105,7 @@ static Value input_native(VM *vm, int argc, Value *argv)
 			if (grown == NULL) {
 				free(buffer);
 				vm_runtime_error(vm,
-				        "Out of memory reading "
+				        "out of memory reading "
 				        "input.");
 				return NIL_VAL;
 			}
@@ -143,7 +143,7 @@ static Value len_native(VM *vm, int argc, Value *argv)
 		return NUMBER_VAL((double)AS_STRING(val)->length);
 	if (IS_LIST(val))
 		return NUMBER_VAL((double)AS_LIST(val)->count);
-	vm_runtime_error(vm, "Argument to len() must be a string or list.");
+	vm_runtime_error(vm, "argument to len() must be a string or list.");
 	return NIL_VAL;
 }
 
@@ -157,7 +157,7 @@ static Value push_native(VM *vm, int argc, Value *argv)
 	(void)argc;
 	if (!IS_LIST(argv[0])) {
 		vm_runtime_error(
-		        vm, "First argument to push() must be a list.");
+		        vm, "first argument to push() must be a list.");
 		return NIL_VAL;
 	}
 	ObjList *list = AS_LIST(argv[0]);
@@ -180,12 +180,12 @@ static Value pop_native(VM *vm, int argc, Value *argv)
 {
 	(void)argc;
 	if (!IS_LIST(argv[0])) {
-		vm_runtime_error(vm, "Argument to pop() must be a list.");
+		vm_runtime_error(vm, "argument to pop() must be a list.");
 		return NIL_VAL;
 	}
 	ObjList *list = AS_LIST(argv[0]);
 	if (list->count == 0) {
-		vm_runtime_error(vm, "Cannot pop from an empty list.");
+		vm_runtime_error(vm, "cannot pop from an empty list.");
 		return NIL_VAL;
 	}
 	return list->items[--list->count];
@@ -276,7 +276,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	 */
 	char *path = sys_resolve_module(raw);
 	if (path == NULL) {
-		vm_runtime_error(vm, "Cannot resolve module path '%s'.", raw);
+		vm_runtime_error(vm, "cannot resolve module path '%s'.", raw);
 		return NIL_VAL;
 	}
 
@@ -300,7 +300,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		free(path);
 		if (IS_NIL(cached)) {
 			vm_runtime_error(vm,
-			        "Import cycle: '%s' is already being "
+			        "import cycle: '%s' is already being "
 			        "loaded.",
 			        raw);
 			return NIL_VAL;
@@ -313,7 +313,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 
 	FILE *file = fopen(path, "rb");
 	if (file == NULL) {
-		vm_runtime_error(vm, "Could not open module file '%s'.", raw);
+		vm_runtime_error(vm, "could not open module file '%s'.", raw);
 		/* remove the in-flight marker: the file did not load, and
 		 * leaving it marked would make a later attempt look like a
 		 * cycle rather than a missing file. */
@@ -333,14 +333,14 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		fclose(file);
 		free(path);
 		vm_runtime_error(
-		        vm, "Could not seek in module file '%s'.", raw);
+		        vm, "could not seek in module file '%s'.", raw);
 		return NIL_VAL;
 	}
 	long length = ftell(file);
 	if (length < 0) {
 		fclose(file);
 		free(path);
-		vm_runtime_error(vm, "Could not size module file '%s'.", raw);
+		vm_runtime_error(vm, "could not size module file '%s'.", raw);
 		return NIL_VAL;
 	}
 	size_t size = (size_t)length;
@@ -348,7 +348,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	if (fseek(file, 0L, SEEK_SET) != 0) {
 		fclose(file);
 		free(path);
-		vm_runtime_error(vm, "Could not rewind module file '%s'.", raw);
+		vm_runtime_error(vm, "could not rewind module file '%s'.", raw);
 		return NIL_VAL;
 	}
 
@@ -358,7 +358,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	if (buffer == NULL) {
 		fclose(file);
 		free(path);
-		vm_runtime_error(vm, "Out of memory reading module '%s'.", raw);
+		vm_runtime_error(vm, "out of memory reading module '%s'.", raw);
 		return NIL_VAL;
 	}
 
@@ -369,7 +369,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		free(buffer);
 		fclose(file);
 		free(path);
-		vm_runtime_error(vm, "Could not read module file '%s'.", raw);
+		vm_runtime_error(vm, "could not read module file '%s'.", raw);
 		return NIL_VAL;
 	}
 	/*

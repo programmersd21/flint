@@ -243,3 +243,118 @@ grep -q 's\[99\]' "$tmp/stridx.out" || {
 }
 
 echo "diagnostic tests passed"
+
+# --- secondary labels ---
+#
+# A redeclaration used to say "already a variable with this name" and stop.
+# The reader then had to go and find the other one. Both spans are now shown.
+
+printf 'fn f() {\n    let x = 1\n    let x = 2\n}\n' >"$tmp/dup.fl"
+out=$("$FLINT" --color=never --error-format=human "$tmp/dup.fl" 2>&1 || true)
+grep -q 'already defined in this scope' <<EOF
+$out
+EOF
+grep -q 'defined again here' <<EOF
+$out
+EOF
+grep -q 'first defined here' <<EOF
+$out
+EOF
+# the secondary span must carry its own line of source, not be printed as a
+# bare sentence the reader has to verify
+if ! grep -q '2 |     let x = 1' <<EOF
+$out
+EOF
+then
+	echo "secondary label has no source line of its own"
+	cat "$tmp/dup.fl" "$out"
+	exit 1
+fi
+
+# --- the summary line ---
+#
+# One line saying how many things were wrong, so that fixing the first error
+# and re-running tells you whether that was the whole job.
+
+printf 'fn f() {\n    let x = 1\n    let x = 2\n}\n' >"$tmp/one.fl"
+out=$("$FLINT" --color=never --error-format=short "$tmp/one.fl" 2>&1 || true)
+grep -q 'due to 1 error' <<EOF
+$out
+EOF
+# and it must not say "1 errors"
+if grep -q 'due to 1 errors' <<EOF
+$out
+EOF
+then
+	echo "summary is not pluralised"
+	exit 1
+fi
+
+# --- option order and the new options ---
+#
+# flint's own options used to be recognised only *before* the script path, so
+# `flint bad.fl --error-format=human` quietly printed the old format while
+# `flint --error-format=human bad.fl` printed the new one.
+
+printf 'print("x"\n' >"$tmp/bad.fl"
+for order in before after; do
+	if [ "$order" = before ]; then
+		out=$("$FLINT" --color=never --error-format=human "$tmp/bad.fl" 2>&1 || true)
+	else
+		out=$("$FLINT" "$tmp/bad.fl" --color=never --error-format=human 2>&1 || true)
+	fi
+	grep -q 'error\[E0102\]' <<EOF
+$out
+EOF
+done
+
+printf 'print(args())\n' >"$tmp/args.fl"
+got=$("$FLINT" "$tmp/args.fl" -v 2>&1)
+[ "$got" = '["-v"]' ] || {
+	echo "expected -v to reach the script, got: $got"
+	exit 1
+}
+got=$("$FLINT" "$tmp/args.fl" -- --color=always 2>&1)
+[ "$got" = '["--color=always"]' ] || {
+	echo "expected -- to stop option scanning, got: $got"
+	exit 1
+}
+got=$("$FLINT" --warnings=none "$tmp/args.fl" 2>&1)
+[ "$got" = '[]' ] || {
+	echo "--warnings= should be accepted before the path, got: $got"
+	exit 1
+}
+if "$FLINT" --warnings=bogus "$tmp/args.fl" >/dev/null 2>&1; then
+	echo "accepted an unknown warning mode"
+	exit 1
+fi
+
+# --quiet drops the repl prompt and nothing else
+got=$(printf 'print(7)\n' | "$FLINT" --quiet 2>&1 | tr -d '\n')
+[ "$got" = "7" ] || {
+	echo "expected a bare 7 from --quiet, got: $got"
+	exit 1
+}
+got=$(printf 'print(7)\n' | "$FLINT" 2>&1 | tr -d '\n')
+if [ "$got" = "7" ]; then
+	echo "expected the repl prompt without --quiet, got: $got"
+	exit 1
+fi
+
+# --- lowercase messages ---
+#
+# every diagnostic in the language is lowercase, matching the rest of the
+# repository. the language tests cover the text; this catches a new one being
+# added in the wrong case.
+
+printf 'pritn("x")\n' >"$tmp/case.fl"
+out=$("$FLINT" --color=never --error-format=short "$tmp/case.fl" 2>&1 || true)
+if grep -q 'error\[E[0-9]*\]: [A-Z]' <<EOF
+$out
+EOF
+then
+	echo "diagnostic message starts with a capital"
+	cat "$tmp/case.fl" "$out"
+	exit 1
+fi
+

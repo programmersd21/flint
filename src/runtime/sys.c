@@ -243,7 +243,7 @@ static Value env_native(VM *vm, int argc, Value *argv)
 {
 	(void)argc;
 	if (!IS_STRING(argv[0])) {
-		vm_runtime_error(vm, "Argument to env() must be a string.");
+		vm_runtime_error(vm, "argument to env() must be a string.");
 		return NIL_VAL;
 	}
 
@@ -276,7 +276,7 @@ static Value exit_native(VM *vm, int argc, Value *argv)
 	if (argc >= 1) {
 		if (!IS_NUMBER(argv[0])) {
 			vm_runtime_error(
-			        vm, "Argument to exit() must be a number.");
+			        vm, "argument to exit() must be a number.");
 			return NIL_VAL;
 		}
 		/* the shell only has 8 bits of status, and a flint number
@@ -336,7 +336,7 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 	FILE *file = fopen(path, "rb");
 	if (file == NULL) {
 		vm_runtime_error(
-		        vm, "Cannot read '%s': %s.", path, strerror(errno));
+		        vm, "cannot read '%s': %s.", path, strerror(errno));
 		return NIL_VAL;
 	}
 
@@ -358,7 +358,7 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 		 * zero byte allocation. */
 		if ((unsigned long)length >= (unsigned long)-1) {
 			fclose(file);
-			vm_runtime_error(vm, "File '%s' is too large.", path);
+			vm_runtime_error(vm, "file '%s' is too large.", path);
 			return NIL_VAL;
 		}
 		size = (size_t)length;
@@ -366,7 +366,7 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 		if (buffer == NULL) {
 			fclose(file);
 			vm_runtime_error(
-			        vm, "Out of memory reading '%s'.", path);
+			        vm, "out of memory reading '%s'.", path);
 			return NIL_VAL;
 		}
 		size_t got = fread(buffer, 1, size, file);
@@ -374,7 +374,7 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 			free(buffer);
 			fclose(file);
 			vm_runtime_error(vm,
-			        "Cannot read '%s': %s.",
+			        "cannot read '%s': %s.",
 			        path,
 			        strerror(errno));
 			return NIL_VAL;
@@ -389,7 +389,7 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 		if (buffer == NULL) {
 			fclose(file);
 			vm_runtime_error(
-			        vm, "Out of memory reading '%s'.", path);
+			        vm, "out of memory reading '%s'.", path);
 			return NIL_VAL;
 		}
 		for (;;) {
@@ -398,7 +398,7 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 					free(buffer);
 					fclose(file);
 					vm_runtime_error(vm,
-					        "File '%s' is too large.",
+					        "file '%s' is too large.",
 					        path);
 					return NIL_VAL;
 				}
@@ -408,7 +408,7 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 					free(buffer);
 					fclose(file);
 					vm_runtime_error(vm,
-					        "Out of memory reading "
+					        "out of memory reading "
 					        "'%s'.",
 					        path);
 					return NIL_VAL;
@@ -472,7 +472,7 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 				free(buffer);
 				fclose(file);
 				vm_runtime_error(vm,
-				        "Out of memory reading '%s'.",
+				        "out of memory reading '%s'.",
 				        path);
 				return NIL_VAL;
 			}
@@ -520,7 +520,7 @@ static Value write_file_native(VM *vm, int argc, Value *argv)
 	FILE *file = fopen(path, "wb");
 	if (file == NULL) {
 		vm_runtime_error(
-		        vm, "Cannot write '%s': %s.", path, strerror(errno));
+		        vm, "cannot write '%s': %s.", path, strerror(errno));
 		return NIL_VAL;
 	}
 
@@ -530,7 +530,7 @@ static Value write_file_native(VM *vm, int argc, Value *argv)
 		 * message says which, because "cannot write" with no
 		 * reason is the least useful error in the world. */
 		vm_runtime_error(vm,
-		        "Cannot write '%s': %s.",
+		        "cannot write '%s': %s.",
 		        path,
 		        ferror(file) ? strerror(errno) : "short write");
 		fclose(file);
@@ -541,7 +541,7 @@ static Value write_file_native(VM *vm, int argc, Value *argv)
 		/* a close that fails means the data may not have landed,
 		 * and for a script writing a file that matters */
 		vm_runtime_error(
-		        vm, "Cannot write '%s': %s.", path, strerror(errno));
+		        vm, "cannot write '%s': %s.", path, strerror(errno));
 		return NIL_VAL;
 	}
 
@@ -581,7 +581,7 @@ static Value exec_native(VM *vm, int argc, Value *argv)
 	for (int i = 1; i < argc; i++) {
 		if (!IS_STRING(argv[i])) {
 			vm_runtime_error(vm,
-			        "Argument %d to exec() must be a string.",
+			        "argument %d to exec() must be a string.",
 			        i + 1);
 			return NIL_VAL;
 		}
@@ -593,7 +593,7 @@ static Value exec_native(VM *vm, int argc, Value *argv)
 	 * across the fork below. */
 	char **child_argv = malloc(sizeof(char *) * (size_t)(argc + 1));
 	if (child_argv == NULL) {
-		vm_runtime_error(vm, "Out of memory in exec().");
+		vm_runtime_error(vm, "out of memory in exec().");
 		return NIL_VAL;
 	}
 	for (int i = 0; i < argc; i++)
@@ -609,7 +609,7 @@ static Value exec_native(VM *vm, int argc, Value *argv)
 	pid_t pid = fork();
 	if (pid < 0) {
 		free(child_argv);
-		vm_runtime_error(vm, "Cannot fork: %s.", strerror(errno));
+		vm_runtime_error(vm, "cannot fork: %s.", strerror(errno));
 		return NUMBER_VAL(127);
 	}
 
@@ -636,7 +636,7 @@ static Value exec_native(VM *vm, int argc, Value *argv)
 		/* NOLINTNEXTLINE(misc-include-cleaner) */
 		if (errno != EINTR) {
 			vm_runtime_error(vm,
-			        "Cannot wait for child: %s.",
+			        "cannot wait for child: %s.",
 			        strerror(errno));
 			return NUMBER_VAL(127);
 		}

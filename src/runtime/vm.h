@@ -18,6 +18,21 @@ typedef enum {
 } InterpretResult;
 
 /*
+ * How much to say.
+ *
+ * FL_WARN_DEFAULT is the only mode that reports anything today: flint emits
+ * no warnings at all yet, and a flag that pretends otherwise would be a lie
+ * dressed as a feature. The modes exist so that the first real warning has
+ * somewhere to go, and so a script that wants a quiet run can ask for one
+ * without a second language.
+ */
+typedef enum {
+	FL_WARN_NONE = 0, /* errors only */
+	FL_WARN_DEFAULT, /* errors, and warnings once there are any */
+	FL_WARN_ALL /* everything the compiler can produce */
+} FlWarnMode;
+
+/*
  * One entry per active call. slots points at the callee value on the value
  * stack, so argument 0 is slots[1] and local slot 0 is the function itself.
  * That single pointer is why the compiler can use one index for both.
@@ -51,6 +66,8 @@ struct VM {
 	Value *base_top;
 	const char *source_text;
 	const char *source_name;
+	FlWarnMode warnings;
+	bool quiet; /* suppress the repl prompt */
 	FlDiagFormat diag_format;
 	FlColorMode diag_color;
 

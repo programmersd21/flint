@@ -284,6 +284,10 @@ static void emit_human(
 	        color ? (d->severity == FL_DIAG_ERROR ? "\033[31m" : "\033[33m")
 	              : "";
 	const char *reset = color ? "\033[0m" : "";
+	/* secondary spans get a dim cyan rather than the severity colour:
+	 * the severity belongs to the thing being complained about, and a
+	 * second span in the same colour reads as a second complaint */
+	const char *muted = color ? "\033[2;36m" : "";
 	fprintf(out, "%s%s%s", paint, severity_name(d->severity), reset);
 	if (d->code != NULL)
 		fprintf(out, "[%s]", d->code);
@@ -332,9 +336,65 @@ static void emit_human(
 			fprintf(out, " %s", d->primary_label);
 		fputs("\n  |\n", out);
 	}
-	for (size_t i = 0; i < d->label_count; i++)
-		if (d->labels[i].label != NULL)
-			fprintf(out, "  = %s\n", d->labels[i].label);
+	/*
+	 * Secondary labels, each on its own source line with a muted caret.
+	 *
+	 * A label is only useful if it points at something, and a label with
+	 * no line of source under it is just a sentence. "first defined here"
+	 * printed on its own is a claim the reader has to go and verify; with
+	 * the line and a caret under the name it is a fact they can check at
+	 * a glance.
+	 *
+	 * Only labels that land on a different line from the primary are
+	 * drawn this way. One on the same line is already inside the span
+	 * being pointed at, and drawing it again would just be noise.
+	 */
+	for (size_t i = 0; i < d->label_count; i++) {
+		const FlDiagLabel *lab = &d->labels[i];
+		if (lab->label == NULL || s == NULL)
+			continue;
+		if (lab->span.end > s->length)
+			continue;
+
+		size_t lline = fl_source_line(s, lab->span.start);
+		size_t lcol = visual_column(s, lline, lab->span.start);
+		if (d->has_primary &&
+		        lline == fl_source_line(s, d->primary.start))
+			continue;
+
+		size_t lwidth = 1;
+		for (size_t n = lline + 1; n >= 10; n /= 10)
+			lwidth++;
+
+		fprintf(out, "  |\n");
+		fprintf(out, "%*zu | ", (int)lwidth, lline + 1);
+		write_source_line(out, s, lline);
+		fputc('\n', out);
+		fprintf(out,
+		        "%*s | %*s%s-",
+		        (int)lwidth,
+		        "",
+		        (int)lcol,
+		        "",
+		        muted);
+		size_t lend = lab->span.end;
+		while (lend > lab->span.start &&
+		        (s->text[lend - 1] == '\n' ||
+		                s->text[lend - 1] == '\r'))
+			lend--;
+		size_t lunderline =
+		        fl_source_line(s, lend) == lline
+		                ? visual_column(s, lline, lend) - lcol
+		                : 1;
+		if (lunderline == 0)
+			lunderline = 1;
+		if (lunderline > 40)
+			lunderline = 40;
+		for (size_t k = 1; k < lunderline; k++)
+			fputc('~', out);
+		fprintf(out, "%s", reset);
+		fprintf(out, " %s\n", lab->label);
+	}
 	for (size_t i = 0; i < d->note_count; i++)
 		fprintf(out, "  = note: %s\n", d->notes[i]);
 	for (size_t i = 0; i < d->help_count; i++)

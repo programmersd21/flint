@@ -1,4 +1,4 @@
-Cannot assign to constant 'LIMIT'.
+cannot assign to constant 'LIMIT'.
 [line 15] in script
 10
 20

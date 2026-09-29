@@ -33,7 +33,7 @@
 	do {                                                                   \
 		if (!IS_STRING(v)) {                                           \
 			vm_runtime_error(                                      \
-			        vm, "Argument to " name " must be a string."); \
+			        vm, "argument to " name " must be a string."); \
 			return NIL_VAL;                                        \
 		}                                                              \
 	} while (false)
@@ -214,7 +214,7 @@ static Value join_native(VM *vm, int argc, Value *argv)
 	(void)argc;
 	if (!IS_LIST(argv[0])) {
 		vm_runtime_error(
-		        vm, "First argument to join() must be a list.");
+		        vm, "first argument to join() must be a list.");
 		return NIL_VAL;
 	}
 	REQUIRE_STRING(vm, argv[1], "join()");
@@ -247,7 +247,7 @@ static Value join_native(VM *vm, int argc, Value *argv)
 
 	char *buffer = malloc((size_t)total + 1);
 	if (buffer == NULL) {
-		vm_runtime_error(vm, "Out of memory in join().");
+		vm_runtime_error(vm, "out of memory in join().");
 		return NIL_VAL;
 	}
 
@@ -445,7 +445,7 @@ static Value replace_native(VM *vm, int argc, Value *argv)
 
 	char *buffer = malloc((size_t)total + 1);
 	if (buffer == NULL) {
-		vm_runtime_error(vm, "Out of memory in replace().");
+		vm_runtime_error(vm, "out of memory in replace().");
 		return NIL_VAL;
 	}
 
@@ -522,7 +522,7 @@ static Value lower_native(VM *vm, int argc, Value *argv)
 
 	char *buffer = malloc((size_t)s->length + 1);
 	if (buffer == NULL) {
-		vm_runtime_error(vm, "Out of memory in lower().");
+		vm_runtime_error(vm, "out of memory in lower().");
 		return NIL_VAL;
 	}
 	for (int i = 0; i < s->length; i++)
@@ -543,7 +543,7 @@ static Value upper_native(VM *vm, int argc, Value *argv)
 
 	char *buffer = malloc((size_t)s->length + 1);
 	if (buffer == NULL) {
-		vm_runtime_error(vm, "Out of memory in upper().");
+		vm_runtime_error(vm, "out of memory in upper().");
 		return NIL_VAL;
 	}
 	for (int i = 0; i < s->length; i++)

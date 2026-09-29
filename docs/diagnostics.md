@@ -74,6 +74,40 @@ temporary file. It does not follow a symlink. There is no warning control.
 `flint --explain E0102` prints the short explanation for a known diagnostic
 code. Explanations exist only for the codes currently emitted.
 
+### more than one error
+
+The compiler recovers where it safely can and reports more than one problem,
+because a reader who has fixed the first error and re-run deserves to know
+whether that was the whole job:
+
+```
+error: could not compile due to 2 errors
+```
+
+That summary is the point. A file that is wrong from the first byte can produce
+thousands of diagnostics, and thousands is not information, it is a wall, so
+reporting stops after 20 and says so.
+
+### two locations for one error
+
+A redeclaration used to say "already a variable with this name" and stop, which
+sent the reader off to find the other one. Both spans are shown now, the first
+in a muted `-` so the eye can go straight between them:
+
+```
+error[E0201]: variable `x` is already defined in this scope
+ --> dup.fl:3:9
+  |
+3 |     let x = 2
+  |         ^ defined again here
+  |
+  |
+2 |     let x = 1
+  |         - first defined here
+  |
+  = error: could not compile due to 1 error
+```
+
 ### where a diagnostic points
 
 A missing delimiter is reported at the end of the token before it, which is

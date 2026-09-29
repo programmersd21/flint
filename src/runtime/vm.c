@@ -247,7 +247,7 @@ static const char *similar_language_name(VM *vm, ObjString *needle)
 
 static const char *undefined_name(const char *message)
 {
-	static const char prefix[] = "Undefined variable '";
+	static const char prefix[] = "undefined variable '";
 	if (strncmp(message, prefix, sizeof(prefix) - 1) != 0)
 		return NULL;
 	const char *start = message + sizeof(prefix) - 1;
@@ -305,23 +305,23 @@ void vm_runtime_error(VM *vm, const char *format, ...)
 			code = "E0202";
 			primary_label = "undefined name";
 		} else if (strncmp(message,
-		                   "Operands must be",
-		                   strlen("Operands must be")) == 0) {
+		                   "operands must be",
+		                   strlen("operands must be")) == 0) {
 			code = "E0301";
 			primary_label = "invalid operands";
 		} else if (strncmp(message,
-		                   "Expected type '",
-		                   strlen("Expected type '")) == 0) {
+		                   "expected type '",
+		                   strlen("expected type '")) == 0) {
 			code = "E0302";
 			primary_label = "type assertion failed";
 		} else if (strstr(message, "index") != NULL) {
 			code = "E0601";
 			primary_label = "invalid index";
-		} else if (strncmp(message, "Expected ", 9) == 0) {
+		} else if (strncmp(message, "expected ", 9) == 0) {
 			code = "E0401";
 			primary_label = "call failed";
 		} else if (strstr(message, "module") != NULL ||
-		           strstr(message, "Import cycle") != NULL) {
+		           strstr(message, "import cycle") != NULL) {
 			code = "E0501";
 			primary_label = "module operation failed";
 		}
@@ -494,7 +494,7 @@ void vm_runtime_error(VM *vm, const char *format, ...)
  * bound is what makes the negative branch safe, because |d| <= count means
  * count + idx cannot overflow, and count is an int to begin with.
  *
- * `what` is "List" or "String" and only appears in the message.
+ * `what` is "list" or "string" and only appears in the message.
  */
 static bool value_to_index(
         VM *vm, Value value, int count, int *out, const char *what)
@@ -580,6 +580,7 @@ void vm_init(VM *vm)
 	vm->base_frame = 0;
 	vm->source_text = NULL;
 	vm->source_name = "<source>";
+	vm->warnings = FL_WARN_DEFAULT;
 	vm->diag_format = FL_DIAG_LEGACY;
 	vm->diag_color = FL_COLOR_AUTO;
 
@@ -694,14 +695,14 @@ static bool call(VM *vm, ObjClosure *closure, int arg_count)
 {
 	if (arg_count != closure->function->arity) {
 		vm_runtime_error(vm,
-		        "Expected %d arguments but got %d.",
+		        "expected %d arguments but got %d.",
 		        closure->function->arity,
 		        arg_count);
 		return false;
 	}
 
 	if (vm->frame_count == FRAMES_MAX) {
-		vm_runtime_error(vm, "Stack overflow.");
+		vm_runtime_error(vm, "stack overflow.");
 		return false;
 	}
 
@@ -732,7 +733,7 @@ static bool call_value(VM *vm, Value callee, int arg_count)
 			/* arity -1 is variadic and skips the check */
 			if (native->arity != -1 && arg_count != native->arity) {
 				vm_runtime_error(vm,
-				        "Expected %d arguments but got %d.",
+				        "expected %d arguments but got %d.",
 				        native->arity,
 				        arg_count);
 				return false;
@@ -748,7 +749,7 @@ static bool call_value(VM *vm, Value callee, int arg_count)
 			break;
 		}
 	}
-	vm_runtime_error(vm, "Can only call functions.");
+	vm_runtime_error(vm, "can only call functions.");
 	return false;
 }
 
@@ -824,7 +825,7 @@ static bool concatenate(VM *vm)
 	 * alternative is undefined behaviour and a confusing crash.
 	 */
 	if (a->length > INT_MAX - b->length) {
-		vm_runtime_error(vm, "String is too long to concatenate.");
+		vm_runtime_error(vm, "string is too long to concatenate.");
 		return false;
 	}
 
@@ -883,7 +884,7 @@ static InterpretResult run(VM *vm, int base_frame)
 #define BINARY_OP(value_type, op)                                              \
 	do {                                                                   \
 		if (!IS_NUMBER(peek(vm, 0)) || !IS_NUMBER(peek(vm, 1))) {      \
-			vm_runtime_error(vm, "Operands must be numbers.");     \
+			vm_runtime_error(vm, "operands must be numbers.");     \
 			return INTERPRET_RUNTIME_ERROR;                        \
 		}                                                              \
 		double b = AS_NUMBER(vm_pop(vm));                              \
@@ -961,7 +962,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			Value value;
 			if (!table_get(&vm->globals, name, &value)) {
 				vm_runtime_error(vm,
-				        "Undefined variable '%s'.",
+				        "undefined variable '%s'.",
 				        name->chars);
 				return INTERPRET_RUNTIME_ERROR;
 			}
@@ -987,7 +988,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			if (table_is_const(&vm->globals, name)) {
 				vm_pop(vm);
 				vm_runtime_error(vm,
-				        "Cannot redefine constant '%s'.",
+				        "cannot redefine constant '%s'.",
 				        name->chars);
 				return INTERPRET_RUNTIME_ERROR;
 			}
@@ -1026,7 +1027,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				}
 				vm_pop(vm);
 				vm_runtime_error(vm,
-				        "Cannot redefine constant '%s'.",
+				        "cannot redefine constant '%s'.",
 				        name->chars);
 				return INTERPRET_RUNTIME_ERROR;
 			}
@@ -1051,7 +1052,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			 */
 			if (table_is_const(&vm->globals, name)) {
 				vm_runtime_error(vm,
-				        "Cannot assign to constant '%s'.",
+				        "cannot assign to constant '%s'.",
 				        name->chars);
 				return INTERPRET_RUNTIME_ERROR;
 			}
@@ -1061,7 +1062,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				 * just created it. undo that and complain. */
 				table_delete(&vm->globals, name);
 				vm_runtime_error(vm,
-				        "Undefined variable '%s'.",
+				        "undefined variable '%s'.",
 				        name->chars);
 				return INTERPRET_RUNTIME_ERROR;
 			}
@@ -1110,7 +1111,7 @@ static InterpretResult run(VM *vm, int base_frame)
 
 			if (!value_has_type(value, want)) {
 				vm_runtime_error(vm,
-				        "Expected type '%s' but got '%s'.",
+				        "expected type '%s' but got '%s'.",
 				        flint_type_name_of(want),
 				        flint_type_name(value));
 				return INTERPRET_RUNTIME_ERROR;
@@ -1151,7 +1152,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				vm_push(vm, NUMBER_VAL(a + b));
 			} else {
 				vm_runtime_error(vm,
-				        "Operands must be two numbers or two "
+				        "operands must be two numbers or two "
 				        "strings.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
@@ -1171,7 +1172,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			if (!IS_NUMBER(peek(vm, 0)) ||
 			        !IS_NUMBER(peek(vm, 1))) {
 				vm_runtime_error(
-				        vm, "Operands must be numbers.");
+				        vm, "operands must be numbers.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
 			double b = AS_NUMBER(vm_pop(vm));
@@ -1185,7 +1186,7 @@ static InterpretResult run(VM *vm, int base_frame)
 		case OP_NEGATE: {
 			if (!IS_NUMBER(peek(vm, 0))) {
 				vm_runtime_error(
-				        vm, "Operand must be a number.");
+				        vm, "operand must be a number.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
 			vm_push(vm, NUMBER_VAL(-AS_NUMBER(vm_pop(vm))));
@@ -1339,7 +1340,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				            index_val,
 				            list->count,
 				            &idx,
-				            "List"))
+				            "list"))
 					return INTERPRET_RUNTIME_ERROR;
 				vm_push(vm, list->items[idx]);
 			} else if (IS_STRING(target)) {
@@ -1351,7 +1352,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				            index_val,
 				            str->length,
 				            &idx,
-				            "String"))
+				            "string"))
 					return INTERPRET_RUNTIME_ERROR;
 				/* the byte goes into a C local before copy_string(),
 				 * which can collect. `str` is rooted and will not be
@@ -1361,7 +1362,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				vm_push(vm, OBJ_VAL(copy_string(vm, c, 1)));
 			} else {
 				vm_runtime_error(vm,
-				        "Can only index lists and strings.");
+				        "can only index lists and strings.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
 			break;
@@ -1375,7 +1376,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			 * append syntax; use push(). */
 			if (!IS_LIST(target)) {
 				vm_runtime_error(
-				        vm, "Can only index-assign to lists.");
+				        vm, "can only index-assign to lists.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
 			ObjList *list = AS_LIST(target);
@@ -1385,7 +1386,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			 * bug, and one of them being checked is worse than
 			 * neither. */
 			if (!value_to_index(
-			            vm, index_val, list->count, &idx, "List"))
+			            vm, index_val, list->count, &idx, "list"))
 				return INTERPRET_RUNTIME_ERROR;
 			list->items[idx] = val;
 			vm_push(vm, val); /* assignment yields the value */
@@ -1415,7 +1416,7 @@ static InterpretResult run(VM *vm, int base_frame)
 field_done:;
 			} else {
 				vm_runtime_error(
-				        vm, "Only tables have fields.");
+				        vm, "only tables have fields.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
 			break;
@@ -1457,7 +1458,7 @@ field_done:;
 field_set_done:;
 			} else {
 				vm_runtime_error(
-				        vm, "Only tables have fields.");
+				        vm, "only tables have fields.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
 			break;
@@ -1483,7 +1484,7 @@ field_set_done:;
 
 			if (!IS_FLINT_TABLE(target)) {
 				vm_runtime_error(
-				        vm, "Only tables have fields.");
+				        vm, "only tables have fields.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
 
