@@ -24,7 +24,7 @@
  * nothing, so this fallback is what those binaries report.
  */
 #ifndef FLINT_VERSION
-#define FLINT_VERSION "dev"
+#	define FLINT_VERSION "dev"
 #endif
 
 /*

@@ -121,6 +121,18 @@ static int closure_instruction(Chunk *chunk, int offset)
 	return offset;
 }
 
+static int closure_long_instruction(Chunk *chunk, int offset)
+{
+	uint32_t fn_idx = (uint32_t)chunk->code[offset + 1] << 16 |
+	                  (uint32_t)chunk->code[offset + 2] << 8 |
+	                  (uint32_t)chunk->code[offset + 3];
+	printf("%-20s %4u ; ", "OP_CLOSURE_LONG", fn_idx);
+	if (fn_idx < (uint32_t)chunk->constants.count)
+		print_value_brief(chunk->constants.values[fn_idx]);
+	printf("\n");
+	return offset + 4;
+}
+
 void chunk_disassemble(Chunk *chunk, const char *name)
 {
 	printf("== %s ==\n", name);
@@ -256,6 +268,29 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return constant_instruction("OP_IMPORT", chunk, offset);
 	case OP_EXPORT:
 		return constant_instruction("OP_EXPORT", chunk, offset);
+	case OP_GET_GLOBAL_LONG:
+		return constant_long_instruction(
+		        "OP_GET_GLOBAL_LONG", chunk, offset);
+	case OP_DEFINE_GLOBAL_LONG:
+		return constant_long_instruction(
+		        "OP_DEFINE_GLOBAL_LONG", chunk, offset);
+	case OP_DEFINE_GLOBAL_CONST_LONG:
+		return constant_long_instruction(
+		        "OP_DEFINE_GLOBAL_CONST_LONG", chunk, offset);
+	case OP_SET_GLOBAL_LONG:
+		return constant_long_instruction(
+		        "OP_SET_GLOBAL_LONG", chunk, offset);
+	case OP_GET_FIELD_LONG:
+		return constant_long_instruction(
+		        "OP_GET_FIELD_LONG", chunk, offset);
+	case OP_SET_FIELD_LONG:
+		return constant_long_instruction(
+		        "OP_SET_FIELD_LONG", chunk, offset);
+	case OP_SET_FIELD_TOP_LONG:
+		return constant_long_instruction(
+		        "OP_SET_FIELD_TOP_LONG", chunk, offset);
+	case OP_CLOSURE_LONG:
+		return closure_long_instruction(chunk, offset);
 	default:
 		printf("Unknown opcode %d\n", instruction);
 		return offset + 1;

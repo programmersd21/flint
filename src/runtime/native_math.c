@@ -40,8 +40,8 @@ static Value fma_native(VM *vm, int argc, Value *argv)
 	(void)argc;
 	double a, b, c;
 	if (!number_arg(vm, argv[0], "fma_a", &a) ||
-	    !number_arg(vm, argv[1], "fma_b", &b) ||
-	    !number_arg(vm, argv[2], "fma_c", &c))
+	        !number_arg(vm, argv[1], "fma_b", &b) ||
+	        !number_arg(vm, argv[2], "fma_c", &c))
 		return NIL_VAL;
 	return NUMBER_VAL(fl_math_fma(a, b, c));
 }
@@ -96,7 +96,7 @@ static Value copysign_native(VM *vm, int argc, Value *argv)
 	(void)argc;
 	double x, y;
 	if (!number_arg(vm, argv[0], "copysign_x", &x) ||
-	    !number_arg(vm, argv[1], "copysign_y", &y))
+	        !number_arg(vm, argv[1], "copysign_y", &y))
 		return NIL_VAL;
 	return NUMBER_VAL(fl_math_copysign(x, y));
 }
@@ -109,8 +109,8 @@ static Value ldexp_native(VM *vm, int argc, Value *argv)
 	        !number_arg(vm, argv[1], "ldexp", &e))
 		return NIL_VAL;
 	if (!isfinite(e) || e != floor(e)) {
-		vm_runtime_error(vm,
-		        "Exponent to ldexp() must be a whole number.");
+		vm_runtime_error(
+		        vm, "Exponent to ldexp() must be a whole number.");
 		return NIL_VAL;
 	}
 	if (e > 4096)
@@ -147,14 +147,14 @@ static Value from_bits_native(VM *vm, int argc, Value *argv)
 
 void register_math_natives(VM *vm)
 {
-    vm_define_native(vm, "__floor", floor_native, 1);
-    vm_define_native(vm, "__sqrt", sqrt_native, 1);
-    vm_define_native(vm, "__fma", fma_native, 3);
-    vm_define_native(vm, "__ldexp", ldexp_native, 2);
-    vm_define_native(vm, "__logb", logb_native, 1);
-    vm_define_native(vm, "__fabs", fabs_native, 1);
-    vm_define_native(vm, "__copysign", copysign_native, 2);
-    vm_define_native(vm, "__hi32", hi32_native, 1);
-    vm_define_native(vm, "__lo32", lo32_native, 1);
-    vm_define_native(vm, "__from_bits", from_bits_native, 2);
+	vm_define_native(vm, "__floor", floor_native, 1);
+	vm_define_native(vm, "__sqrt", sqrt_native, 1);
+	vm_define_native(vm, "__fma", fma_native, 3);
+	vm_define_native(vm, "__ldexp", ldexp_native, 2);
+	vm_define_native(vm, "__logb", logb_native, 1);
+	vm_define_native(vm, "__fabs", fabs_native, 1);
+	vm_define_native(vm, "__copysign", copysign_native, 2);
+	vm_define_native(vm, "__hi32", hi32_native, 1);
+	vm_define_native(vm, "__lo32", lo32_native, 1);
+	vm_define_native(vm, "__from_bits", from_bits_native, 2);
 }

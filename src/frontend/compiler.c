@@ -277,22 +277,21 @@ static int make_constant(Value value)
 	return constant;
 }
 
-/*
- * Push a constant, picking the encoding. The 1-byte form covers 256
- * constants, which is every function anyone writes by hand, so the 3-byte
- * form only shows up in generated code.
- */
+static void emit_indexed(uint8_t short_op, uint8_t long_op, int index)
+{
+	if (index < 256) {
+		emit_bytes(short_op, (uint8_t)index);
+	} else {
+		emit_byte(long_op);
+		emit_byte((uint8_t)((index >> 16) & 0xff));
+		emit_byte((uint8_t)((index >> 8) & 0xff));
+		emit_byte((uint8_t)(index & 0xff));
+	}
+}
+
 static void emit_constant(Value value)
 {
-	int constant = make_constant(value);
-	if (constant < 256) {
-		emit_bytes(OP_CONSTANT, (uint8_t)constant);
-	} else {
-		emit_byte(OP_CONSTANT_LONG);
-		emit_byte((uint8_t)((constant >> 16) & 0xff));
-		emit_byte((uint8_t)((constant >> 8) & 0xff));
-		emit_byte((uint8_t)(constant & 0xff));
-	}
+	emit_indexed(OP_CONSTANT, OP_CONSTANT_LONG, make_constant(value));
 }
 
 /*
@@ -411,7 +410,7 @@ static void end_scope(void)
 
 /* intern a name into the constant pool. names are interned, so equality on
  * them is a pointer compare all the way down. */
-static uint8_t identifier_constant(Token *name)
+static int identifier_constant(Token *name)
 {
 	return make_constant(
 	        OBJ_VAL(copy_string(state.vm, name->start, name->length)));
@@ -575,7 +574,7 @@ static void mark_initialized(void)
  * add_local() entirely, which is why the scope check is here rather than in
  * the caller.
  */
-static uint8_t parse_variable(const char *message, bool is_const)
+static int parse_variable(const char *message, bool is_const)
 {
 	consume(TOKEN_IDENTIFIER, message);
 
@@ -596,7 +595,7 @@ static uint8_t parse_variable(const char *message, bool is_const)
  * the compiler next looks at it. That is what lets a const be written in one
  * file and assigned in another.
  */
-static void define_variable(uint8_t global, bool is_const)
+static void define_variable(int global, bool is_const)
 {
 	if (state.current->scope_depth > 0) {
 		mark_initialized();
@@ -607,11 +606,13 @@ static void define_variable(uint8_t global, bool is_const)
 		/* a separate opcode rather than a third operand byte, so the
 		 * encoding of the common `let` does not grow to pay for a
 		 * case almost no script uses */
-		emit_bytes(OP_DEFINE_GLOBAL_CONST, global);
+		emit_indexed(OP_DEFINE_GLOBAL_CONST,
+		        OP_DEFINE_GLOBAL_CONST_LONG,
+		        global);
 		return;
 	}
 
-	emit_bytes(OP_DEFINE_GLOBAL, global);
+	emit_indexed(OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_LONG, global);
 }
 
 /* forward declarations. the expression and statement parsers call each other
@@ -751,6 +752,16 @@ static void string(bool can_assign)
 	emit_constant(OBJ_VAL(str));
 }
 
+static void emit_variable_op(uint8_t op, int arg)
+{
+	if (op == OP_GET_GLOBAL)
+		emit_indexed(OP_GET_GLOBAL, OP_GET_GLOBAL_LONG, arg);
+	else if (op == OP_SET_GLOBAL)
+		emit_indexed(OP_SET_GLOBAL, OP_SET_GLOBAL_LONG, arg);
+	else
+		emit_bytes(op, (uint8_t)arg);
+}
+
 /*
  * An identifier that is not being declared. Resolves to a local, an
  * upvalue, or a global, in that order, and picks the matching get and set
@@ -783,7 +794,7 @@ static void named_variable(Token name, bool can_assign)
 			return;
 		}
 		expression();
-		emit_bytes(set_op, (uint8_t)arg);
+		emit_variable_op(set_op, arg);
 	} else if (can_assign &&
 	           (match(TOKEN_PLUS_EQUAL) || match(TOKEN_MINUS_EQUAL) ||
 	                   match(TOKEN_STAR_EQUAL) ||
@@ -796,7 +807,7 @@ static void named_variable(Token name, bool can_assign)
 		TokenType op = state.parser.previous.type;
 		/* read, modify, write. no in-place bytecode for this, so the
 		 * value is loaded, combined and stored. */
-		emit_bytes(get_op, (uint8_t)arg);
+		emit_variable_op(get_op, arg);
 		expression();
 		switch (op) {
 		case TOKEN_PLUS_EQUAL:
@@ -814,9 +825,9 @@ static void named_variable(Token name, bool can_assign)
 		default:
 			break;
 		}
-		emit_bytes(set_op, (uint8_t)arg);
+		emit_variable_op(set_op, arg);
 	} else {
-		emit_bytes(get_op, (uint8_t)arg);
+		emit_variable_op(get_op, arg);
 	}
 }
 
@@ -1051,13 +1062,13 @@ static void subscript(bool can_assign)
 static void dot(bool can_assign)
 {
 	consume(TOKEN_IDENTIFIER, "Expect field name after '.'.");
-	uint8_t name = identifier_constant(&state.parser.previous);
+	int name = identifier_constant(&state.parser.previous);
 
 	if (can_assign && match(TOKEN_EQUAL)) {
 		expression();
-		emit_bytes(OP_SET_FIELD, name);
+		emit_indexed(OP_SET_FIELD, OP_SET_FIELD_LONG, name);
 	} else {
-		emit_bytes(OP_GET_FIELD, name);
+		emit_indexed(OP_GET_FIELD, OP_GET_FIELD_LONG, name);
 	}
 }
 
@@ -1085,8 +1096,7 @@ static void table_literal(bool can_assign)
 		do {
 			consume(TOKEN_IDENTIFIER,
 			        "Expect key name in table literal.");
-			uint8_t name =
-			        identifier_constant(&state.parser.previous);
+			int name = identifier_constant(&state.parser.previous);
 			consume(TOKEN_COLON,
 			        "Expect ':' after key in table literal.");
 
@@ -1098,7 +1108,8 @@ static void table_literal(bool can_assign)
 			 * stashed anywhere to survive to the next pair.
 			 */
 			expression();
-			emit_bytes(OP_SET_FIELD_TOP, name);
+			emit_indexed(
+			        OP_SET_FIELD_TOP, OP_SET_FIELD_TOP_LONG, name);
 		} while (match(TOKEN_COMMA));
 	}
 	consume(TOKEN_RIGHT_BRACE, "Expect '}' after table literal.");
@@ -1450,8 +1461,8 @@ static void for_statement(void)
 
 		Token len_tok = {
 		        TOKEN_IDENTIFIER, "len", 3, var_name.line, false};
-		uint8_t len_const = identifier_constant(&len_tok);
-		emit_bytes(OP_GET_GLOBAL, len_const);
+		int len_const = identifier_constant(&len_tok);
+		emit_indexed(OP_GET_GLOBAL, OP_GET_GLOBAL_LONG, len_const);
 		emit_bytes(OP_GET_LOCAL, (uint8_t)list_slot);
 		emit_bytes(OP_CALL, 1);
 
@@ -1611,7 +1622,7 @@ static void statement(void)
  */
 static void fn_declaration(void)
 {
-	uint8_t global = parse_variable("Expect function name.", false);
+	int global = parse_variable("Expect function name.", false);
 	mark_initialized();
 
 	Compiler compiler;
@@ -1626,7 +1637,7 @@ static void fn_declaration(void)
 			if (state.current->function->arity > 255)
 				error_at_current(
 				        "Can't have more than 255 parameters.");
-			uint8_t param =
+			int param =
 			        parse_variable("Expect parameter name.", false);
 			define_variable(param, false);
 		} while (match(TOKEN_COMMA));
@@ -1637,7 +1648,7 @@ static void fn_declaration(void)
 
 	ObjFunction *function = end_compiler();
 	int constant = make_constant(OBJ_VAL(function));
-	emit_bytes(OP_CLOSURE, (uint8_t)constant);
+	emit_indexed(OP_CLOSURE, OP_CLOSURE_LONG, constant);
 
 	/* the upvalue descriptors, in the order OP_CLOSURE expects them */
 	for (int i = 0; i < function->upvalue_count; i++) {
@@ -1651,7 +1662,7 @@ static void fn_declaration(void)
 /* let, with or without an initializer. no initializer means nil. */
 static void let_declaration(void)
 {
-	uint8_t global = parse_variable("Expect variable name.", false);
+	int global = parse_variable("Expect variable name.", false);
 
 	if (match(TOKEN_EQUAL))
 		expression();
@@ -1666,7 +1677,7 @@ static void let_declaration(void)
  * be constant about. */
 static void const_declaration(void)
 {
-	uint8_t global = parse_variable("Expect variable name.", true);
+	int global = parse_variable("Expect variable name.", true);
 
 	consume(TOKEN_EQUAL, "Expect '=' after const name.");
 	expression();
@@ -1726,8 +1737,8 @@ static void import_declaration(void)
 
 	Token import_fn = {
 	        TOKEN_IDENTIFIER, "import_file", 11, path_token.line, false};
-	uint8_t fn_const = identifier_constant(&import_fn);
-	emit_bytes(OP_GET_GLOBAL, fn_const);
+	int fn_const = identifier_constant(&import_fn);
+	emit_indexed(OP_GET_GLOBAL, OP_GET_GLOBAL_LONG, fn_const);
 
 	const char *src = path_token.start + 1;
 	int len = path_token.length - 2;
