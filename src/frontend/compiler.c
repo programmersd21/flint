@@ -14,6 +14,7 @@
 #include "compiler.h"
 #include "chunk.h"
 #include "common.h"
+#include "diagnostic.h"
 #include "memory.h"
 #include "object.h"
 #include "scanner.h"
@@ -150,6 +151,45 @@ typedef struct {
 } CompilerState;
 
 static CompilerState state;
+static const FlSource *diag_source;
+static FlDiagFormat diag_format = FL_DIAG_LEGACY;
+static FlColorMode diag_color = FL_COLOR_AUTO;
+static const char *diag_text;
+static const char *diag_name;
+static FlDiagSuggestion fixes[64];
+static size_t fix_count;
+
+size_t compiler_fix_count(void) { return fix_count; }
+
+const FlDiagSuggestion *compiler_fix_at(size_t index)
+{
+	return index < fix_count ? &fixes[index] : NULL;
+}
+
+void compiler_set_diagnostics(
+        const FlSource *source, FlDiagFormat format, FlColorMode color)
+{
+	diag_source = source;
+	diag_format = format;
+	diag_color = color;
+}
+
+static const char *diagnostic_code(const Token *token, const char *message)
+{
+	if (token->type == TOKEN_ERROR) {
+		if (strstr(message, "Unexpected character") != NULL)
+			return "E0001";
+		if (strstr(message, "scientific notation") != NULL)
+			return "E0002";
+		if (strstr(message, "string") != NULL)
+			return "E0003";
+	}
+	if (strstr(message, "Expect ')'") != NULL ||
+	        strstr(message, "Expect '}'") != NULL ||
+	        strstr(message, "Expect ']'") != NULL)
+		return "E0102";
+	return "E0100";
+}
 
 static Chunk *current_chunk(void) { return &state.current->function->chunk; }
 
@@ -165,14 +205,66 @@ static void error_at(Token *token, const char *message)
 	if (state.parser.panic_mode)
 		return;
 	state.parser.panic_mode = true;
-
-	fprintf(stderr, "[line %d] Error", token->line);
-	if (token->type == TOKEN_EOF)
-		fprintf(stderr, " at end");
-	else if (token->type != TOKEN_ERROR)
-		fprintf(stderr, " at '%.*s'", token->length, token->start);
-
-	fprintf(stderr, ": %s\n", message);
+	if (diag_format == FL_DIAG_LEGACY) {
+		fprintf(stderr, "[line %d] Error", token->line);
+		if (token->type == TOKEN_EOF)
+			fprintf(stderr, " at end");
+		else if (token->type != TOKEN_ERROR)
+			fprintf(stderr,
+			        " at '%.*s'",
+			        token->length,
+			        token->start);
+		fprintf(stderr, ": %s\n", message);
+		state.parser.had_error = true;
+		return;
+	}
+	FlDiagSuggestion suggestion;
+	const FlDiagSuggestion *suggestions = NULL;
+	size_t suggestion_count = 0;
+	if (token->type == TOKEN_EOF &&
+	        (strstr(message, "Expect ')'") != NULL ||
+	                strstr(message, "Expect '}'") != NULL ||
+	                strstr(message, "Expect ']'") != NULL)) {
+		const char *replacement =
+		        strstr(message, "Expect ')'") != NULL   ? ")"
+		        : strstr(message, "Expect '}'") != NULL ? "}"
+		                                                : "]";
+		size_t insertion = (size_t)state.parser.previous.offset +
+		                   (size_t)state.parser.previous.length;
+		suggestion = (FlDiagSuggestion){
+		        .span = fl_span(insertion, insertion),
+		        .message = "add the missing delimiter",
+		        .replacement = replacement,
+		        .applicability = FL_APPLICABILITY_MACHINE,
+		};
+		suggestions = &suggestion;
+		suggestion_count = 1;
+		if (fix_count < sizeof(fixes) / sizeof(fixes[0]))
+			fixes[fix_count++] = suggestion;
+	}
+	FlDiagnostic diag = {
+	        .severity = FL_DIAG_ERROR,
+	        .code = diagnostic_code(token, message),
+	        .message = message,
+	        .primary = fl_span(token->offset,
+	                (size_t)token->offset + (size_t)token->length),
+	        .has_primary = true,
+	        .primary_label = token->type == TOKEN_EOF ? "expected here"
+	                                                  : "unexpected token",
+	        .suggestions = suggestions,
+	        .suggestion_count = suggestion_count,
+	};
+	FlSource source;
+	bool temporary = diag_source == NULL;
+	if (temporary) {
+		fl_source_init(&source, diag_name, diag_text);
+		diag_source = &source;
+	}
+	fl_diag_emit(stderr, &diag, diag_source, diag_format, diag_color);
+	if (temporary) {
+		fl_source_free(&source);
+		diag_source = NULL;
+	}
 	state.parser.had_error = true;
 }
 
@@ -1349,7 +1441,8 @@ static void for_statement(void)
 			        " end",
 			        4,
 			        var_name.line,
-			        false};
+			        false,
+			        var_name.offset};
 			add_local(hidden, false);
 			mark_initialized();
 
@@ -1405,15 +1498,23 @@ static void for_statement(void)
 
 		/* List iteration. The list expression is already on the
 		 * stack, so it becomes the first hidden local. */
-		Token hidden_list = {
-		        TOKEN_IDENTIFIER, " list", 5, var_name.line, false};
+		Token hidden_list = {TOKEN_IDENTIFIER,
+		        " list",
+		        5,
+		        var_name.line,
+		        false,
+		        var_name.offset};
 		add_local(hidden_list, false);
 		mark_initialized();
 
 		/* the index starts at zero */
 		emit_constant(NUMBER_VAL(0));
-		Token hidden_idx = {
-		        TOKEN_IDENTIFIER, " idx", 4, var_name.line, false};
+		Token hidden_idx = {TOKEN_IDENTIFIER,
+		        " idx",
+		        4,
+		        var_name.line,
+		        false,
+		        var_name.offset};
 		add_local(hidden_idx, false);
 		mark_initialized();
 
@@ -1448,8 +1549,12 @@ static void for_statement(void)
 		 */
 		emit_bytes(OP_GET_LOCAL, (uint8_t)idx_slot);
 
-		Token len_tok = {
-		        TOKEN_IDENTIFIER, "len", 3, var_name.line, false};
+		Token len_tok = {TOKEN_IDENTIFIER,
+		        "len",
+		        3,
+		        var_name.line,
+		        false,
+		        var_name.offset};
 		uint8_t len_const = identifier_constant(&len_tok);
 		emit_bytes(OP_GET_GLOBAL, len_const);
 		emit_bytes(OP_GET_LOCAL, (uint8_t)list_slot);
@@ -1724,8 +1829,12 @@ static void import_declaration(void)
 	Token path_token = state.parser.previous;
 	consume_terminator();
 
-	Token import_fn = {
-	        TOKEN_IDENTIFIER, "import_file", 11, path_token.line, false};
+	Token import_fn = {TOKEN_IDENTIFIER,
+	        "import_file",
+	        11,
+	        path_token.line,
+	        false,
+	        path_token.offset};
 	uint8_t fn_const = identifier_constant(&import_fn);
 	emit_bytes(OP_GET_GLOBAL, fn_const);
 
@@ -1789,6 +1898,12 @@ static void declaration(void)
  */
 ObjFunction *compile(VM *vm, const char *source)
 {
+	return compile_named(vm, source, "<source>");
+}
+
+ObjFunction *compile_named(VM *vm, const char *source, const char *name)
+{
+	fix_count = 0;
 	/*
 	 * Own the compiler state for the duration of this compile.
 	 *
@@ -1815,6 +1930,8 @@ ObjFunction *compile(VM *vm, const char *source)
 
 	state.vm = vm;
 	scanner_init(source);
+	diag_text = source;
+	diag_name = name;
 
 	Compiler compiler;
 	init_compiler(&compiler, TYPE_SCRIPT);

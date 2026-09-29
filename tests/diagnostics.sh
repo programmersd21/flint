@@ -13,7 +13,16 @@ set -e
 [ "$status" -eq 65 ]
 grep -q 'error\[E0102\]' "$tmp/human"
 grep -q 'print("x"' "$tmp/human"
-grep -q 'machine-applicable' "$tmp/human"
+# The replacement belongs on the help line, where it can be acted on. It used
+# to print as a bare "|" block followed by the delimiter and an internal
+# "applicability: machine-applicable" line, which told the reader nothing and
+# leaked metadata. Applicability is still in the JSON, where tooling wants it.
+grep -q 'help: add the missing delimiter' "$tmp/human"
+if grep -q 'applicability' "$tmp/human"; then
+	echo "internal applicability leaked into human output"
+	cat "$tmp/human"
+	exit 1
+fi
 
 set +e
 "$FLINT" --error-format=json -e 'let x =' >"$tmp/json" 2>&1
@@ -142,3 +151,48 @@ if grep -q 'did you mean' "$tmp/nosug"; then
 	cat "$tmp/nosug"
 	exit 1
 fi
+
+# --- option order ---
+#
+# flint's own options used to be recognised only *before* the script path, so
+# `flint bad.fl --error-format=human` quietly printed the old format while
+# `flint --error-format=human bad.fl` printed the new one. Two spellings of
+# one command, found the first time anybody typed it the natural way.
+
+printf 'print("x"\n' >"$tmp/bad.fl"
+
+for order in "before" "after"; do
+	if [ "$order" = before ]; then
+		out=$("$FLINT" --color=never --error-format=human "$tmp/bad.fl" 2>&1 || true)
+	else
+		out=$("$FLINT" "$tmp/bad.fl" --color=never --error-format=human 2>&1 || true)
+	fi
+	grep -q 'error\[E0102\]' <<EOF
+$out
+EOF
+done
+
+# short flags stay positional, because they are the ones a script wants for
+# itself. `flint t.fl -v` is a script asking for "-v", not a version request.
+printf 'print(args())\n' >"$tmp/args.fl"
+got=$("$FLINT" "$tmp/args.fl" -v 2>&1)
+[ "$got" = '["-v"]' ] || {
+	echo "expected -v to reach the script, got: $got"
+	exit 1
+}
+
+# `--` ends flint's scanning, for a script that really does want one of these
+# as an argument
+got=$("$FLINT" "$tmp/args.fl" -- --color=always 2>&1)
+[ "$got" = '["--color=always"]' ] || {
+	echo "expected -- to stop option scanning, got: $got"
+	exit 1
+}
+
+# a bad value is refused, with the accepted values, rather than ignored
+if "$FLINT" --error-format=bogus "$tmp/args.fl" >/dev/null 2>"$tmp/err"; then
+	echo "accepted an unknown error format"
+	exit 1
+fi
+grep -q 'human, short or json' "$tmp/err"
+
