@@ -1,5 +1,43 @@
 # releases
 
+## v0.2.0
+
+the same flint, substantially more correct. no new language, one new
+builtin, and a pile of crashes turned into errors.
+
+**runtime**
+
+- `input([prompt])`: prompt with no newline, one line, nil at eof. empty
+  line is `""`, not nil. CRLF tolerated. buffer grows, never truncates
+- `x[1.5]` is an error, not a silent truncation. non-finite, out-of-range
+  and non-numeric indices rejected with their own messages
+- string concatenation refuses to overflow instead of invoking undefined
+  behaviour. concatenation failing mid-expression no longer falls through
+  to the wrong error
+- a native that fails (len on a table, pop on empty) stops the script
+  instead of the dispatch loop reading `frames[-1]`
+
+**const**
+
+- `const x = 1; const x = 2` refused. same value twice (module re-import)
+  allowed, anything else is a contradiction
+- `let` on an existing const refused. `let` on an ordinary name still
+  overwrites. `let` promoted to `const` allowed
+- the flag survives table rehash; copied on `table_add_all` so imported
+  constants stay read-only
+
+**compiler**
+
+- parser state is one struct, saved and restored around `compile()`, so a
+  nested compile starts clean and puts the outer state back
+
+**tests**
+
+- stdin support in the runner: a `.stdin` file next to the `.fl`, `/dev/null`
+  otherwise so no test can hang on a terminal
+- coverage for input, index validation, const rules, shared upvalues,
+  gc-stress allocation, concat overflow
+
 ## v0.1.0
 
 first release. everything below is new.

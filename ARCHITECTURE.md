@@ -76,8 +76,8 @@ refuses. no runtime cost and no extra instruction.
 
 a global `const` cannot work that way, so the flag lives on the table entry
 instead. `OP_DEFINE_GLOBAL_CONST` is `OP_DEFINE_GLOBAL` with one difference:
-it passes `is_const = true` to `table_set()`, and the entry remembers it. the
-check then happens in `OP_SET_GLOBAL`, via `table_is_const()`.
+it calls `table_define_const()`, which marks the entry. the check then happens
+in `OP_SET_GLOBAL`, via `table_is_const()`.
 
 the reason it has to be the table and not the compiler is ordering. a name can
 be made const by a module that this file imported, and the import runs at
@@ -91,10 +91,16 @@ Doing it to a const would leave the entry's flag set, so the "new" binding
 would be unwritable too: the source would read as a plain `let` and the
 language would disagree.
 
+redeclaring a const with a *different* value is also refused, for the same
+reason: one of the two declarations would be a lie. the same statement
+re-executed with the same value is allowed, because importing a module runs
+its top level and the second import is not a contradiction.
+
 the flag has to survive a table rehash, since globals are rehashed as a script
 defines more names. `adjust_capacity()` copies it for that reason; without
 that, a script that declared a const and then defined twenty more names would
-quietly find the const writable.
+quietly find the const writable. `table_add_all()` carries it across module
+copy for the same reason.
 
 ## call frames and upvalues
 
@@ -125,7 +131,11 @@ roots:
 - the closure in every live `CallFrame`
 - the open upvalue list
 - the globals table
-- every `Compiler` on the chain from `vm->current_compiler`
+- every `Compiler` on the chain the compiler hands over. the four parser
+  globals (`parser`, `current`, `vm`, `loop`) live in one `CompilerState`
+  struct, and `compile()` saves it on entry and restores it on exit, so a
+  nested compile starts clean and cannot clobber the outer one. the GC walks
+  the current chain during the compile that is live right now.
 
 `mark_object()` sets the mark bit and pushes onto an explicit gray stack. the
 gray stack grows with plain `realloc`, not `fl_reallocate`, because allocating
@@ -142,6 +152,36 @@ iteratively, so object graphs of any depth do not blow the C stack.
 step 3 must happen before step 4, because the intern table holds weak
 references. sweep first and the collector reads freed memory to decide what to
 free.
+
+## indices and printing
+
+every double-to-index conversion goes through `value_to_index()`. it checks
+finiteness, integrality with `floor()` rather than a cast, and bounds by the
+container length before converting, which is what makes the negative branch
+safe: `|d| <= count` means `count + idx` cannot overflow. the same helper
+serves read and write, because one of them checked and the other not is worse
+than neither.
+
+integral doubles print with `%ld` via `fl_double_is_printable_int()`. the
+range test runs before the cast, because `1e21` overflows `int64_t` and the
+check that rejects it has to come first. one helper in `value.h`, used by the
+VM, the natives, `str()`, and the debug printer, so the four copies of the
+expression cannot drift.
+
+string concatenation checks `a->length > INT_MAX - b->length` before adding,
+and `concatenate()` reports through its return value instead of letting
+`OP_ADD` fall through and blame the operand types.
+
+## natives and the stack
+
+a native receives its arguments as a pointer into the value stack and returns
+one value. it runs on the C stack inside the caller's frame, and if it calls
+`vm_interpret()` the whole thing reenters: that is how `import` works.
+
+a native that fails reports through `vm_runtime_error()` and returns, exactly
+like one that succeeded. `OP_CALL` therefore checks the frame count after a
+native returns, because `vm_runtime_error()` has already unwound everything
+and the loop would otherwise keep executing with no frames at all.
 
 ## object types
 

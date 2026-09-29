@@ -1,6 +1,6 @@
 # flint language spec
 
-version 0.1. this is the grammar and the semantics. the implementation is not
+version 0.2. this is the grammar and the semantics. the implementation is not
 always right; when they disagree, file a bug.
 
 ## lexical
@@ -124,6 +124,11 @@ all truthy.
 - `let` on a name that is already const is an error. an ordinary global can
   be redeclared, so this has to be checked separately, and silently
   overwriting would leave the name read-only anyway
+- redeclaring a const with a different value is an error. re-running the
+  same `const` statement with the same value is not, because importing a
+  module executes its top level, and failing on the second import of any
+  module that exports a const would be absurd
+- promoting `let` to `const` is allowed; narrowing is not a contradiction
 - a closure captures enclosing locals by reference. a write inside the closure
   is visible outside it
 - a local cannot be read in its own initializer: `let a = a` is an error
@@ -139,7 +144,40 @@ and is an error otherwise. there is no implicit conversion.
 `list[i]` accepts negative indices, counting from the end. out of range is a
 runtime error. `str[i]` yields a one-character string.
 
+the index must be a finite whole number. a fractional index is not truncated:
+`xs[1.5]` is an error rather than a silent read of element 1. a value beyond
+the range of int, an infinity, a NaN, or anything that is not a number is
+rejected with its own message before any conversion happens, because a
+floating-to-integer conversion of any of those is undefined.
+
+### string concatenation
+
+`a + b` on strings whose combined length would overflow is a runtime error,
+not undefined behaviour. doubling a string each iteration reaches the limit
+in a dozen passes, so the check is not theoretical.
+
 ### tables
 
 `{ key: value }` is a table literal. `t.key` reads it, `t.key = v` writes it.
 reading a key that was never set gives `nil`. there is no delete syntax.
+
+a table literal works in any expression position. it keeps itself on the
+stack between pairs rather than in a hidden local, which is what lets
+`type({a: 1})` work: a hidden local collides with the callee already on the
+stack in a call argument.
+
+### input
+
+`input()` reads one line from stdin and returns it without the newline.
+`input("prompt")` writes the prompt first with no newline added. the prompt
+must be a string; more than one argument is an error.
+
+an empty line returns `""`. end of file returns `nil`, so a script tells
+"the user pressed enter" from "there is nothing left to read". a final line
+with no trailing newline is still a line, not nothing.
+
+CRLF is tolerated: a `\r` is skipped, so input from a windows terminal
+arrives as plain text. a line can be any length; the buffer grows.
+
+a non-string prompt and a non-zero-or-one argument count are runtime errors,
+reported the ordinary way.
