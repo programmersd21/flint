@@ -12,7 +12,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#define FLINT_VERSION "0.1.0"
+
+/*
+ * The version comes from the build, not from here. The Makefile passes
+ * -DFLINT_VERSION="$(git describe)" on every compile, so the binary always
+ * reports the tag that produced it. A version string edited by hand in this
+ * file is how v0.2.0 shipped identifying as v0.1.0, and that only needs to
+ * happen once.
+ *
+ * Building outside a git checkout (from a tarball, for example) defines
+ * nothing, so this fallback is what those binaries report.
+ */
+#ifndef FLINT_VERSION
+#define FLINT_VERSION "dev"
+#endif
 
 /*
  * Read-eval-print, one line at a time.

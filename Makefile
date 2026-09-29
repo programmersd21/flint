@@ -20,7 +20,17 @@ INCLUDES := -Isrc/core -Isrc/frontend -Isrc/runtime -Isrc/util
 # User flags go last so they can add to the baseline without being able to
 # quietly drop the parts that matter.
 CFLAGS ?=
-ALL_CFLAGS := $(STD) $(WARN) $(INCLUDES) $(CFLAGS)
+
+# The version is the tag, read at build time. `git describe` gives
+# "v0.2.0", or "v0.2.0-3-gabc1234" a few commits after it, or "abc1234"
+# with no tags at all. Outside a git tree (a tarball build) there is
+# nothing to read and the fallback in main.c reports "dev".
+#
+# The escaped quotes survive make and the shell so the compiler receives a
+# string literal. Without them -D hands the preprocessor a bare token and
+# the build fails in a way that looks nothing like a quoting problem.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+ALL_CFLAGS := $(STD) $(WARN) $(INCLUDES) $(CFLAGS) -DFLINT_VERSION="\"$(VERSION)\""
 
 SRCDIRS := src src/core src/frontend src/runtime src/util
 
