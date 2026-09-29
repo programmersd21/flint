@@ -163,6 +163,12 @@ typedef struct {
 	Compiler *current; /* innermost function being compiled */
 	VM *vm; /* for allocation, and the GC's view */
 	LoopContext *loop; /* innermost loop, for break and continue */
+
+	/* repl echo: leave an expression statement's value on the stack
+	 * rather than popping it, so `1 + 2` can answer. see
+	 * expression_statement() */
+	bool echo_repl_value;
+	bool left_value_on_stack;
 } CompilerState;
 
 static CompilerState state;
@@ -179,6 +185,15 @@ size_t compiler_fix_count(void) { return fix_count; }
 const FlDiagSuggestion *compiler_fix_at(size_t index)
 {
 	return index < fix_count ? &fixes[index] : NULL;
+}
+
+void compiler_repl_echo(bool on) { state.echo_repl_value = on; }
+
+bool compiler_repl_value(void)
+{
+	bool left = state.left_value_on_stack;
+	state.left_value_on_stack = false;
+	return left;
 }
 
 void compiler_set_diagnostics(
@@ -200,7 +215,7 @@ static const char *diagnostic_code(const Token *token, const char *message)
 			return "E0003";
 	}
 	if (strstr(message, "expect ')'") != NULL ||
-	        strstr(message, "Expect '}'") != NULL ||
+	        strstr(message, "expect '}'") != NULL ||
 	        strstr(message, "expect ']'") != NULL)
 		return "E0102";
 	return "E0100";
@@ -246,25 +261,50 @@ static void error_at(Token *token, const char *message)
 			        token->start);
 		fprintf(stderr, ": %s\n", message);
 		state.parser.had_error = true;
+		state.parser.error_count++;
 		return;
 	}
 	FlDiagSuggestion suggestion;
 	const FlDiagSuggestion *suggestions = NULL;
 	size_t suggestion_count = 0;
-	if (token->type == TOKEN_EOF &&
-	        (strstr(message, "expect ')'") != NULL ||
-	                strstr(message, "Expect '}'") != NULL ||
-	                strstr(message, "expect ']'") != NULL)) {
-		const char *replacement =
-		        strstr(message, "expect ')'") != NULL   ? ")"
-		        : strstr(message, "Expect '}'") != NULL ? "}"
-		                                                : "]";
-		size_t insertion = (size_t)state.parser.previous.offset +
-		                   (size_t)state.parser.previous.length;
+
+	/*
+	 * A missing delimiter is a problem with the token *before* it, not
+	 * with whatever token the parser happened to be holding. The
+	 * insertion point is the end of the previous token, which is where
+	 * the delimiter belongs.
+	 *
+	 * Offering a fix used to be restricted to end of file, on the
+	 * reasoning that a delimiter is missing "at the end". That was
+	 * wrong: the common case is a missing brace in the middle of a
+	 * function, and it got neither the right span nor a fix. This is a
+	 * property of the *message*, not of where the parser ran out of
+	 * input.
+	 */
+	const char *delimiter = NULL;
+	if (strstr(message, "expect ')'") != NULL)
+		delimiter = ")";
+	else if (strstr(message, "expect '}'") != NULL)
+		delimiter = "}";
+	else if (strstr(message, "expect ']'") != NULL)
+		delimiter = "]";
+
+	size_t start = token->offset;
+	size_t len = (size_t)token->length;
+	const char *label =
+	        token->type == TOKEN_EOF ? "expected here" : "unexpected token";
+
+	if (delimiter != NULL) {
+		Token *prev = &state.parser.previous;
+		if (prev->type != TOKEN_EOF) {
+			start = (size_t)prev->offset + (size_t)prev->length;
+			len = 0;
+			label = "expected here";
+		}
 		suggestion = (FlDiagSuggestion){
-		        .span = fl_span(insertion, insertion),
+		        .span = fl_span(start, start + len),
 		        .message = "add the missing delimiter",
-		        .replacement = replacement,
+		        .replacement = delimiter,
 		        .applicability = FL_APPLICABILITY_MACHINE,
 		};
 		suggestions = &suggestion;
@@ -272,40 +312,6 @@ static void error_at(Token *token, const char *message)
 		if (fix_count < sizeof(fixes) / sizeof(fixes[0]))
 			fixes[fix_count++] = suggestion;
 	}
-	/*
-	 * A missing delimiter is a problem with the token *before* it, not
-	 * with whatever token the parser happened to be looking at.
-	 *
-	 * `print("x"` with the closing paren left off was reported at the
-	 * end of file, so the caret sat on line 2 pointing at nothing, two
-	 * lines below the code that is actually wrong. The insertion point
-	 * is the end of the previous token, which is where the `)` belongs.
-	 *
-	 * Only for EOF and for the delimiter messages. An ordinary
-	 * "unexpected token" really is about the token in hand, and moving
-	 * that would point at the wrong place.
-	 */
-	bool missing_delimiter =
-	        token->type == TOKEN_EOF &&
-	        (strstr(message, "expect ')'") != NULL ||
-	                strstr(message, "Expect '}'") != NULL ||
-	                strstr(message, "expect ']'") != NULL ||
-	                strstr(message, "expect ';'") != NULL ||
-	                strstr(message, "expect ','") != NULL);
-	size_t start = token->offset;
-	size_t len = (size_t)token->length;
-	const char *label =
-	        token->type == TOKEN_EOF ? "expected here" : "unexpected token";
-
-	if (missing_delimiter) {
-		Token *prev = &state.parser.previous;
-		if (prev->type != TOKEN_EOF) {
-			start = (size_t)prev->offset + (size_t)prev->length;
-			len = 0;
-			label = "expected here";
-		}
-	}
-
 	FlDiagnostic diag = {
 	        .severity = FL_DIAG_ERROR,
 	        .code = diagnostic_code(token, message),
@@ -1326,7 +1332,7 @@ static void table_literal(bool can_assign)
 			emit_bytes(OP_SET_FIELD_TOP, name);
 		} while (match(TOKEN_COMMA));
 	}
-	consume(TOKEN_RIGHT_BRACE, "Expect '}' after table literal.");
+	consume(TOKEN_RIGHT_BRACE, "expect '}' after table literal.");
 }
 
 /*
@@ -1423,7 +1429,7 @@ static void block(void)
 {
 	while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF))
 		declaration();
-	consume(TOKEN_RIGHT_BRACE, "Expect '}' after block.");
+	consume(TOKEN_RIGHT_BRACE, "expect '}' after block.");
 }
 
 /*
@@ -1471,7 +1477,7 @@ static void if_statement(void)
 	int then_jump = emit_jump(OP_JUMP_IF_FALSE);
 	emit_byte(OP_POP); /* the condition, on the then path */
 
-	consume(TOKEN_LEFT_BRACE, "Expect '{' after if condition.");
+	consume(TOKEN_LEFT_BRACE, "expect '{' after if condition.");
 	begin_scope();
 	block();
 	end_scope();
@@ -1484,7 +1490,7 @@ static void if_statement(void)
 		if (match(TOKEN_IF)) {
 			if_statement(); /* else if, recursively */
 		} else {
-			consume(TOKEN_LEFT_BRACE, "Expect '{' after else.");
+			consume(TOKEN_LEFT_BRACE, "expect '{' after else.");
 			begin_scope();
 			block();
 			end_scope();
@@ -1515,7 +1521,7 @@ static void while_statement(void)
 	int exit_jump = emit_jump(OP_JUMP_IF_FALSE);
 	emit_byte(OP_POP);
 
-	consume(TOKEN_LEFT_BRACE, "Expect '{' after while condition.");
+	consume(TOKEN_LEFT_BRACE, "expect '{' after while condition.");
 	begin_scope();
 	block();
 	end_scope();
@@ -1602,7 +1608,7 @@ static void for_statement(void)
 			emit_byte(OP_POP);
 
 			consume(TOKEN_LEFT_BRACE,
-			        "Expect '{' after for range.");
+			        "expect '{' after for range.");
 			begin_scope();
 			block();
 			end_scope();
@@ -1706,7 +1712,7 @@ static void for_statement(void)
 		emit_byte(OP_POP);
 
 		consume(TOKEN_LEFT_BRACE,
-		        "Expect '{' after for-in expression.");
+		        "expect '{' after for-in expression.");
 		begin_scope();
 		block();
 		end_scope();
@@ -1798,10 +1804,31 @@ static void return_statement(void)
 }
 
 /* an expression statement. the result is discarded, so it is popped. */
+/*
+ * An expression used as a statement.
+ *
+ * In a script the value is thrown away, which is what OP_POP is for. At the
+ * repl it is not thrown away: a person who types `1 + 2` is asking what the
+ * answer is, and a repl that says nothing is a calculator with the screen
+ * off. So in echo mode the POP is left off and the value is left on the
+ * stack for the caller to print.
+ *
+ * The flag is checked against the script's own function, not "depth 0",
+ * because a nested function inside the repl input is a statement, not
+ * something to echo.
+ */
 static void expression_statement(void)
 {
 	expression();
 	consume_terminator();
+	if (state.echo_repl_value && state.current->type == TYPE_SCRIPT) {
+		state.left_value_on_stack = true;
+		/* return it rather than discarding it and falling out
+		 * through emit_return, which would push nil on top and
+		 * the repl would print nil every time. */
+		emit_byte(OP_RETURN);
+		return;
+	}
 	emit_byte(OP_POP);
 }
 
@@ -1870,7 +1897,7 @@ static void fn_declaration(void)
 		} while (match(TOKEN_COMMA));
 	}
 	consume(TOKEN_RIGHT_PAREN, "expect ')' after parameters.");
-	consume(TOKEN_LEFT_BRACE, "Expect '{' before function body.");
+	consume(TOKEN_LEFT_BRACE, "expect '{' before function body.");
 	block();
 
 	ObjFunction *function = end_compiler();
@@ -1906,7 +1933,7 @@ static void const_declaration(void)
 {
 	uint8_t global = parse_variable("expect variable name.", true);
 
-	consume(TOKEN_EQUAL, "Expect '=' after const name.");
+	consume(TOKEN_EQUAL, "expect '=' after const name.");
 	expression();
 	consume_terminator();
 
@@ -2054,11 +2081,17 @@ ObjFunction *compile_named(VM *vm, const char *source, const char *name)
 	 * a few hundred bytes and about forty instructions.
 	 */
 	CompilerState saved = state;
+	/* echo mode is set by the repl before it calls in, and it is a
+	 * mode rather than per-compile state, so it has to survive the
+	 * save/restore below. left_value_on_stack is the per-compile
+	 * result and deliberately does not. */
+	bool echo_mode = state.echo_repl_value;
 
 	/* a fresh compile does not inherit the previous one's error state */
 	state.parser.had_error = false;
 	state.parser.error_count = 0;
 	state.parser.suppressed = false;
+	state.left_value_on_stack = false;
 	state.parser.panic_mode = false;
 	state.loop = NULL;
 	state.current = NULL;
@@ -2105,7 +2138,10 @@ ObjFunction *compile_named(VM *vm, const char *source, const char *name)
 	 * already a live heap object, so dropping the compiler chain does
 	 * not lose it: the caller roots it on the next line.
 	 */
+	bool left_value = state.left_value_on_stack;
 	state = saved;
+	state.echo_repl_value = echo_mode;
+	state.left_value_on_stack = left_value;
 
 	return failed ? NULL : function;
 }

@@ -24,4 +24,18 @@ const FlDiagSuggestion *compiler_fix_at(size_t index);
 /* called by the GC to mark functions that are still being compiled. */
 void compiler_mark_roots(VM *vm);
 
+/*
+ * Repl echo.
+ *
+ * In a script, `1 + 2` on its own is an expression statement: it is
+ * evaluated and the value thrown away, because a script that printed every
+ * bare expression would be unusable. At a repl the person typing it is asking
+ * for the answer, so the value is left on the stack for the caller.
+ *
+ * compiler_repl_echo turns that on. compiler_repl_value then reports whether
+ * the last compile left something to print, and clears the flag.
+ */
+void compiler_repl_echo(bool on);
+bool compiler_repl_value(void);
+
 #endif /* FL_COMPILER_H */

@@ -581,6 +581,7 @@ void vm_init(VM *vm)
 	vm->source_text = NULL;
 	vm->source_name = "<source>";
 	vm->warnings = FL_WARN_DEFAULT;
+	vm->repl_leaves_value = false;
 	vm->diag_format = FL_DIAG_LEGACY;
 	vm->diag_color = FL_COLOR_AUTO;
 
@@ -607,6 +608,15 @@ void vm_set_diagnostics(VM *vm, FlDiagFormat format, FlColorMode color)
 	vm->diag_format = format;
 	vm->diag_color = color;
 	compiler_set_diagnostics(NULL, format, color);
+}
+
+bool vm_pop_value(VM *vm, Value *out)
+{
+	if (vm->stack_top <= vm->stack)
+		return false;
+	vm->stack_top--;
+	*out = *vm->stack_top;
+	return true;
 }
 
 void vm_free(VM *vm)
@@ -684,6 +694,11 @@ static void print_flint_value(Value value)
 		printf("\n");
 	}
 }
+
+/* formats any value the way print() does, plus a newline. the repl needs it,
+ * and duplicating the number formatting would be a second copy of the rule that
+ * fixes a floating-to-integer cast. */
+void vm_print_value(Value value) { print_flint_value(value); }
 
 /*
  * Push a frame for a flint function. The callee and its arguments are already
@@ -1278,11 +1293,20 @@ static InterpretResult run(VM *vm, int base_frame)
 			close_upvalues(vm, frame->slots);
 			vm->frame_count--;
 			if (vm->frame_count == base_frame) {
-				/* the frame this run() started with. pop its
-				 * closure and stop: there is no caller inside this
-				 * run() to return to, even though the VM may
-				 * still hold frames from an outer script. */
-				vm_pop(vm);
+				/* the frame this run() started with, and there
+				 * is no caller inside this run() to return to.
+				 *
+				 * the closure sits at frame->slots, and the
+				 * result was just popped from above it. when a
+				 * repl asked for the result to be left on the
+				 * stack, frame->slots is the wrong thing to pop,
+				 * so the value goes back and the stack is left
+				 * as the caller expects. */
+				if (vm->repl_leaves_value) {
+					vm_push(vm, result);
+				} else {
+					vm_pop(vm);
+				}
 				return INTERPRET_OK;
 			}
 
@@ -1637,7 +1661,16 @@ InterpretResult vm_interpret_named(VM *vm, const char *source, const char *name)
 	 * the same position for the caller that is about to do its own
 	 * arithmetic on it.
 	 */
-	vm->stack_top = base_top;
+	/*
+	 * The repl is the one case where the stack is deliberately not
+	 * restored: it asked for the value of the last expression and
+	 * OP_RETURN left it above the frame's closure. handing back
+	 * base_top here would throw away the answer the repl is about
+	 * to print, and a repl that throws away the answer is the
+	 * thing this whole path exists to avoid.
+	 */
+	if (!vm->repl_leaves_value)
+		vm->stack_top = base_top;
 	vm->frame_count = base_frame;
 
 	/*

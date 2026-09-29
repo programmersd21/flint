@@ -8,6 +8,7 @@
  * 74 could not read the file.
  */
 #include "sys.h"
+#include "value.h"
 #include "vm.h"
 #include "compiler.h"
 #include "diagnostic.h"
@@ -36,9 +37,56 @@
  * cleaner loses track through sys.h, which also pulls vm.h in, and reports
  * the first use rather than the header. */
 /* NOLINTNEXTLINE(misc-include-cleaner) */
-static void repl(VM *vm)
+/*
+ * The welcome. Short, and it says what to type next.
+ *
+ * A repl that opens to a bare cursor tells a first-time user nothing and
+ * gives an experienced one nothing either. This is the same bargain python
+ * makes, minus the colour, and the reason to bother is that the most
+ * common way a new person meets a language is by typing at a prompt.
+ */
+static void print_banner(VM *vm)
 {
+	if (vm->quiet)
+		return;
+	printf("flint %s\n", FLINT_VERSION);
+	printf("a small scripting language. type an expression and press "
+	       "enter.\n");
+	printf(":help for what works here, ctrl-d to leave.\n\n");
+}
+
+/* the repl's own commands, kept short because they are not the language */
+static void repl_help(void)
+{
+	printf("\n");
+	printf("  :help      this text\n");
+	printf("  :quit      leave, same as ctrl-d\n");
+	printf("\n");
+	printf("  each line is its own script. state carries over through\n");
+	printf("  globals, so `x = 1` then `x + 1` works. a block that is\n");
+	printf("  not closed yet is a syntax error; there is no multi-line\n");
+	printf("  input, which is a real limitation and not a design "
+	       "choice.\n");
+	printf("\n");
+	printf("  try:\n");
+	printf("    1 + 2\n");
+	printf("    let xs = [1, 2, 3]\n");
+	printf("    for x in xs { print(x * 2) }\n");
+	printf("    split(\"a,b,c\", \",\")\n");
+	printf("\n");
+}
+
+/*
+ * The repl. Returns the worst result any line produced, so that a session
+ * which failed somewhere still exits non-zero. A script that fails exits 70;
+ * a repl that swallowed that would report success for a session that clearly
+ * did not, and a shell has no other way to know.
+ */
+static int repl(VM *vm)
+{
+	int worst = 0;
 	char line[1024];
+	print_banner(vm);
 	for (;;) {
 		if (!vm->quiet)
 			printf("> ");
@@ -52,8 +100,47 @@ static void repl(VM *vm)
 			break;
 		}
 
-		vm_interpret(vm, line);
+		/* a leading colon is a repl command, not flint, so it
+		 * cannot collide with a variable or a keyword */
+		const char *typed = line;
+		while (*typed == ' ' || *typed == '\t')
+			typed++;
+		if (*typed == ':') {
+			if (strcmp(typed, ":help\n") == 0 ||
+			        strcmp(typed, ":help\r\n") == 0)
+				repl_help();
+			else if (strncmp(typed, ":q", 2) == 0)
+				break;
+			else
+				printf("unknown command. try :help\n");
+			continue;
+		}
+
+		/*
+		 * Echo mode, and it is on for the repl only. In a script
+		 * `1 + 2` is an expression statement whose value is
+		 * thrown away, which is right for a script. Here the
+		 * person typing is asking for the answer, so the value is
+		 * left on the stack and printed below.
+		 */
+		compiler_repl_echo(true);
+		vm->repl_leaves_value = true;
+		InterpretResult r = vm_interpret(vm, line);
+		vm->repl_leaves_value = false;
+		compiler_repl_echo(false);
+
+		/* a line that failed leaves the session running, but it is
+		 * still a failure, and a shell has no other way to know */
+		if (r != INTERPRET_OK)
+			worst = 70;
+
+		if (r == INTERPRET_OK && compiler_repl_value()) {
+			Value v;
+			if (vm_pop_value(vm, &v))
+				vm_print_value(v);
+		}
 	}
+	return worst;
 }
 
 /* slurp a whole file. the caller frees the result. */
@@ -684,8 +771,9 @@ int main(int argc, char *argv[])
 	vm.warnings = warnings;
 	vm.quiet = quiet;
 
+	int worst = 0;
 	if (arg == argc) {
-		repl(&vm);
+		worst = repl(&vm);
 	} else {
 		/* one path plus any number of arguments. the arguments belong
 		 * to the script, not to flint, so they are not parsed here:
@@ -697,5 +785,5 @@ int main(int argc, char *argv[])
 
 	vm_free(&vm);
 	sys_free_args();
-	return 0;
+	return worst;
 }

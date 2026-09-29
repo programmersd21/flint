@@ -251,6 +251,30 @@ process spawning beyond `exec`, and no regex. each is a portability question
 or a design argument, and the answer so far has been no. see
 [docs/library.md](docs/library.md) for the full list and the reasoning.
 
+### the repl
+
+```sh
+flint
+```
+
+```
+flint v0.3.0
+a small scripting language. type an expression and press enter.
+:help for what works here, ctrl-d to leave.
+
+> 1 + 2
+3
+> let x = 5
+> x * 2
+10
+> [1, 2, 3]
+[1, 2, 3]
+```
+
+an expression prints its value, a statement does not, and an error does not
+end the session. one line at a time, so an unclosed block is a syntax error.
+`--quiet` drops the banner and the prompt for piping.
+
 ### errors
 
 the default output is one line per error, and it is what scripts that compare

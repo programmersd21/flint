@@ -108,6 +108,26 @@ error[E0201]: variable `x` is already defined in this scope
   = error: could not compile due to 1 error
 ```
 
+### fixing what can be fixed
+
+`--fix` applies edits that are marked machine-applicable, checks for
+overlapping ranges, validates that the result compiles, and replaces a regular
+file through a temporary in the same directory. It does not follow a symlink.
+
+The offer is generated from the message, not from where the parser ran out of
+input. That distinction was the whole bug for a while: a missing `)` at end of
+file got a fix, and a missing `}` in the middle of a function — which is the
+common case — got neither a fix nor the right span.
+
+```
+$ flint t.fl --fix
+fixed: t.fl (1 edit)
+```
+
+A fix that cannot be applied with certainty is not offered as one. Where a
+suggestion exists but is not machine-applicable, human output says so, because
+`--fix` will skip it and the reader would otherwise wonder why.
+
 ### where a diagnostic points
 
 A missing delimiter is reported at the end of the token before it, which is
@@ -143,3 +163,49 @@ successful run does not read it, so it costs nothing on the path that matters.
 
 Run `make diagnostic-test` for format and compatibility checks. `make test`
 continues to cover the language behavior and the default output.
+
+## the repl
+
+The repl is line at a time, and each line is its own script. State carries over
+through globals, and an error does not end the session.
+
+An expression prints its value and a statement does not, which is the
+distinction every repl makes and the one a first-time user expects:
+
+```
+$ flint
+flint v0.3.0
+a small scripting language. type an expression and press enter.
+:help for what works here, ctrl-d to leave.
+
+> 1 + 2
+3
+> "hi"
+hi
+> let x = 5
+> x * 2
+10
+> [1, 2, 3]
+[1, 2, 3]
+> nope
+undefined variable 'nope'.
+[line 1] in script
+> 1 + 1
+2
+```
+
+`1 + 2` in a script is an expression *statement*: evaluated, then thrown away,
+which is right for a script. At a repl the person typing it is asking for the
+answer, and a repl that says nothing is a calculator with the screen off. So
+the compiler leaves the value on the stack in repl mode and the repl prints it.
+
+A session in which any line failed exits 70, even though the session carried
+on. A shell has no other way to know.
+
+There is no multi-line input: a block that is not closed yet is a syntax error.
+That is a real limitation, not a design choice, and `:help` says so.
+
+`--quiet` removes the banner and the prompt, for piping.
+
+`:help` lists the commands and the same limitation. `:quit` leaves, same as
+ctrl-d.

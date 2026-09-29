@@ -20,14 +20,29 @@ that reads stdin, calls a program, and writes a line is the whole toolchain.
 
 - rustc-style errors, opt in: `--error-format=human|short|json`
 - stable codes by origin, `--explain E0102`, `--color=`
-- `--fix` for machine-applicable closing-delimiter insertions
+- `--fix` for machine-applicable closing-delimiter insertions, now offered for
+  a missing delimiter anywhere and not only at end of file
+- secondary spans: a redeclaration shows where the name was first defined
+- more than one error per file, with a count, capped at 20
+- every message lowercase, matching the rest of the repository
+- `--quiet` and `--warnings=default|none|all`
+- `did you mean` for a misspelled name, including keywords, which are not
+  globals and were therefore never suggested before
 - JSON includes source spans and structured delimiter replacements; runtime
-  spans currently identify the executing line
+  spans underline the failing expression rather than the whole line
 
 **new: cli**
 
 - `flint -` reads a script from stdin, next to `-e` and the repl
 - `flint script.fl args...` passes everything after the script to the script
+
+**the repl**
+
+- opens with the version and what to type, instead of a bare cursor
+- `:help` and `:quit`
+- an expression prints its value and a statement does not, which is what makes
+  a repl a repl and not a shell with an `eval` in it
+- a session where a line failed exits 70, even though the session carried on
 
 **modules**
 
@@ -54,14 +69,14 @@ method in [bench/RESULTS.md](bench/RESULTS.md).
 
 | case | flint | python | |
 |---|---|---|---|
-| startup | 0.41 ms | 10.6 ms | **26x** |
-| hello | 0.57 ms | 10.1 ms | **18x** |
-| arith | 1.39 s | 2.62 s | **1.88x** |
-| closures | 107 ms | 203 ms | **1.89x** |
-| lists | 119 ms | 196 ms | **1.65x** |
-| fib | 19.2 ms | 31.6 ms | **1.64x** |
-| calls | 178 ms | 266 ms | **1.49x** |
-| strings | 160 ms | 61 ms | **0.38x** |
+| startup | 0.47 ms | 11.1 ms | **23x** |
+| hello | 0.54 ms | 8.9 ms | **17x** |
+| arith | 1.36 s | 2.55 s | **1.88x** |
+| lists | 107 ms | 198 ms | **1.85x** |
+| fib | 15.0 ms | 26.4 ms | **1.75x** |
+| calls | 168 ms | 265 ms | **1.58x** |
+| closures | 114 ms | 173 ms | **1.52x** |
+| strings | 148 ms | 64 ms | **0.43x** |
 
 startup is the result that matters for this language. the others are honest
 but modest, and `strings` is a loss that stays in the table.

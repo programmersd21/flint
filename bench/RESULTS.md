@@ -11,20 +11,20 @@ Best of 7 runs, wall clock.
 
 | case      | flint    | python   | python/flint |
 |-----------|----------|----------|--------------|
-| startup   | 0.41 ms  | 10.6 ms  | **26.2x**    |
-| hello     | 0.57 ms  | 10.1 ms  | **17.8x**    |
-| arith     | 1.39 s   | 2.62 s   | **1.88x**    |
-| closures  | 107.5 ms | 202.9 ms | **1.89x**    |
-| calls     | 178.3 ms | 265.8 ms | **1.49x**    |
-| lists     | 118.6 ms | 196.2 ms | **1.65x**    |
-| fib       | 19.2 ms  | 31.6 ms  | **1.64x**    |
-| strings   | 159.8 ms | 60.7 ms  | **0.38x**    |
+| startup   | 0.47 ms  | 11.1 ms  | **23.4x**    |
+| hello     | 0.54 ms  | 8.9 ms   | **16.6x**    |
+| arith     | 1.36 s   | 2.55 s   | **1.88x**    |
+| lists     | 107.4 ms | 198.4 ms | **1.85x**    |
+| fib       | 15.0 ms  | 26.4 ms  | **1.75x**    |
+| calls     | 168.0 ms | 264.7 ms | **1.58x**    |
+| closures  | 113.9 ms | 173.4 ms | **1.52x**    |
+| strings   | 147.6 ms | 63.8 ms  | **0.43x**    |
 
-flint binary: 117 KB, linked against nothing but libc.
+flint binary: 125 KB, linked against nothing but libc.
 
 ## what is actually true
 
-**Startup is the real win and it is not close.** 26x on an empty program. A
+**Startup is the real win and it is not close.** 23x on an empty program. A
 shell pipeline pays this on every invocation, so it bounds what a small script
 can cost. Nothing else in this table matters as much for the work flint is
 aimed at.
@@ -41,7 +41,7 @@ double-boxing cost is real but smaller than CPython's per-operation dispatch,
 so it never surfaces as a deficit. The prediction was wrong and the
 measurement overrules it.
 
-**strings is an honest loss: CPython is 2.6x faster.** This is the one to
+**strings is an honest loss: CPython is 2.3x faster.** This is the one to
 be uncomfortable about, so it is here in full.
 
 The `strings` case is mostly *not* measuring the string primitives. Timing

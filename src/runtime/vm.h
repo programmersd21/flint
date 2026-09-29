@@ -68,6 +68,11 @@ struct VM {
 	const char *source_name;
 	FlWarnMode warnings;
 	bool quiet; /* suppress the repl prompt */
+	/* the repl asked for an expression statement's value to be left on
+	 * the stack. it changes what OP_RETURN does at the base frame,
+	 * where the value sits above the frame's closure rather than
+	 * being the thing the return pops. */
+	bool repl_leaves_value;
 	FlDiagFormat diag_format;
 	FlColorMode diag_color;
 
@@ -107,6 +112,19 @@ struct VM {
 
 void vm_init(VM *vm);
 void vm_free(VM *vm);
+
+/*
+ * Pop and return the top of the value stack, or false if it is empty.
+ *
+ * This exists for the repl. It hands out a raw Value, which the caller must
+ * treat as unrooted: any allocation before it is pushed again could collect it.
+ * The repl prints and does nothing else, which is safe. Anything more should
+ * push it straight back.
+ */
+bool vm_pop_value(VM *vm, Value *out);
+
+/* format any value the way print() does, plus a newline. for the repl. */
+void vm_print_value(Value value);
 void vm_set_diagnostics(VM *vm, FlDiagFormat format, FlColorMode color);
 
 /* compile and run. the entry point for the repl, files and modules alike. */

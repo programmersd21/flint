@@ -358,3 +358,142 @@ then
 	exit 1
 fi
 
+
+# --- --fix ---
+#
+# --fix only ever applied a fix when the missing delimiter was at end of file.
+# The common case is a missing brace in the middle of a function, and that got
+# neither a fix nor the right span. Two bugs with the same cause: the offer was
+# gated on the token being EOF, and the matcher compared "Expect '}'" against a
+# message that had since been lowercased to "expect '}'", so only `)` ever
+# matched at all.
+
+printf 'fn f() {\n    let a = 1\n' >"$tmp/brace.fl"
+cp "$tmp/brace.fl" "$tmp/brace.orig"
+"$FLINT" --color=never "$tmp/brace.fl" --fix >"$tmp/fixout" 2>&1 || true
+if cmp -s "$tmp/brace.fl" "$tmp/brace.orig"; then
+	echo "--fix did not add a missing closing brace"
+	cat "$tmp/fixout"
+	exit 1
+fi
+# the fixed file must actually compile, which is the whole point of a fix
+if ! "$FLINT" "$tmp/brace.fl" >/dev/null 2>&1; then
+	echo "--fix produced a file that still does not compile"
+	cat "$tmp/brace.fl"
+	exit 1
+fi
+
+# the fix lands at the end of the previous token, not at the parser's position
+out=$("$FLINT" --color=never --error-format=short "$tmp/brace.orig" 2>&1 || true)
+grep -q "brace.orig:2:" <<EOF
+$out
+EOF
+
+# --- error counts ---
+#
+# The legacy format set had_error without incrementing the counter, so the
+# summary said "due to 0 errors" directly under three errors it had just
+# printed. A summary that contradicts the lines above it is worse than none.
+
+printf 'let x =\n' >"$tmp/one.fl"
+for fmt in short human; do
+	out=$("$FLINT" --color=never --error-format=$fmt "$tmp/one.fl" 2>&1 || true)
+	grep -q 'due to 1 error' <<EOF
+$out
+EOF
+done
+# and the default format, which is the one people actually run
+out=$("$FLINT" "$tmp/one.fl" 2>&1 || true)
+grep -q 'due to 1 error' <<EOF
+$out
+EOF
+
+# --- the repl ---
+#
+# It opened to a bare cursor, which tells a first-time user nothing. It now
+# says what it is and what to type, and :help explains the one limitation
+# that surprises people, which is that an unclosed block is an error.
+
+out=$(printf ':help\n' | "$FLINT" 2>&1)
+grep -q 'flint' <<EOF
+$out
+EOF
+grep -q ':quit' <<EOF
+$out
+EOF
+grep -q 'multi-line' <<EOF
+$out
+EOF
+
+# --quiet must print neither banner nor prompt
+out=$(printf 'print(1)\n' | "$FLINT" --quiet 2>&1)
+[ "$out" = "1" ] || {
+	echo "expected just 1 from --quiet, got: $out"
+	exit 1
+}
+
+# and the repl still keeps state across lines
+out=$(printf 'let x = 40\nprint(x + 2)\n' | "$FLINT" --quiet 2>&1)
+[ "$out" = "42" ] || {
+	echo "repl lost state between lines, got: $out"
+	exit 1
+}
+
+
+# --- the repl echoes expressions ---
+#
+# `1 + 2` in a script is an expression statement: evaluated, then thrown away,
+# which is right for a script. At a repl the person typing it is asking for the
+# answer, and a repl that says nothing is a calculator with the screen off.
+
+out=$(printf '1 + 2\n' | "$FLINT" --quiet 2>&1)
+[ "$out" = "3" ] || {
+	echo "expected the repl to echo 3, got: $out"
+	exit 1
+}
+out=$(printf '"hi"\n' | "$FLINT" --quiet 2>&1)
+[ "$out" = "hi" ] || {
+	echo "expected a string to echo bare, got: $out"
+	exit 1
+}
+out=$(printf '[1, 2, 3]\n' | "$FLINT" --quiet 2>&1)
+[ "$out" = "[1, 2, 3]" ] || {
+	echo "expected a list to echo as itself, got: $out"
+	exit 1
+}
+
+# a statement is not an expression and must not print anything
+out=$(printf 'let x = 5\n' | "$FLINT" --quiet 2>&1)
+[ -z "$out" ] || {
+	echo "a let should print nothing, got: $out"
+	exit 1
+}
+out=$(printf 'print(7)\n' | "$FLINT" --quiet 2>&1)
+[ "$out" = "7" ] || {
+	echo "print should print exactly once, got: $out"
+	exit 1
+}
+
+# state carries across lines, and an error does not end the session
+out=$(printf 'let x = 5\nx * 2\n' | "$FLINT" --quiet 2>&1)
+[ "$out" = "10" ] || {
+	echo "repl lost state, got: $out"
+	exit 1
+}
+out=$(set +e; printf 'nope\n1 + 1\n' | "$FLINT" --quiet 2>&1 | tail -1)
+[ "$out" = "2" ] || {
+	echo "an error should not end the repl, got: $out"
+	exit 1
+}
+
+# and the exit code is still 70 when a line failed, so a shell can tell.
+# set +e because the failure is the point and `set -e` would abort on it.
+set +e
+printf 'nope\n' | "$FLINT" --quiet >/dev/null 2>&1
+repl_status=$?
+set -e
+[ "$repl_status" -eq 70 ] || {
+	echo "expected exit 70 from a failing repl line, got $repl_status"
+	exit 1
+}
+
