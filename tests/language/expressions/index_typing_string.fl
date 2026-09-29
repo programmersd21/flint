@@ -1,0 +1,11 @@
+# String indexing shares the list's validation, including the silent
+# truncation: "hello"[1.5] used to return "e".
+let s = "hello"
+
+# the valid ones first
+print(s[0])
+print(s[4])
+print(s[-1])
+
+# then the first invalid one
+print(s[1.5])

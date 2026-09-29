@@ -1,0 +1,15 @@
+# A module that exports a const, imported twice.
+#
+# the second import re-executes the module, so `export const LIMIT = 10` runs
+# a second time with the same value. That is idempotent and must not be an
+# error, otherwise no module exporting a constant could be imported more than
+# once.
+import "tests/language/modules/const_source.fl"
+import "tests/language/modules/const_source.fl"
+
+print(LIMIT)
+print(doubled())
+
+# and the constant is still read-only in this file, whichever import defined
+# it
+LIMIT = 99

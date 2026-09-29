@@ -1,0 +1,109 @@
+# A pile of allocation and collection in a row, to make the collector do its
+# work while objects are half-built or newly linked. nothing here is a
+# language feature; it is the runtime being asked to survive itself.
+#
+# this runs under `make stress`, where the collector fires on every single
+# allocation, so each line below is a collection point.
+
+# strings built and immediately dropped
+let scratch = ""
+let i = 0
+while i < 50 {
+    scratch = scratch + str(i) + "-"
+    i += 1
+}
+print(len(scratch))
+
+# a table literal as a call argument, which parks the table in a hidden
+# local and reloads it between pairs
+fn second(a, b) {
+    return b
+}
+print(second(1, {x: 1, y: 2}).y)
+
+# a table literal that fills and then grows, forcing both key arrays to move
+let big = {}
+i = 0
+while i < 64 {
+    big.key = i
+    i += 1
+}
+print(big.key)
+
+# a list grown one element at a time, reallocating on the way
+let xs = []
+i = 0
+while i < 200 {
+    push(xs, {n: i})
+    i += 1
+}
+print(len(xs))
+print(xs[199].n)
+
+# a closure created while the collector is busiest, then used after its
+# frame is gone
+fn make_counter() {
+    let n = 0
+    let junk = []
+    let j = 0
+    while j < 32 {
+        push(junk, j * j)
+        j += 1
+    }
+    fn bump() {
+        n += 1
+        return n
+    }
+    return bump
+}
+let c = make_counter()
+i = 0
+while i < 20 {
+    c()
+    i += 1
+}
+print(c())
+
+# nested closures, each frame holding objects of its own
+fn outer_fn() {
+    let a = 0
+    fn middle() {
+        let b = 10
+        fn inner() {
+            a += 1
+            b += 1
+            return a + b
+        }
+        return inner
+    }
+    return middle()
+}
+let n = outer_fn()
+print(n())
+print(n())
+
+# string concatenation, growing linearly. the doubling form
+# `s = (s + "a") + (s + "b")` is its own test, in concat_overflow.fl, because
+# it reaches the length limit in a dozen iterations and a test that dies is
+# not a test.
+let acc = ""
+i = 0
+while i < 200 {
+    acc = acc + str(i)
+    i += 1
+}
+print(len(acc))
+
+# a list of closures, each capturing its own loop body's binding
+let fns = []
+i = 0
+while i < 16 {
+    let captured = i
+    fn get() {
+        return captured
+    }
+    push(fns, get)
+    i += 1
+}
+print(fns[15]())
+print(fns[0]())

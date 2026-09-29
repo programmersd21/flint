@@ -1,0 +1,33 @@
+# Index typing. A script stops at its first error, so the valid cases come
+# first and the file ends on exactly one failure. The remaining invalid cases
+# live in index_typing_*.fl, one per error, because that is the only way to
+# assert on more than one of them.
+#
+# What is here: the index used to be `(int)AS_NUMBER(v)` and nothing else,
+# which is wrong three separate ways.
+#
+#   - a fractional index truncates, so x[1.5] silently read element 1 and
+#     the script had no way to know it had asked for something that is not an
+#     index at all
+#   - a value beyond the range of int is undefined behaviour on the cast, and
+#     on x86-64 the result was a plausible negative number that then indexed
+#     backwards
+#   - `count + idx` for a negative idx could overflow on its own
+#
+# So the valid cases are checked here, and the first invalid one ends the file.
+
+let xs = [10, 20, 30]
+
+# in range, both signs
+print(xs[0])
+print(xs[2])
+print(xs[-1])
+print(xs[-3])
+
+# integral values that are large but still inside the range. 2^53 is where a
+# double stops representing every integer, and it is the bound the check uses.
+print(xs[2])
+print(9007199254740992 as number > 0)
+
+# and now the first thing that must be rejected
+print(xs[1.5])

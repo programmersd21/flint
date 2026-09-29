@@ -1,0 +1,4 @@
+# A non-finite index. Both fail every comparison, and converting either is
+# undefined, so they have to be rejected before the cast rather than after.
+let xs = [10, 20, 30]
+print(xs[1 / 0])

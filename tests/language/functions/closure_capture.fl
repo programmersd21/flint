@@ -1,0 +1,75 @@
+# Two closures over one local, and a closure that outlives its frame.
+#
+# the pair is the case worth testing. if capture_upvalue() ever hands each
+# closure its own copy, bump() and read() stop agreeing, and the failure shows
+# up as a counter that is somehow always one behind rather than as a crash.
+
+fn make_pair() {
+    let n = 0
+
+    fn bump() {
+        n += 1
+        return n
+    }
+
+    fn read() {
+        return n
+    }
+
+    return [bump, read]
+}
+
+let pair = make_pair()
+
+# read before any bump
+print(pair[1]())     # 0
+print(pair[0]())     # 1
+print(pair[1]())     # 1
+print(pair[0]())     # 2
+print(pair[0]())     # 3
+print(pair[1]())     # 3
+
+# a second pair is independent
+let other = make_pair()
+print(other[0]())    # 1
+print(pair[1]())     # 3, untouched by other
+print(other[0]())    # 2
+
+# a closure that has outlived the frame that made it, called a long way after
+fn escape() {
+    let secret = 42
+    fn reveal() {
+        secret += 1
+        return secret
+    }
+    return reveal
+}
+
+let kept = escape()
+print(kept())        # 43
+print(kept())        # 44
+
+# three closures over one local, all interleaved
+fn make_trio() {
+    let total = 0
+    fn add(n) {
+        total += n
+        return total
+    }
+    fn reset() {
+        total = 0
+        return total
+    }
+    fn get() {
+        return total
+    }
+    return [add, reset, get]
+}
+
+let trio = make_trio()
+print(trio[0](5))    # 5
+print(trio[0](3))    # 8
+print(trio[2]())     # 8
+print(trio[1]())     # 0
+print(trio[0](7))    # 7
+print(trio[2]())     # 7

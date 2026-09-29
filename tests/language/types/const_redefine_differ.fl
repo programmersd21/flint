@@ -1,0 +1,7 @@
+# `const x = 1; const x = 2` must be refused.
+#
+# this used to be accepted silently, which made the first declaration
+# meaningless: the value it bound was gone, and with it any reason to trust
+# the promise that nothing writes this name.
+const x = 1
+const x = 2

@@ -1,0 +1,59 @@
+# input.fl -- talking to the person running the script.
+#
+# run it two ways:
+#
+#     echo "Ada" | ./flint examples/input.fl
+#     ./flint examples/input.fl < names.txt
+#
+# the second form is the honest one. input() is for reading data piped in as
+# much as for prompting a human, and the example is written so the same lines
+# work for both.
+#
+# what input() does, in one paragraph: it writes the prompt with no newline,
+# reads one line, drops the newline, and hands it back as a normal string.
+# end of file gives nil, not an empty string, so a script can tell "the user
+# pressed enter" from "there is nothing left to read".
+#
+# pipe a name in and watch the types disagree:
+#
+#     echo "" | ./flint examples/input.fl
+#     echo "x" | head -c 0 | ./flint examples/input.fl
+
+# the prompt goes out exactly as written, with no newline added, so the
+# typing starts where the prompt ends
+let name = input("What is your name? ")
+print("hello, " + name)
+
+# no prompt, no prompt output. just the line.
+let raw = input()
+print("you wrote: " + raw)
+
+# empty input is a string with nothing in it, because someone pressing enter
+# on an empty line is an answer, and crashing on it would be a surprise
+let blank = input()
+print("empty is a string: " + str(type(blank)))
+print("and it is this long: " + str(len(blank)))
+
+# end of file is nil. this reads until there is nothing left, which is the
+# only sane loop over stdin there is:
+#
+#     while true {
+#         let line = input()
+#         if line == nil { break }
+#         print("got: " + line)
+#     }
+#
+# the loop above is commented out rather than deleted so the example ends at
+# a fixed place. reading until EOF in one go is a real program shape; try it
+# interactively by typing lines and ending with ctrl-D.
+
+# a long line. the buffer doubles from 64 bytes, so nothing is truncated and
+# a script that reads a file-like amount of text through stdin never notices.
+let big = input()
+print("long line was " + str(len(big)) + " bytes")
+print(big)
+
+# input() with the wrong shape is an ordinary runtime error, like everything
+# else that is wrong-shaped in this language
+# print(input("one", "two"))   # error: expected 0 or 1 arguments
+# print(input(42))              # error: argument to input() must be a string

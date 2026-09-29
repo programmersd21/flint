@@ -1,0 +1,3 @@
+# An index that is not a number at all.
+let xs = [10, 20, 30]
+print(xs["a"])

@@ -1,0 +1,4 @@
+# input() with a prompt that is not a string. A number is the obvious mistake
+# here, and silently stringifying it would hide a real bug in the caller: they
+# meant a name, and they passed a count.
+print(input(42))

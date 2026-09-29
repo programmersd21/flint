@@ -1,0 +1,18 @@
+# String concatenation that would overflow the length.
+#
+# this form doubles the string every iteration, so it reaches the limit in
+# about a dozen lines of a loop and used to be undefined behaviour: the two
+# int lengths were added without a check, overflowed, and the negative result
+# became an enormous size_t for the allocator. ubsan caught it as a signed
+# integer overflow and asan as an allocation that was too big to be a real
+# request.
+#
+# a script should not be able to reach undefined behaviour by typing a loop,
+# even a loop that is obviously going to run out of memory.
+let s = "x"
+let i = 0
+while i < 40 {
+    s = (s + "x") + (s + "y")
+    i += 1
+}
+print(len(s))

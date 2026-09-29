@@ -1,0 +1,5 @@
+# An index too large for an int. The conversion is undefined behaviour, and
+# the value that came out was negative, so it then indexed backwards from the
+# end and reported a plausible-looking index in the error.
+let xs = [10, 20, 30]
+print(xs[1e30])

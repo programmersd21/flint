@@ -1,0 +1,37 @@
+# input(): normal line, prompt, empty line, long line, CRLF, and EOF.
+#
+# stdin comes from input.stdin. The prompt goes to stdout with no newline, so
+# it is part of the expected output below and the user's next read starts on
+# the same line.
+
+# a prompt is written verbatim, with no trailing newline added
+let name = input("What is your name? ")
+print("hello, " + name)
+
+# no argument, no prompt
+print(input())
+
+# an empty line is a string, not nil. nil is reserved for end of file, so
+# these two are distinguishable and a script can tell them apart.
+let blank = input()
+print(type(blank))
+print(len(blank))
+
+# a CRLF line arrives as plain text, because a script should not have to know
+# which platform wrote the file
+let crlf = input()
+print(len(crlf))
+print(crlf)
+
+# a long line. the buffer grows, so nothing is truncated; see input_native.
+let long = input()
+print(len(long))
+
+# EOF after some input is still a line, not nothing: the last line of a file
+# with no trailing newline still holds a value
+let last = input()
+print(last)
+
+# and then EOF for real
+print(input())
+print(input("still prompting at eof\n"))

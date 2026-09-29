@@ -1,0 +1,4 @@
+# input() with two arguments. arity is checked inside input_native rather than
+# by the call site, because input() is the one builtin that accepts both zero
+# and one argument and the fixed-arity check in the VM cannot express that.
+print(input("one", "two"))

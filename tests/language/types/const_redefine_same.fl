@@ -1,0 +1,11 @@
+# `const x = 1; const x = 1` is allowed, and deliberately so.
+#
+# importing a module re-executes its top level, so the same declaration runs
+# twice with the same value. That is not a contradiction, and failing on it
+# would make a second import of any module that exports a constant an error.
+#
+# what is refused is a *different* value, because then one of the two
+# declarations is a lie about what the name holds forever.
+const x = 1
+const x = 1
+print(x)

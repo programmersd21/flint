@@ -1,0 +1,7 @@
+# Index assignment had the same unchecked conversion as index read, and one
+# worse: a fractional index wrote to the wrong element. Reading and writing
+# through x[1.5] are the same bug, and checking only one of them is worse
+# than checking neither.
+let xs = [10, 20, 30]
+
+xs[1.5] = 99

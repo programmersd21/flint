@@ -1,0 +1,9 @@
+# `let x = 1; const x = 2` is allowed. Narrowing a binding is not a
+# contradiction, and refusing it would be a rule with no principle behind it.
+#
+# this is also the case that used to silently go the other way: table_set only
+# set the const flag on a *new* entry, so promoting a let to a const left the
+# name writable and the const a decoration.
+let x = 1
+const x = 2
+print(x)
