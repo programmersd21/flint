@@ -1,7 +1,8 @@
 # the library
 
-The language core has seven built-ins. The runtime also exposes string and
-system functions; the latter can read files and start processes.
+Everything a script can call, in three groups: the core language, strings, and
+the system functions that read files and start processes. Nothing else is
+reachable without importing a module.
 
 ## input
 
@@ -236,3 +237,28 @@ statement, and you should not call it yourself. see [modules.md](modules.md).
 There is no random number generator, sorting, or conversion of a printed
 container into a string. `str([1, 2])` is still `<object>`. The `print`
 statement knows how to render containers; `str()` does not.
+
+## internal math
+
+ten `__`-prefixed natives exist for a math library that is not in this
+repository yet. they are deliberately not part of the language: a leading
+underscore means "not for you", and nothing in the documentation or the
+examples uses them.
+
+| native | |
+|---|---|
+| `__floor(x)` | largest integer not above x |
+| `__sqrt(x)` | square root |
+| `__fma(a,b,c)` | `a*b+c` with one rounding |
+| `__ldexp(x,n)` | x times 2 to the n |
+| `__logb(x)` | exponent as a number |
+| `__fabs(x)` | absolute value |
+| `__copysign(x,y)` | x with y's sign |
+| `__hi32(x)` / `__lo32(x)` | half of a double's bits |
+| `__from_bits(hi,lo)` | a double rebuilt from two halves |
+
+they take and return numbers, and a non-number argument is a runtime error
+like any other. the wrappers live in `src/util/fl_math.c` so the language and
+the maths stay separate.
+
+contributed in [#1](https://github.com/programmersd21/flint/pull/1).

@@ -36,6 +36,15 @@ that reads stdin, calls a program, and writes a line is the whole toolchain.
 - `flint -` reads a script from stdin, next to `-e` and the repl
 - `flint script.fl args...` passes everything after the script to the script
 
+**internal math**
+
+- ten `__`-prefixed natives for a math library that is not in this repository
+  yet: `__floor` `__sqrt` `__fma` `__ldexp` `__logb` `__fabs` `__copysign`
+  `__hi32` `__lo32` `__from_bits`
+- the wrappers live in `src/util/fl_math.c`, separate from the language, so a
+  future library can change them without touching the runtime
+- contributed in [#1](https://github.com/programmersd21/flint/pull/1)
+
 **the repl**
 
 - opens with the version and what to type, instead of a bare cursor

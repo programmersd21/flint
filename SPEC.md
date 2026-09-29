@@ -188,7 +188,7 @@ reported the ordinary way.
 
 ## the standard library, v0.3
 
-seven functions before v0.3, and six more since. all of them are ordinary
+seven functions before v0.3, and sixteen more since. all of them are ordinary
 values: there is no namespace, a builtin is a global holding a native, and a
 script can pass one to another.
 
@@ -236,6 +236,14 @@ competitive rather than three times slower.
 | `read_file(path)` | the whole file as a string, binary |
 | `write_file(path, text)` | truncate and write. returns true |
 | `exec(cmd, arg...)` | run a program, return its exit status |
+
+### internal maths
+
+ten names beginning `__` exist for a math library that is not in this
+repository. `__floor` `__sqrt` `__fma` `__ldexp` `__logb` `__fabs`
+`__copysign` `__hi32` `__lo32` `__from_bits`. the leading underscore marks
+them as not part of the language, and a script has no business calling
+them.
 
 `exec` calls `execvp` and never a shell. there is no path from this API to
 `/bin/sh`, so a filename containing a space, a semicolon or a `$(...)` is an

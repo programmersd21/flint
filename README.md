@@ -251,6 +251,10 @@ process spawning beyond `exec`, and no regex. each is a portability question
 or a design argument, and the answer so far has been no. see
 [docs/library.md](docs/library.md) for the full list and the reasoning.
 
+there are also ten `__`-prefixed maths natives for a library that is not in
+this repository yet. the underscore means "not for you", and nothing in the
+documentation or the examples uses them.
+
 ### the repl
 
 ```sh
