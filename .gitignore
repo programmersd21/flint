@@ -4,3 +4,4 @@ flint-stress
 *.o
 *.d
 *.bin
+names.txt
