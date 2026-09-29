@@ -108,7 +108,7 @@ static Value ldexp_native(VM *vm, int argc, Value *argv)
 	if (!number_arg(vm, argv[0], "ldexp", &x) ||
 	        !number_arg(vm, argv[1], "ldexp", &e))
 		return NIL_VAL;
-	if (isnan(e) || e != floor(e)) {
+	if (!isfinite(e) || e != floor(e)) {
 		vm_runtime_error(vm,
 		        "Exponent to ldexp() must be a whole number.");
 		return NIL_VAL;
