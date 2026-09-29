@@ -11,6 +11,7 @@
 #include "chunk.h"
 #include "common.h"
 #include "compiler.h"
+#include "diagnostic.h"
 /* the disassembler is called from run(), and only under
  * FL_DEBUG_TRACE_EXECUTION. Same reasoning as the compiler: an include that
  * nothing references in a release build is noise the analyser has to be told
@@ -53,23 +54,6 @@ static Value peek(VM *vm, int distance) { return vm->stack_top[-1 - distance]; }
 
 static void close_upvalues(VM *vm, Value *last);
 
-/*
- * Discard everything this script pushed: the frames above vm->base_frame, and
- * the stack above vm->base_top.
- *
- * Both, and the second one is not optional. Recovering the stack top from the
- * frame index is wrong, because a frame's base is where its *callee* sits, not
- * where the current statement began. An `import` at the top of a script has the
- * import_file callee and its path argument sitting above the frame base, and
- * call_value is about to subtract them itself. Unwinding to the frame base
- * throws them away first, so the subtraction runs off the bottom of the array
- * and writes there. That is silent corruption when it lands in the VM struct
- * and a segfault when it does not.
- *
- * So vm_interpret() records both on entry: the frame count to keep, and the
- * exact stack position to return to. A failure restores both, and the caller
- * finds its stack exactly as it left it.
- */
 /*
  * Discard everything this script added: the frames above base_frame, and the
  * value stack back down to base_top.
@@ -115,13 +99,308 @@ static void unwind_to(VM *vm, int base_frame, Value *base_top)
  * each frame is the line of the instruction *before* ip, because ip already
  * points past the opcode that failed.
  */
+static int name_distance(const char *a, size_t alen, const char *b, size_t blen)
+{
+	if (alen > 31 || blen > 31 || alen > blen + 2 || blen > alen + 2)
+		return 3;
+	int prev[32];
+	int next[32];
+	for (size_t j = 0; j <= blen; j++)
+		prev[j] = (int)j;
+	for (size_t i = 1; i <= alen; i++) {
+		next[0] = (int)i;
+		int row_min = next[0];
+		for (size_t j = 1; j <= blen; j++) {
+			int cost = a[i - 1] == b[j - 1] ? 0 : 1;
+			int del = prev[j] + 1;
+			int ins = next[j - 1] + 1;
+			int sub = prev[j - 1] + cost;
+			int best = del < ins ? del : ins;
+			next[j] = best < sub ? best : sub;
+			if (next[j] < row_min)
+				row_min = next[j];
+		}
+		if (row_min > 2)
+			return 3;
+		memcpy(prev, next, (blen + 1) * sizeof(int));
+	}
+	return prev[blen];
+}
+
+/*
+ * Names a script might have meant that are not values.
+ *
+ * `print` is a keyword, not a global, so it is not in vm->globals and a
+ * search over globals alone can never suggest it. `pritn("x")` is the single
+ * most common typo in any language and it was reported with no help at all,
+ * because the one name the user wanted was in a different table.
+ *
+ * Keywords and the builtins are candidates for the same reason, and the
+ * search over both is bounded by construction: this list is fixed and the
+ * globals table is whatever the program defined.
+ */
+static const char *const language_names[] = {
+        "print",
+        "len",
+        "push",
+        "pop",
+        "str",
+        "type",
+        "input",
+        "clock",
+        "split",
+        "join",
+        "trim",
+        "contains",
+        "starts_with",
+        "ends_with",
+        "replace",
+        "lower",
+        "upper",
+        "args",
+        "env",
+        "exit",
+        "read_file",
+        "write_file",
+        "exec",
+        "let",
+        "const",
+        "if",
+        "else",
+        "while",
+        "for",
+        "fn",
+        "return",
+        "break",
+        "continue",
+        "import",
+        "export",
+        "in",
+        "and",
+        "or",
+        "not",
+        "nil",
+        "true",
+        "false",
+};
+
+/*
+ * The closest name to the needle, or NULL if nothing is close enough.
+ *
+ * Returns a static string from language_names, or a key borrowed from
+ * vm->globals. Both outlive the call: the static one trivially, the globals
+ * one because the table outlives the diagnostic.
+ */
+static const char *similar_language_name(VM *vm, ObjString *needle)
+{
+	const char *best = NULL;
+	int best_distance = 3;
+	bool tied = false;
+
+	for (size_t i = 0;
+	        i < sizeof(language_names) / sizeof(language_names[0]);
+	        i++) {
+		const char *name = language_names[i];
+		int distance = name_distance(needle->chars,
+		        (size_t)needle->length,
+		        name,
+		        strlen(name));
+		if (distance < best_distance) {
+			best = name;
+			best_distance = distance;
+			tied = false;
+		} else if (distance == best_distance) {
+			tied = true;
+		}
+	}
+
+	for (int i = 0; i < vm->globals.capacity; i++) {
+		ObjString *key = vm->globals.entries[i].key;
+		if (key == NULL)
+			continue;
+		if (best != NULL && strcmp(best, key->chars) == 0)
+			continue; /* already the best, from the list above */
+		int distance = name_distance(needle->chars,
+		        (size_t)needle->length,
+		        key->chars,
+		        (size_t)key->length);
+		if (distance < best_distance) {
+			best = key->chars;
+			best_distance = distance;
+			tied = false;
+		} else if (distance == best_distance) {
+			tied = true;
+		}
+	}
+
+	/* a tie means two candidates are equally close, and suggesting
+	 * either is a coin flip. say nothing instead. */
+	/*
+	 * A name can be in both tables -- every builtin is a global *and* is
+	 * listed above -- so the second pass can re-find the current best at
+	 * the same distance and tie with itself. Skip anything already the
+	 * best; a genuine tie between two *different* names is still a coin
+	 * flip and correctly says nothing.
+	 */
+	return tied || best == NULL ? NULL : best;
+}
+
+static const char *undefined_name(const char *message)
+{
+	static const char prefix[] = "Undefined variable '";
+	if (strncmp(message, prefix, sizeof(prefix) - 1) != 0)
+		return NULL;
+	const char *start = message + sizeof(prefix) - 1;
+	const char *end = strchr(start, '\'');
+	if (end == NULL || end[1] != '.' || end[2] != '\0')
+		return NULL;
+	char *name = malloc((size_t)(end - start) + 1);
+	if (name == NULL)
+		return NULL;
+	memcpy(name, start, (size_t)(end - start));
+	name[end - start] = '\0';
+	return name;
+}
+
 void vm_runtime_error(VM *vm, const char *format, ...)
 {
 	va_list args;
 	va_start(args, format);
-	vfprintf(stderr, format, args);
+	va_list count_args;
+	va_copy(count_args, args);
+	int length = vsnprintf(NULL, 0, format, count_args);
+	va_end(count_args);
+	char fallback[2048];
+	char *message = fallback;
+	if (length >= 0) {
+		message = malloc((size_t)length + 1);
+		if (message == NULL)
+			message = fallback;
+	}
+	vsnprintf(message,
+	        message == fallback ? sizeof(fallback) : (size_t)length + 1,
+	        format,
+	        args);
 	va_end(args);
-	fputs("\n", stderr);
+	if (vm->diag_format == FL_DIAG_LEGACY) {
+		fprintf(stderr, "%s\n", message);
+	} else {
+		FlSource source;
+		FlSource *source_ptr = NULL;
+		FlSpan span = {0, 0};
+		bool has_span = false;
+		const char *code = "E0600";
+		const char *primary_label = "runtime error";
+		const char *missing_name = undefined_name(message);
+		ObjString *missing =
+		        missing_name != NULL
+		                ? copy_string(vm,
+		                          missing_name,
+		                          (int)strlen(missing_name))
+		                : NULL;
+		const char *help[1];
+		size_t help_count = 0;
+		char help_text[128];
+		if (missing != NULL) {
+			code = "E0202";
+			primary_label = "undefined name";
+		} else if (strncmp(message,
+		                   "Operands must be",
+		                   strlen("Operands must be")) == 0) {
+			code = "E0301";
+			primary_label = "invalid operands";
+		} else if (strncmp(message,
+		                   "Expected type '",
+		                   strlen("Expected type '")) == 0) {
+			code = "E0302";
+			primary_label = "type assertion failed";
+		} else if (strstr(message, "index") != NULL) {
+			code = "E0601";
+			primary_label = "invalid index";
+		} else if (strncmp(message, "Expected ", 9) == 0) {
+			code = "E0401";
+			primary_label = "call failed";
+		} else if (strstr(message, "module") != NULL ||
+		           strstr(message, "Import cycle") != NULL) {
+			code = "E0501";
+			primary_label = "module operation failed";
+		}
+		if (vm->source_text != NULL) {
+			fl_source_init(
+			        &source, vm->source_name, vm->source_text);
+			source_ptr = &source;
+			if (source.line_count != 0 &&
+			        vm->frame_count > vm->base_frame) {
+				CallFrame *frame =
+				        &vm->frames[vm->frame_count - 1];
+				ObjFunction *fn = frame->closure->function;
+				size_t ip = (size_t)(frame->ip -
+				                     fn->chunk.code - 1);
+				size_t line = (size_t)fn->chunk.lines[ip];
+				if (line > 0 && line <= source.line_count) {
+					span.start =
+					        (uint32_t)source
+					                .line_starts[line - 1];
+					size_t end = span.start;
+					while (end < source.length &&
+					        source.text[end] != '\n')
+						end++;
+					span.end = (uint32_t)end;
+					has_span = true;
+					if (missing != NULL) {
+						size_t name_len =
+						        (size_t)missing->length;
+						size_t at = span.start;
+						while (at + name_len <=
+						                span.end &&
+						        memcmp(source.text + at,
+						                missing->chars,
+						                name_len) != 0)
+							at++;
+						if (at + name_len <= span.end) {
+							span.start =
+							        (uint32_t)at;
+							span.end =
+							        (uint32_t)(at +
+							                   name_len);
+						}
+						const char *similar =
+						        similar_language_name(
+						                vm, missing);
+						if (similar != NULL) {
+							snprintf(help_text,
+							        sizeof(help_text),
+							        "did you mean "
+							        "`%s`?",
+							        similar);
+							help[0] = help_text;
+							help_count = 1;
+						}
+					}
+				}
+			}
+		}
+		FlDiagnostic diag = {
+		        .severity = FL_DIAG_ERROR,
+		        .code = code,
+		        .message = message,
+		        .primary = span,
+		        .has_primary = has_span,
+		        .primary_label = primary_label,
+		        .help = help,
+		        .help_count = help_count,
+		};
+		fl_diag_emit(stderr,
+		        &diag,
+		        source_ptr,
+		        vm->diag_format,
+		        vm->diag_color);
+		if (source_ptr != NULL)
+			fl_source_free(&source);
+		free((void *)missing_name);
+	}
+	if (message != fallback)
+		free(message);
 
 	/*
 	 * Only the frames this script owns. The importing script's frames
@@ -129,7 +408,11 @@ void vm_runtime_error(VM *vm, const char *format, ...)
 	 * them would attribute a module's failure to a line in the importer
 	 * that ran long before it.
 	 */
-	for (int i = vm->frame_count - 1; i >= vm->base_frame; i--) {
+	for (int i = vm->frame_count - 1;
+	        i >= vm->base_frame &&
+	        (vm->diag_format == FL_DIAG_LEGACY ||
+	                vm->diag_format == FL_DIAG_HUMAN);
+	        i--) {
 		CallFrame *frame = &vm->frames[i];
 		ObjFunction *function = frame->closure->function;
 		size_t instruction = frame->ip - function->chunk.code - 1;
@@ -250,6 +533,10 @@ void vm_init(VM *vm)
 	vm->frame_count = 0;
 	vm->open_upvalues = NULL;
 	vm->base_frame = 0;
+	vm->source_text = NULL;
+	vm->source_name = "<source>";
+	vm->diag_format = FL_DIAG_LEGACY;
+	vm->diag_color = FL_COLOR_AUTO;
 
 	vm->objects = NULL;
 	vm->bytes_allocated = 0;
@@ -264,8 +551,16 @@ void vm_init(VM *vm)
 	table_init(&vm->globals);
 	table_init(&vm->strings);
 	table_init(&vm->modules);
+	compiler_set_diagnostics(NULL, vm->diag_format, vm->diag_color);
 
 	register_natives(vm);
+}
+
+void vm_set_diagnostics(VM *vm, FlDiagFormat format, FlColorMode color)
+{
+	vm->diag_format = format;
+	vm->diag_color = color;
+	compiler_set_diagnostics(NULL, format, color);
 }
 
 void vm_free(VM *vm)
@@ -304,6 +599,16 @@ static void print_flint_value(Value value)
 		 * the range test has to happen inside the helper, before the
 		 * cast: see the note on fl_double_is_printable_int. */
 		if (fl_double_is_printable_int(d)) {
+			/* the digit loop, not printf("%ld"). small integers
+			 * are the common case and a libc format call is
+			 * ~250ns for something this is twenty nanoseconds of. */
+			char small[24];
+			int n = fl_itoa(
+			        fl_double_to_long(d), small, sizeof(small));
+			if (n > 0) {
+				printf("%s\n", small);
+				return;
+			}
 			printf("%ld\n", fl_double_to_long(d));
 			return;
 		}
@@ -1202,6 +1507,15 @@ field_set_done:;
  */
 InterpretResult vm_interpret(VM *vm, const char *source)
 {
+	return vm_interpret_named(vm, source, "<source>");
+}
+
+InterpretResult vm_interpret_named(VM *vm, const char *source, const char *name)
+{
+	const char *saved_text = vm->source_text;
+	const char *saved_name = vm->source_name;
+	vm->source_text = source;
+	vm->source_name = name;
 	/*
 	 * Reentrant, in two independent ways.
 	 *
@@ -1236,9 +1550,11 @@ InterpretResult vm_interpret(VM *vm, const char *source)
 	vm->base_frame = base_frame;
 	vm->base_top = base_top;
 
-	ObjFunction *function = compile(vm, source);
+	ObjFunction *function = compile_named(vm, source, name);
 	if (function == NULL) {
 		vm->base_frame = saved_base;
+		vm->source_text = saved_text;
+		vm->source_name = saved_name;
 		return INTERPRET_COMPILE_ERROR;
 	}
 
@@ -1260,6 +1576,8 @@ InterpretResult vm_interpret(VM *vm, const char *source)
 	if (!call(vm, closure, 0)) {
 		unwind_to(vm, base_frame, base_top);
 		vm->base_frame = saved_base;
+		vm->source_text = saved_text;
+		vm->source_name = saved_name;
 		return INTERPRET_RUNTIME_ERROR;
 	}
 
@@ -1281,6 +1599,8 @@ InterpretResult vm_interpret(VM *vm, const char *source)
 	 * start and not to this script's.
 	 */
 	vm->base_frame = saved_base;
+	vm->source_text = saved_text;
+	vm->source_name = saved_name;
 
 	return result;
 }
