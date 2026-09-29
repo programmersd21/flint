@@ -7,3 +7,4 @@ flint-stress
 *.d
 *.bin
 names.txt
+flint-libraries/
