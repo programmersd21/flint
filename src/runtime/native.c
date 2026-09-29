@@ -10,6 +10,7 @@
  */
 #include "native.h"
 #include "memory.h"
+#include "native_math.h"
 #include "object.h"
 #include "stdint.h"
 #include "table.h"
@@ -345,4 +346,5 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "type", type_native, 1);
 	/* not in the manual: the compiler emits this for `import` */
 	vm_define_native(vm, "import_file", import_file_native, 1);
+	register_math_natives(vm);
 }
