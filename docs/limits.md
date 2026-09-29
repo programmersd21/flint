@@ -120,10 +120,11 @@ strings do not compare with `<` and `>`. there is no ordering on bytes, so
 
 ## no io, no env, no processes
 
-`print` and the `import_file` the compiler generates are the only ways anything
-leaves the interpreter. there is no file reading, no stdin, no environment
-variables, no environment access, no time other than `clock()`, which is cpu
-time.
+`print`, `input` and the `import_file` the compiler generates are the ways
+anything enters or leaves the interpreter. there is no file reading, no echo
+control, no line editing, no history and no signal handling on input, no
+environment variables, no environment access, and no time other than
+`clock()`, which is cpu time.
 
 ## no random
 

@@ -85,8 +85,14 @@ failed. the list is short and worth knowing by heart:
 | `Operands must be numbers.` | arithmetic on something that is not a number |
 | `Operands must be two numbers or two strings.` | `+` on a mismatched pair |
 | `Operand must be a number.` | unary `-` on a non-number |
+| `Expected 0 or 1 arguments but got M.` | `input()` with two or more arguments |
+| `Argument to input() must be a string.` | a non-string `input()` prompt |
 | `List index N out of bounds (len M).` | list index, either direction |
+| `List index must be a whole number.` | fractional index, e.g. `xs[1.5]` |
+| `List index must be a finite number.` | `inf` or `NaN` as an index |
 | `String index N out of bounds.` | string index |
+| `String index must be a whole number.` | fractional string index |
+| `String is too long to concatenate.` | the two lengths would overflow int |
 | `Only tables have fields.` | `.name` on something that is not a table |
 | `Expected type 'T' but got 'U'.` | an `as` assertion that did not hold |
 | `Expected N arguments but got M.` | call arity |

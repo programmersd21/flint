@@ -217,7 +217,7 @@ fn f() { return 1 }
 f() = 2      # error: invalid assignment target
 ```
 
-## `as` — a type assertion
+## `as` -- a type assertion
 
 `expr as T` checks that `expr` is a `T` and passes the value through
 untouched. a mismatch is an error.
@@ -260,7 +260,7 @@ needs_string({a: 1})
 ```
 
 the check happens when the line runs, not when the file is compiled, because
-the value can come from anywhere — a module that was not read yet, a function
+the value can come from anywhere -- a module that was not read yet, a function
 parameter, a list element.
 
 **precedence.** `as` binds tighter than the arithmetic operators and looser

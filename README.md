@@ -15,19 +15,37 @@ binary. if that takes more than a second, check your machine.
 ./flint -e 'print(1 + 2)'
 ```
 
+# flint
+
+a small bytecode interpreter and scripting language, in portable c11. no
+dependencies beyond libc and libm.
+
+```sh
+make release
+```
+
+that's the whole build. no llvm, no cmake, no configure step, no code
+generator. the compiler runs once, most of it in parallel, and you get a
+binary. if that takes more than a second, check your machine.
+
+```sh
+./flint -e 'print(1 + 2)'
+```
+
 ## what it is
 
 - a stack vm over 64-bit nan-boxed values: a number, or a tagged pointer, in
   eight bytes
 - a single-pass pratt parser. no ast. tokens go in one at a time, bytecode
   comes out the other end
-- mark-and-sweep gc with an explicit gray stack, so a deep list does not
-  overflow the C stack
-- interned strings, which is what makes `==` on strings a pointer compare
-- closures that capture by reference, lists, tables, and modules
-
-about 6,000 lines of C, all of it commented on the parts where the reason
-isn't obvious from the code.
+- mark-and-sweep gc with an explicit gray stack, so a deeply nested list is
+  heap work rather than a segfault in the collector's third frame
+- interned strings, which is what makes `==` on two strings cost one pointer
+  compare instead of a memcmp on every loop iteration
+- closures that capture by reference, lists, tables, modules, and a scripting
+  language small enough that the whole thing reads in an afternoon. if there
+  is a comment above a function, it is there because the reason is not in the
+  code.
 
 ## build targets
 
@@ -135,7 +153,7 @@ table.port = 9000
 print(table.missing)    # nil. a miss is not an error, which is a tradeoff.
 ```
 
-### `as` — checking a type
+### `as` -- checking a type
 
 ```flint
 print(1 as number)      # 1
@@ -181,13 +199,15 @@ find the file next to the script, because "math.fl" is looked up as
 `./math.fl` and your cwd is now `myproject`, where the file does not live.
 
 so a script only finds its imports if you run it from the directory the paths
-were written for. there is no search path and no `private` — all files share
+were written for. there is no search path and no `private` -- all files share
 one global table, so two modules defining the same name is a collision that
 import order decides. see [docs/modules.md](docs/modules.md).
 
 ### the whole library
 
-six functions. that is deliberate.
+seven functions. that is deliberate, and the size is the point: anything else
+you reach for before you write a loop is a runtime nobody can hold in their
+head.
 
 ```flint
 print(len("abc"))   # 3. string or list.
@@ -196,8 +216,21 @@ print(str(42))      # "42"
 print(type([1]))    # "list"
 ```
 
+the one that talks back:
+
+```flint
+let name = input("What is your name? ")
+print("hello, " + name)
+```
+
+`input()` writes its prompt with no newline and reads one line, so the typing
+starts where the prompt ends. an empty line gives `""` and end of file gives
+`nil`, which are different values on purpose: the script has to be able to
+tell "the user typed nothing" from "there is nothing left to read". see
+[docs/library.md](docs/library.md).
+
 `clock()` returns process cpu time. `push` and `pop` work on lists. no
-`map`, no `sort`, no file io, no random — see
+`map`, no `sort`, no file io, no random -- see
 [docs/library.md](docs/library.md) for the list and why.
 
 ## two things that catch everyone
@@ -221,7 +254,7 @@ project a bug:
 | [functions](docs/functions.md) | functions, recursion, closures |
 | [data](docs/data.md) | strings, lists, tables |
 | [modules](docs/modules.md) | `import` and `export` |
-| [library](docs/library.md) | the six built-in functions |
+| [library](docs/library.md) | the seven built-in functions |
 | [errors](docs/errors.md) | what goes wrong, and the exit codes |
 | [limits](docs/limits.md) | what it doesn't do, and what that costs |
 

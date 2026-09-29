@@ -30,6 +30,12 @@ no `%`:
 print("n=" + str(1))    # n=1
 ```
 
+a concatenation that would overflow the length is an error rather than
+undefined behaviour. doubling a string each iteration reaches the limit in
+about a dozen passes, and without the check the two lengths add in int,
+overflow, and hand a negative number to the allocator as an enormous size.
+scripts grow; lengths do not wrap.
+
 `str()` is how you turn anything into a string, and it is the only conversion
 you need. see [library.md](library.md).
 
@@ -124,6 +130,13 @@ let xs = [1, 2, 3]
 print(xs[3])     # error: out of bounds (len 3)
 print(xs[-4])    # error: out of bounds
 ```
+
+an index that is not a whole number is an error, not a truncation. `xs[1.5]`
+does not read element 1; it reports, because reading the wrong element
+silently is worse than failing loudly. the same goes for anything beyond the
+range of an int, for infinity and NaN, and for values that are not numbers at
+all. negative indices still count from the end, and valid ones are untouched:
+this changed what fails, not what succeeds.
 
 ### assignment
 

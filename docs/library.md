@@ -1,7 +1,46 @@
 # the library
 
-six built-in functions. that is the entire standard library, and it is
+seven built-in functions. that is the entire standard library, and it is
 deliberately that small. anything else is a flint function you write.
+
+## input
+
+read one line from stdin, and return it without the trailing newline.
+
+```flint
+let name = input("What is your name? ")
+print("hello, " + name)
+```
+
+the argument is a prompt, and it is optional. `input()` with nothing reads a
+line in silence. a prompt is written exactly as given, with no newline added,
+so the line the user types starts where the prompt ends.
+
+a prompt that is not a string is an error, and so is calling it with two
+arguments. arity zero or one is not expressible in the fixed-arity check the
+VM does for every other native, so `input()` checks inside instead.
+
+the return value is a normal string: empty for an empty line, which is
+deliberately a different value from what you get at end of file. pressing
+enter on an otherwise empty line gives `""`, and reaching end of file gives
+`nil`, because a script has to be able to tell "the user typed nothing" from
+"there is nothing left to read".
+
+```flint
+print(input())      # with nothing piped in: nil
+```
+
+an input line can be any length. the buffer starts at 64 bytes and doubles,
+which is the same growth shape as every other array in the runtime and is not
+coincidence. a fixed-size buffer would silently truncate a long line, which is
+the kind of failure a script cannot possibly notice, let alone handle.
+
+windows line endings are tolerated: a `\r` is skipped, so a file written there
+arrives as plain text. a script should not have to know which platform produced
+its input.
+
+there is no echo control, no history, no line editing and no signal handling.
+it is a prompt and a read.
 
 ## len
 
@@ -164,7 +203,7 @@ deliberately, and each would be a function you write:
 
 - no `print`-to-a-string, so you cannot build a log line without `+` and `str()`
 - no file io, no environment, no process control
-- no `input`, so a script cannot read from stdin
+- no echo control or history on `input`. it prompts and reads, and that is it.
 - no random numbers. there is no seedable PRNG in the runtime, and adding one
   means picking a source of entropy that is not a portability problem
 - no string methods, so `"a,b".split(",")` is a `while` loop
