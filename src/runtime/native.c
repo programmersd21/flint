@@ -12,6 +12,7 @@
 #include "memory.h"
 #include "object.h"
 #include "stdint.h"
+#include "stringx.h"
 #include "sys.h"
 #include "table.h"
 #include "value.h"
@@ -373,6 +374,7 @@ void register_natives(VM *vm)
 	/* args, env, exit, read_file, write_file, exec. a different kind of
 	 * thing from the ones above, which is why they live in sys.c. */
 	register_sys_natives(vm);
+	register_string_natives(vm);
 	/* not in the manual: the compiler emits this for `import` */
 	vm_define_native(vm, "import_file", import_file_native, 1);
 }

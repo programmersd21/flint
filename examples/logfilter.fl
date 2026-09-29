@@ -1,0 +1,55 @@
+# logfilter.fl -- the thing flint is actually for.
+#
+#     cat access.log | flint examples/logfilter.fl 404
+#
+# reads an access log on stdin, keeps the lines whose status matches, and
+# writes them back out. nothing here is a language feature; it is a
+# demonstration that the parts are enough for a real pipeline.
+#
+# the whole script is one pass over stdin with no intermediate data structure
+# larger than one line, which is the point. a log filter that builds an array
+# of every line first is a memory problem waiting for a big file.
+
+# the needle, from the command line
+let wanted = args()
+
+# read lines until there are none. input() returns nil at end of file, which
+# is the only difference between "an empty line" and "nothing left", so this
+# loop does not need a counter or a length check.
+while true {
+    let line = input()
+
+    if line == nil {
+        break
+    }
+
+    # drop the trailing newline, then look at the fields. access logs are
+    # conventionally "ip - - [date] \"METHOD path status bytes\"" but the
+    # status is always a standalone field, so find it by shape rather than
+    # counting columns: three digits in the fourth-from-last field.
+    let clean = trim(line)
+    let fields = split(clean, " ")
+
+    # too short to be a log line. skip rather than crash: a filter that dies
+    # on one malformed line is a filter nobody can run over real logs.
+    if len(fields) < 2 {
+        continue
+    }
+
+    let status = fields[len(fields) - 2]
+
+    # match. no needle means "keep everything", which makes the script
+    # useful as a passthrough when called with no arguments.
+    if len(wanted) == 0 {
+        print(clean)
+        continue
+    }
+
+    if contains(status, wanted[0]) {
+        # scrub anything that looks like it could be a query string before
+        # it goes back out. a log filter is often the first thing to touch
+        # a line, and tokens end up in logs.
+        let scrubbed = replace(clean, "?", "?[redacted]")
+        print(scrubbed)
+    }
+}
