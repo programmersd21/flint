@@ -47,6 +47,7 @@ void chunk_init(Chunk *chunk)
 	chunk->capacity = 0;
 	chunk->code = NULL;
 	chunk->lines = NULL;
+	chunk->spans = NULL;
 	value_array_init(&chunk->constants);
 }
 
@@ -55,7 +56,7 @@ void chunk_init(Chunk *chunk)
  * is parser.previous.line at the point of the call, so an error blames the
  * operator and not the operand that followed it.
  */
-void chunk_write(VM *vm, Chunk *chunk, uint8_t byte, int line)
+void chunk_write(VM *vm, Chunk *chunk, uint8_t byte, int line, uint32_t offset)
 {
 	if (chunk->count + 1 > chunk->capacity) {
 		int old_capacity = chunk->capacity;
@@ -67,9 +68,15 @@ void chunk_write(VM *vm, Chunk *chunk, uint8_t byte, int line)
 		        chunk->capacity);
 		chunk->lines = GROW_ARRAY(
 		        vm, int, chunk->lines, old_capacity, chunk->capacity);
+		chunk->spans = GROW_ARRAY(vm,
+		        uint32_t,
+		        chunk->spans,
+		        old_capacity,
+		        chunk->capacity);
 	}
 	chunk->code[chunk->count] = byte;
 	chunk->lines[chunk->count] = line;
+	chunk->spans[chunk->count] = offset;
 	chunk->count++;
 }
 
@@ -77,6 +84,7 @@ void chunk_free(VM *vm, Chunk *chunk)
 {
 	FREE_ARRAY(vm, uint8_t, chunk->code, chunk->capacity);
 	FREE_ARRAY(vm, int, chunk->lines, chunk->capacity);
+	FREE_ARRAY(vm, uint32_t, chunk->spans, chunk->capacity);
 	value_array_free(vm, &chunk->constants);
 	chunk_init(chunk);
 }

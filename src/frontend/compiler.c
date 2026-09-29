@@ -242,15 +242,47 @@ static void error_at(Token *token, const char *message)
 		if (fix_count < sizeof(fixes) / sizeof(fixes[0]))
 			fixes[fix_count++] = suggestion;
 	}
+	/*
+	 * A missing delimiter is a problem with the token *before* it, not
+	 * with whatever token the parser happened to be looking at.
+	 *
+	 * `print("x"` with the closing paren left off was reported at the
+	 * end of file, so the caret sat on line 2 pointing at nothing, two
+	 * lines below the code that is actually wrong. The insertion point
+	 * is the end of the previous token, which is where the `)` belongs.
+	 *
+	 * Only for EOF and for the delimiter messages. An ordinary
+	 * "unexpected token" really is about the token in hand, and moving
+	 * that would point at the wrong place.
+	 */
+	bool missing_delimiter =
+	        token->type == TOKEN_EOF &&
+	        (strstr(message, "Expect ')'") != NULL ||
+	                strstr(message, "Expect '}'") != NULL ||
+	                strstr(message, "Expect ']'") != NULL ||
+	                strstr(message, "Expect ';'") != NULL ||
+	                strstr(message, "Expect ','") != NULL);
+	size_t start = token->offset;
+	size_t len = (size_t)token->length;
+	const char *label =
+	        token->type == TOKEN_EOF ? "expected here" : "unexpected token";
+
+	if (missing_delimiter) {
+		Token *prev = &state.parser.previous;
+		if (prev->type != TOKEN_EOF) {
+			start = (size_t)prev->offset + (size_t)prev->length;
+			len = 0;
+			label = "expected here";
+		}
+	}
+
 	FlDiagnostic diag = {
 	        .severity = FL_DIAG_ERROR,
 	        .code = diagnostic_code(token, message),
 	        .message = message,
-	        .primary = fl_span(token->offset,
-	                (size_t)token->offset + (size_t)token->length),
+	        .primary = fl_span(start, start + len),
 	        .has_primary = true,
-	        .primary_label = token->type == TOKEN_EOF ? "expected here"
-	                                                  : "unexpected token",
+	        .primary_label = label,
 	        .suggestions = suggestions,
 	        .suggestion_count = suggestion_count,
 	};
@@ -327,8 +359,11 @@ static bool match(TokenType type)
  */
 static void emit_byte(uint8_t byte)
 {
-	chunk_write(
-	        state.vm, current_chunk(), byte, state.parser.previous.line);
+	chunk_write(state.vm,
+	        current_chunk(),
+	        byte,
+	        state.parser.previous.line,
+	        (uint32_t)state.parser.previous.offset);
 }
 
 static void emit_bytes(uint8_t byte1, uint8_t byte2)

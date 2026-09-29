@@ -108,15 +108,8 @@ void sys_set_source_dir(const char *dir)
 }
 
 /*
- * Point the import resolver at the directory containing `file`.
- *
- * Given "project/lib/x.fl", the source directory becomes "project/lib", so
- * an `import "y.fl"` inside x.fl finds project/lib/y.fl. This is the whole
- * reason a flint script can be run from any directory.
- *
- * A path with no slash is a bare filename in the working directory, so the
- * directory is empty and imports resolve against the process, which is the
- * only meaning that has.
+ * Imports in this file resolve beside it. A bare filename has no directory,
+ * so its imports resolve from the working directory.
  */
 void sys_set_source_dir_for_file(const char *file)
 {
@@ -143,19 +136,8 @@ void sys_set_source_dir_for_file(const char *file)
 }
 
 /*
- * join a module path against the directory of the file doing the import.
- *
- * A module path is relative to the importing file, not to wherever the user
- * happened to be standing. That is the difference between a script that works
- * when you run it and a script that works only from one directory, and for a
- * language aimed at being run from anywhere it is the whole ballgame.
- *
- * An absolute path is returned as-is: the user asked for that exact file.
- *
- * The result is malloc'd and the caller frees it. Two cases: relative path,
- * prepend the source directory; absolute path, copy it. There is no third
- * case, and no search path, because a search path is a package manager
- * wearing a disguise.
+ * Resolve relative to the importing file. Absolute paths pass through.
+ * The caller owns the returned buffer.
  */
 char *sys_resolve_module(const char *path)
 {

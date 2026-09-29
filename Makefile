@@ -83,7 +83,7 @@ DBG_CFLAGS := -O0 -g3 -DFL_DEBUG_PRINT_CODE -DFL_DEBUG_TRACE_EXECUTION
 STR_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFL_GC_STRESS
 STR_LDFLAGS := -fsanitize=address,undefined
 
-.PHONY: all release debug stress test unit bench lint fmt fmt-check clean help
+.PHONY: all release debug stress test diagnostic-test unit bench lint fmt fmt-check clean help
 .SUFFIXES:
 
 # If a compile fails partway, do not leave a truncated object behind. Make
@@ -136,6 +136,9 @@ $(STR_DIR)/%.o: %.c
 # because a stale binary makes a passing test meaningless.
 test: flint
 	@sh tests/run_tests.sh ./flint
+
+diagnostic-test: flint
+	@sh tests/diagnostics.sh ./flint
 
 # The build that finds bugs. GC on every allocation means every missing root
 # turns into a use-after-free immediately instead of on a Tuesday, and asan

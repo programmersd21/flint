@@ -6,6 +6,7 @@
 #define FL_SCANNER_H
 
 #include "common.h"
+#include "../util/diagnostic.h"
 
 typedef enum {
 	/* single character */
@@ -83,6 +84,7 @@ typedef struct {
 	int line;
 	/* a newline appeared before this token, which ends a statement */
 	bool newline_before;
+	uint32_t offset;
 } Token;
 
 /* point the scanner at a new buffer. resets the line to 1. */

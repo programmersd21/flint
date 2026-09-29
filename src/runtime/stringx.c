@@ -133,7 +133,7 @@ static Value split_native(VM *vm, int argc, Value *argv)
 		int i = 0;
 		while (i <= limit) {
 			const char *hit = memchr(
-			        s->chars + i, first, (size_t)(limit - i + 1));
+			        s->chars + i, first, (size_t)(limit - i) + 1);
 			if (hit == NULL)
 				break;
 			int at = (int)(hit - s->chars);
@@ -326,7 +326,7 @@ static Value contains_native(VM *vm, int argc, Value *argv)
 	int i = 0;
 	while (i <= limit) {
 		const char *hit = memchr(
-		        s->chars + i, sub->chars[0], (size_t)(limit - i + 1));
+		        s->chars + i, sub->chars[0], (size_t)(limit - i) + 1);
 		if (hit == NULL)
 			return FALSE_VAL;
 		int at = (int)(hit - s->chars);
@@ -416,7 +416,7 @@ static Value replace_native(VM *vm, int argc, Value *argv)
 		while (i <= limit) {
 			const char *hit = memchr(s->chars + i,
 			        from->chars[0],
-			        (size_t)(limit - i + 1));
+			        (size_t)(limit - i) + 1);
 			if (hit == NULL)
 				break;
 			int at = (int)(hit - s->chars);
@@ -461,7 +461,7 @@ static Value replace_native(VM *vm, int argc, Value *argv)
 	int limit = s->length - from->length;
 	while (i <= limit) {
 		const char *hit = memchr(
-		        s->chars + i, from->chars[0], (size_t)(limit - i + 1));
+		        s->chars + i, from->chars[0], (size_t)(limit - i) + 1);
 		if (hit == NULL)
 			break;
 		int at = (int)(hit - s->chars);

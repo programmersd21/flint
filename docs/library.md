@@ -1,7 +1,7 @@
 # the library
 
-seven built-in functions. that is the entire standard library, and it is
-deliberately that small. anything else is a flint function you write.
+The language core has seven built-ins. The runtime also exposes string and
+system functions; the latter can read files and start processes.
 
 ## input
 
@@ -41,6 +41,40 @@ its input.
 
 there is no echo control, no history, no line editing and no signal handling.
 it is a prompt and a read.
+
+## string functions
+
+`split(s, sep)` returns a list of byte strings. An empty separator splits into
+one-byte strings. `join(xs, sep)` joins string elements with the separator.
+`trim(s)` removes surrounding whitespace. `contains(s, part)`,
+`starts_with(s, prefix)`, and `ends_with(s, suffix)` return booleans.
+`replace(s, old, new)` replaces occurrences; `lower(s)` and `upper(s)` change
+ASCII letters. These operate on bytes; UTF-8 characters are not decoded.
+
+```flint
+print(split("a,b", ","))
+print(join(["a", "b"], ","))
+print(trim("  flint  "))
+print(contains("flint", "lin"))
+```
+
+## system functions
+
+`args()` returns arguments after the script path. `env(name)` returns the
+environment value or `nil` when the variable is unset. An empty environment
+value is still a string.
+
+`read_file(path)` reads a whole file into a string. `write_file(path, data)`
+writes a string and returns `true` on success. These are not sandboxed. A path
+is a path on the host, and a script can overwrite a file it can name.
+
+`exec(program, arg...)` searches `PATH`, starts the program directly, waits,
+and returns its exit status as a number. It does not invoke a shell and does
+not capture output; the child inherits the process streams.
+
+`exit()` terminates the process with status zero. `exit(code)` accepts an
+integer status from 0 through 255. It does not return to the calling Flint
+function.
 
 ## len
 
@@ -197,19 +231,8 @@ for wall clock timing, measure outside the interpreter, with `time`.
 not part of the language. the compiler emits a call to it for every `import`
 statement, and you should not call it yourself. see [modules.md](modules.md).
 
-## what is missing
+## missing pieces
 
-deliberately, and each would be a function you write:
-
-- no `print`-to-a-string, so you cannot build a log line without `+` and `str()`
-- no file io, no environment, no process control
-- no echo control or history on `input`. it prompts and reads, and that is it.
-- no random numbers. there is no seedable PRNG in the runtime, and adding one
-  means picking a source of entropy that is not a portability problem
-- no string methods, so `"a,b".split(",")` is a `while` loop
-- no sorting, on either lists or tables
-- no integer, so there is no integer division or overflow to think about, and
-  no exact arithmetic above 2^53
-
-each of these is a few lines of flint, and keeping them out keeps the runtime
-small enough to read in an afternoon.
+There is no random number generator, sorting, or conversion of a printed
+container into a string. `str([1, 2])` is still `<object>`. The `print`
+statement knows how to render containers; `str()` does not.

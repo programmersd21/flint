@@ -88,10 +88,35 @@ flint --explain E0102                  # what a code means
 see [diagnostics.md](diagnostics.md) for the code groups, the span rules, and
 `--fix`.
 
+## diagnostic codes
+
+These are all codes emitted by the current compiler and VM. The grouping is
+provisional. `E0100` and `E0600` are catchalls while call sites are still being
+migrated.
+
+| code | used for |
+|---|---|
+| `E0001` | unexpected source character |
+| `E0002` | unterminated scientific notation, such as `1e+` |
+| `E0003` | unterminated string literal |
+| `E0100` | parser or compile error without a more specific code |
+| `E0102` | missing `)`, `]`, or `}` |
+| `E0202` | undefined variable or global name |
+| `E0301` | incompatible operator operands |
+| `E0302` | failed `as` type assertion |
+| `E0401` | call error, including wrong arity |
+| `E0501` | module operation error, including an import cycle |
+| `E0600` | runtime error without a more specific code |
+| `E0601` | runtime index error |
+
+`flint --explain CODE` prints a short explanation for each listed code.
+Codes appear only with `--error-format=human`, `short`, or `json`; the default
+legacy format keeps its existing output.
+
 ## the messages
 
-they are lowercase, they end with a period, and they name the thing that
-failed. the list is short and worth knowing by heart:
+runtime messages name the failure and usually end with a period. Some begin
+with a capital because the legacy wording predates structured diagnostics.
 
 | message | cause |
 |---|---|
@@ -130,9 +155,10 @@ its output.
 
 ## what there is not
 
-no line numbers in the runtime trace, only in the compile error. no column. no
-source line quoted, only the line number. no error object, so you cannot
-inspect a failure in flint code.
+the default format shows no source excerpt or caret. Human and JSON formats
+include source locations; the runtime currently maps an error to its executing
+line. See [diagnostics.md](diagnostics.md) for the span limits and supported
+fixes. There is no error value, so Flint code cannot inspect a failure.
 
 that is a deliberate floor. an error type would mean an error class, a
 `try`/`catch`, and a guarantee about unwinding that the runtime does not

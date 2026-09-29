@@ -27,16 +27,14 @@ from the repository root:
 printf 'Ada\nsecond\n\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nafter\nlast' | ./flint examples/input.fl
 ```
 
-the module example is the exception, and the reason is the sharpest edge in the
-language: an import path is resolved against the process working directory, not
-against the file doing the importing.
+the module example is the exception because its imports are relative to the
+importing file. Run it from its directory so the example paths stay short.
 
 ```sh
 cd examples/modules && ../../flint main.fl
 ```
 
-run from the repository root instead, and every import fails with "could not
-open module file". see [../docs/modules.md](../docs/modules.md).
+see [../docs/modules.md](../docs/modules.md) for the path and cache rules.
 
 ## a note on the comments
 

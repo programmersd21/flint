@@ -57,7 +57,7 @@ make release    # -O2, no asserts. the one you ship.
 make debug      # -O0 -g3, dumps the bytecode and traces every instruction
 make stress     # gc on every allocation, under asan and ubsan
 make test       # builds release, runs the language suite
-make diagnostic-test # checks human, short, json, and fix output
+make diagnostic-test # checks human, short, JSON, and fix output
 make unit       # the value and chunk unit tests
 make lint       # clang-tidy, policy in .clang-tidy
 make fmt        # clang-format, policy in .clang-format
@@ -215,8 +215,8 @@ decides. see [docs/modules.md](docs/modules.md).
 
 ### the whole library
 
-thirteen functions. small on purpose -- the point is that a script needs
-nothing installed and nothing built to read a file and call a program.
+The built-ins cover core values, byte-string operations, and basic system
+access. There is no package manager and no external runtime dependency.
 
 ```flint
 let name = input("What is your name? ")   # a prompt, a line, no trailing \n
@@ -293,13 +293,15 @@ project a bug:
 | [functions](docs/functions.md) | functions, recursion, closures |
 | [data](docs/data.md) | strings, lists, tables |
 | [modules](docs/modules.md) | `import` and `export` |
-| [library](docs/library.md) | the seven built-in functions |
+| [library](docs/library.md) | core, string, and system functions |
+| [diagnostics](docs/diagnostics.md) | error formats, current coverage, and `--fix` |
+| [language reference](docs/language.md) | the language in one document |
+| [VM internals](docs/internals.md) | value representation, GC, closures, modules |
 | [errors](docs/errors.md) | what goes wrong, and the exit codes |
 | [limits](docs/limits.md) | what it doesn't do, and what that costs |
 
-[examples/](examples) has runnable programs, commented line by line.
-`hello.fl` first, then work up. the module example needs a `cd`, which is the
-path thing above demonstrating itself.
+[examples/](examples) has runnable programs. `hello.fl` first, then work up.
+The module example uses paths relative to its own file.
 
 ## hacking
 

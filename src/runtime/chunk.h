@@ -132,13 +132,35 @@ typedef struct {
 	 * it and would also be a source of bugs nobody has time for yet.
 	 */
 	int *lines;
+	/*
+	 * Source byte offset of the start of each instruction, parallel to
+	 * `code`. Only the start is stored: the end of one instruction is
+	 * the start of the next, so the array doubles as the end table and
+	 * no span needs two entries.
+	 *
+	 * This is what lets a runtime error underline the expression that
+	 * failed instead of the whole line. Without it the VM knows an
+	 * instruction failed but not which words in the source produced it.
+	 *
+	 * It costs four bytes per byte of code, the same as the line table
+	 * beside it, and is never read on a successful run: the VM only
+	 * touches it while unwinding an error.
+	 */
+	uint32_t *spans;
 	ValueArray constants;
 } Chunk;
 
 void chunk_init(Chunk *chunk);
 
-/* appends one byte. line is used for error messages. */
-void chunk_write(VM *vm, Chunk *chunk, uint8_t byte, int line);
+/*
+ * Append one byte.
+ *
+ * line is the source line, for the stack trace. offset is the source byte
+ * offset the instruction starts at, so a runtime error can underline the
+ * expression rather than the whole line. Both are recorded per byte, which
+ * makes the end of an instruction the start offset of the next one.
+ */
+void chunk_write(VM *vm, Chunk *chunk, uint8_t byte, int line, uint32_t offset);
 void chunk_free(VM *vm, Chunk *chunk);
 
 /* returns the new index, or -1 if the pool is full. */

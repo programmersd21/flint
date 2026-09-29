@@ -19,8 +19,9 @@
   three patches.
 - the commit body says what broke and why the change fixes it. "fix bug" and
   "refactor" say nothing.
-- bugs get a test. add a `.fl` file under `tests/language/` plus a `.expected`
-  file holding the output you expect. `make test` runs every pair it finds.
+- language behavior gets a `.fl` file and `.expected` file under
+  `tests/language/`; `make test` runs those pairs. CLI diagnostic changes go
+  in `tests/diagnostics.sh` and run with `make diagnostic-test`.
 
 ## bug reports
 
@@ -33,14 +34,8 @@ screenshots of terminal text.
 things that are wrong on purpose, or wrong and not yet fixed. each one says
 where the fix belongs, so nobody rediscovers the analysis.
 
-**No module cycle detection.** A file that imports itself recurses until
-`FRAMES_MAX` and reports "Stack overflow". There is also no module cache, so
-importing the same file twice runs it twice. The native is
-`import_file_native()` in `src/runtime/native.c`.
-
-**Import paths resolve against the process working directory**, not against
-the importing file. That is why the tests in `tests/language/modules/` use
-repo-root-relative paths. Fixing it means tracking a directory per call frame.
+See [docs/limits.md](docs/limits.md) for language limits and
+[docs/diagnostics.md](docs/diagnostics.md) for diagnostics coverage.
 
 **Ranges do not nest.** `for n in 1..3` works; `for n in (1..3)` is a parse
 error, because `..` is not an operator and the parser has nothing to attach it
@@ -53,13 +48,9 @@ to inside a grouping. A clean error, not a crash.
 script, so state carries over only through globals, and an unclosed block on
 one line is a syntax error. No multi-line input.
 
-**The compiler's parser state is file-scope static.** `import` reenters the
-interpreter, and a nested `compile()` would clobber the outer one. This is
-safe today only because compiling and executing are separate phases: an outer
-compile has always finished before any execution nests. Nothing enforces that
-invariant, so making `import` eager would break it. The real fix is threading
-the state through as a parameter, which is a large change to
-`src/frontend/compiler.c`.
+The parser state is file-scope static, but `compile_named()` saves and restores
+it around each compile. Keep nested compilation covered if import behavior or
+compiler reentrancy changes.
 
 ## when the interpreter is the suspect
 

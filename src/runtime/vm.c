@@ -338,14 +338,59 @@ void vm_runtime_error(VM *vm, const char *format, ...)
 				                     fn->chunk.code - 1);
 				size_t line = (size_t)fn->chunk.lines[ip];
 				if (line > 0 && line <= source.line_count) {
-					span.start =
-					        (uint32_t)source
-					                .line_starts[line - 1];
-					size_t end = span.start;
-					while (end < source.length &&
-					        source.text[end] != '\n')
-						end++;
-					span.end = (uint32_t)end;
+					/*
+					 * Point at the instruction, not the
+					 * line. Each code byte records the
+					 * source offset it came from, and
+					 * the end of an instruction is the
+					 * start offset of the next, so the
+					 * span of the failing expression
+					 * falls out of two array reads.
+					 *
+					 * Underlining the whole line was
+					 * what made `print(xs[10])` show a
+					 * caret across the entire call.
+					 */
+					if (fn->chunk.spans != NULL &&
+					        ip < (size_t)fn->chunk.count) {
+						span.start =
+						        fn->chunk.spans[ip];
+						span.end =
+						        ip + 1 < (size_t)fn->chunk
+						                                .count
+						                ? fn->chunk.spans
+						                          [ip + 1]
+						                : span.start;
+					} else {
+						span.start =
+						        (uint32_t)source
+						                .line_starts[line -
+						                             1];
+					}
+					if (span.end <= span.start) {
+						/* a zero-width span: fall back
+						 * to the rest of the line, which
+						 * is what it was before, and is
+						 * better than pointing at
+						 * nothing */
+						span.start =
+						        (uint32_t)source
+						                .line_starts[line -
+						                             1];
+					}
+					if (span.end == span.start) {
+						size_t end = span.start;
+						while (end < source.length &&
+						        source.text[end] !=
+						                '\n')
+							end++;
+						span.end = (uint32_t)end;
+					}
+					/* never run past the end of the
+					 * source, whatever the tables say */
+					if (span.end > source.length)
+						span.end =
+						        (uint32_t)source.length;
 					has_span = true;
 					if (missing != NULL) {
 						size_t name_len =

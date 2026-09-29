@@ -16,6 +16,7 @@ program you can run: `./flint -e 'print(1)'`.
 | [errors.md](errors.md) | what goes wrong, and what flint does |
 | [diagnostics.md](diagnostics.md) | formats, current coverage, and `--fix` |
 | [limits.md](limits.md) | what the language does not do |
+| [language.md](language.md) | the language in one prose reference |
 | [internals.md](internals.md) | how the compiler and the vm work |
 
 the formal grammar and semantics are in [../SPEC.md](../SPEC.md), and the

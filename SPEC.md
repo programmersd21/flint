@@ -3,8 +3,9 @@
 version 0.3. this is the grammar and the semantics. the implementation is not
 always right; when they disagree, file a bug.
 
-[language.md](language.md) is a prose version of this for people who want to
-read it rather than implement it.
+[docs/language.md](docs/language.md) is a prose version of this for people who
+want to read it rather than implement it. [docs/diagnostics.md](docs/diagnostics.md)
+documents the current diagnostic output and its limits.
 
 ## lexical
 

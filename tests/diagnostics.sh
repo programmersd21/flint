@@ -112,7 +112,6 @@ import sys
 assert b"\x1b[" not in pathlib.Path(sys.argv[1]).read_bytes()
 PY
 
-echo 'diagnostic tests passed'
 
 # --- typo suggestions ---
 #
@@ -196,3 +195,51 @@ if "$FLINT" --error-format=bogus "$tmp/args.fl" >/dev/null 2>"$tmp/err"; then
 fi
 grep -q 'human, short or json' "$tmp/err"
 
+# --- span precision ---
+#
+# Both of these used to point somewhere unhelpful.
+#
+# A missing `)` was reported at end of file, so the caret sat on the line
+# *after* the code that was actually wrong. The insertion point for a
+# delimiter is the end of the previous token, which is where it belongs.
+#
+# A runtime index error underlined the whole line, so `print(xs[10])` got a
+# caret across the whole call rather than across the subscript. Each code
+# byte now records the source offset it came from, and the end of one
+# instruction is the start of the next, so the failing expression falls out
+# of two array reads.
+
+printf 'print("x"\n' >"$tmp/nodelim.fl"
+"$FLINT" --color=never --error-format=human "$tmp/nodelim.fl" \
+	>"$tmp/nodelim.out" 2>&1 || true
+
+grep -q 'nodelim.fl:1:' "$tmp/nodelim.out" || {
+	echo "missing-delimiter error should point at the end of line 1"
+	cat "$tmp/nodelim.out"
+	exit 1
+}
+if grep -q 'nodelim.fl:2:' "$tmp/nodelim.out"; then
+	echo "missing-delimiter error still points at end of file"
+	cat "$tmp/nodelim.out"
+	exit 1
+fi
+
+printf 'let xs = [1, 2, 3]\nprint(xs[10])\n' >"$tmp/idx.fl"
+"$FLINT" --color=never --error-format=human "$tmp/idx.fl" \
+	>"$tmp/idx.out" 2>&1 || true
+grep -q 'xs\[10\]' "$tmp/idx.out" || {
+	echo "index error should underline the subscript, not the line"
+	cat "$tmp/idx.out"
+	exit 1
+}
+
+printf 'let s = "abc"\nprint(s[99])\n' >"$tmp/stridx.fl"
+"$FLINT" --color=never --error-format=human "$tmp/stridx.fl" \
+	>"$tmp/stridx.out" 2>&1 || true
+grep -q 's\[99\]' "$tmp/stridx.out" || {
+	echo "string index error should underline the subscript"
+	cat "$tmp/stridx.out"
+	exit 1
+}
+
+echo "diagnostic tests passed"

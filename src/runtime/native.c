@@ -205,10 +205,18 @@ static Value str_native(VM *vm, int argc, Value *argv)
 	if (IS_NUMBER(val)) {
 		char buf[64];
 		double d = AS_NUMBER(val);
-		if (fl_double_is_printable_int(d))
+		/* the digit loop first. a loop that builds a hundred
+		 * thousand strings with str() is otherwise dominated by
+		 * snprintf, which costs ~250ns for a call that a digit
+		 * loop does in about twenty. */
+		if (fl_double_is_printable_int(d) &&
+		        fl_itoa(fl_double_to_long(d), buf, sizeof(buf)) > 0) {
+			/* buf already holds the digits */
+		} else if (fl_double_is_printable_int(d)) {
 			snprintf(buf, sizeof(buf), "%ld", fl_double_to_long(d));
-		else
+		} else {
 			snprintf(buf, sizeof(buf), "%.15g", d);
+		}
 		return OBJ_VAL(copy_string(vm, buf, (int)strlen(buf)));
 	}
 	if (IS_BOOL(val))
@@ -242,10 +250,8 @@ static Value type_native(VM *vm, int argc, Value *argv)
  * Read a module and run it in the same VM, so its top-level `let` lands in
  * the same globals table and its `export` is just a definition.
  *
- * This is the only place the runtime reenters the interpreter. There is no
- * module cache, so importing the same file twice runs it twice, and no cycle
- * detection, so a file that imports itself recurses until the stack gives
- * out. Both are known and neither has been worth fixing.
+ * This is the only place the runtime reenters the interpreter. Resolved
+ * paths are cached, and an in-flight entry catches import cycles.
  */
 static Value import_file_native(VM *vm, int argc, Value *argv)
 {
@@ -386,7 +392,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	 * difference between 'lib/math.fl' meaning one thing and meaning
 	 * whatever the last nested import left behind.
 	 */
-	InterpretResult res = vm_interpret(vm, buffer);
+	InterpretResult res = vm_interpret_named(vm, buffer, path);
 	free(buffer);
 	free(path);
 	if (res != INTERPRET_OK) {

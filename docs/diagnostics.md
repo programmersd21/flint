@@ -74,5 +74,38 @@ temporary file. It does not follow a symlink. There is no warning control.
 `flint --explain E0102` prints the short explanation for a known diagnostic
 code. Explanations exist only for the codes currently emitted.
 
+### where a diagnostic points
+
+A missing delimiter is reported at the end of the token before it, which is
+where the delimiter belongs, rather than at whatever token the parser had
+reached:
+
+```
+error[E0102]: Expect ')' after arguments.
+ --> bad.fl:1:10
+  |
+1 | print("x"
+  |          ^ expected here
+  |
+  = help: add the missing delimiter: )
+```
+
+Runtime errors underline the expression that failed rather than the line it
+sits on. Each bytecode byte records the source offset it was compiled from,
+and because the end of one instruction is the start of the next, the span of
+the failing expression is two array reads:
+
+```
+error[E0601]: List index 10 out of bounds (len 3).
+ --> idx.fl:2:1
+  |
+2 | print(xs[10])
+  | ^^^^^^^^^~~ invalid index
+  |
+```
+
+The offset table is only consulted while an error is being reported. A
+successful run does not read it, so it costs nothing on the path that matters.
+
 Run `make diagnostic-test` for format and compatibility checks. `make test`
 continues to cover the language behavior and the default output.

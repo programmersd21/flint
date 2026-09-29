@@ -9,6 +9,7 @@
 #include "object.h"
 #include "table.h"
 #include "value.h"
+#include "../util/diagnostic.h"
 
 typedef enum {
 	INTERPRET_OK,
@@ -48,6 +49,10 @@ struct VM {
 	 */
 	int base_frame;
 	Value *base_top;
+	const char *source_text;
+	const char *source_name;
+	FlDiagFormat diag_format;
+	FlColorMode diag_color;
 
 	Value stack[STACK_MAX];
 	Value *stack_top;
@@ -85,9 +90,12 @@ struct VM {
 
 void vm_init(VM *vm);
 void vm_free(VM *vm);
+void vm_set_diagnostics(VM *vm, FlDiagFormat format, FlColorMode color);
 
 /* compile and run. the entry point for the repl, files and modules alike. */
 InterpretResult vm_interpret(VM *vm, const char *source);
+InterpretResult vm_interpret_named(
+        VM *vm, const char *source, const char *name);
 
 /*
  * Stack primitives. These are also the GC roots, so an object must be on the
