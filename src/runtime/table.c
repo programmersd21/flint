@@ -13,6 +13,9 @@
 #include "value.h"
 
 #include <string.h>
+
+/* table_define_const() below needs this, and it is public anyway. */
+bool table_is_const(Table *table, ObjString *key);
 /*
  * Grow at 75%. Higher means shorter probe chains and wasted slots. Lower
  * means less memory. For a table holding globals this is not a decision
@@ -114,12 +117,15 @@ bool table_get(Table *table, ObjString *key, Value *value)
 }
 
 /*
- * Insert or overwrite, optionally marking the binding const.
+ * Find the entry for a write, growing first if the table is at its load
+ * factor. Reports whether the key was absent, which is what tells `let` from
+ * assignment.
  *
- * Returns true if the key was not already present, which is how the compiler
- * tells `let` from assignment.
+ * The growth and the count bookkeeping live here rather than in table_set()
+ * because there are two ways to write and both have to do them identically.
  */
-bool table_set(VM *vm, Table *table, ObjString *key, Value value, bool is_const)
+static Entry *entry_for_write(
+        VM *vm, Table *table, ObjString *key, bool *is_new)
 {
 	if (table->count + 1 > table->capacity * TABLE_MAX_LOAD) {
 		int capacity = GROW_CAPACITY(table->capacity);
@@ -129,27 +135,65 @@ bool table_set(VM *vm, Table *table, ObjString *key, Value value, bool is_const)
 	Entry *entry = find_entry(table->entries, table->capacity, key);
 
 	/* reusing a tombstone does not increase the count */
-	bool is_new_key = entry->key == NULL;
-	if (is_new_key && IS_NIL(entry->value))
+	*is_new = entry->key == NULL;
+	if (*is_new && IS_NIL(entry->value))
 		table->count++;
 
-	/*
-	 * is_const applies to a new binding only. Overwriting a live const
-	 * entry keeps the flag, so `const x = 1; let x = 2` cannot quietly
-	 * downgrade the binding and leave the earlier const meaningless.
-	 *
-	 * The test is is_new_key, not "was this slot a tombstone": a reused
-	 * tombstone still holds is_const from whatever lived there before it
-	 * was deleted, so OR-ing that in would resurrect the flag of a
-	 * binding that no longer exists. is_new_key is the only test that
-	 * separates a live occupant from a dead slot.
-	 */
-	if (is_new_key)
-		entry->is_const = is_const;
+	return entry;
+}
+
+/*
+ * Insert or overwrite, without touching the const flag.
+ *
+ * An existing const entry keeps its flag, so `const x = 1; let x = 2` cannot
+ * quietly downgrade the binding and leave the earlier const meaningless. That
+ * downgrade is the whole reason the flag lives on the entry rather than being
+ * inferred from the bytecode.
+ *
+ * The test for "existing" is key == NULL, not "is this a tombstone": a reused
+ * tombstone still holds is_const from whatever lived there before it was
+ * deleted, so a wider test would resurrect the flag of a dead binding.
+ *
+ * Returns true if the key was not already present.
+ */
+bool table_set(VM *vm, Table *table, ObjString *key, Value value)
+{
+	bool is_new;
+	Entry *entry = entry_for_write(vm, table, key, &is_new);
 
 	entry->key = key;
 	entry->value = value;
-	return is_new_key;
+	return is_new;
+}
+
+/*
+ * Bind a name with const, or refuse.
+ *
+ * Returns false if the name is already const, because redeclaring a constant
+ * would make the first declaration a lie: the value it held is gone and the
+ * promise that nothing writes it is gone with it. The caller reports it.
+ *
+ * Upgrading is allowed, because `let x = 1; const x = 2` narrows the binding
+ * rather than contradicting it, and refusing that would be a rule with no
+ * principle behind it.
+ */
+bool table_define_const(VM *vm, Table *table, ObjString *key, Value value)
+{
+	if (table_is_const(table, key))
+		return false;
+
+	bool is_new;
+	Entry *entry = entry_for_write(vm, table, key, &is_new);
+
+	entry->key = key;
+	entry->value = value;
+	/* set unconditionally, including on an overwrite: this is the call
+	 * that establishes the binding, and a let being promoted to const
+	 * is the only way to reach an existing entry here */
+	entry->is_const = true;
+	(void)is_new;
+
+	return true;
 }
 
 /*
@@ -189,17 +233,24 @@ bool table_delete(Table *table, ObjString *key)
 	return true;
 }
 
-/* used to copy exported names out of a module. */
+/*
+ * Copy every live entry from one table into another, preserving const.
+ *
+ * Const has to come along. A table that copied names without it would turn an
+ * imported constant into an ordinary binding in the importing table, and the
+ * copy is exactly the case where nobody is watching the flag.
+ */
 void table_add_all(VM *vm, Table *from, Table *to)
 {
 	for (int i = 0; i < from->capacity; i++) {
 		Entry *entry = &from->entries[i];
-		if (entry->key != NULL)
-			table_set(vm,
-			        to,
-			        entry->key,
-			        entry->value,
-			        entry->is_const);
+		if (entry->key == NULL)
+			continue;
+
+		if (entry->is_const)
+			table_define_const(vm, to, entry->key, entry->value);
+		else
+			table_set(vm, to, entry->key, entry->value);
 	}
 }
 

@@ -42,12 +42,21 @@ void table_free(VM *vm, Table *table);
 bool table_get(Table *table, ObjString *key, Value *value);
 
 /*
- * Insert or overwrite. is_const marks a *new* entry; overwriting a const
- * entry leaves its flag alone, so `const x = 1; let x = 2` cannot quietly
- * downgrade the binding. Returns true if the key was new.
+ * Insert or overwrite. Never touches the const flag, so overwriting a const
+ * leaves it const. Returns true if the key was new.
  */
-bool table_set(
-        VM *vm, Table *table, ObjString *key, Value value, bool is_const);
+bool table_set(VM *vm, Table *table, ObjString *key, Value value);
+
+/*
+ * Bind a name with const. Returns false if the name is already const, which
+ * the caller reports as a redeclaration.
+ *
+ * Separate from table_set() because the two want opposite things when they
+ * meet an existing const: an ordinary write must leave the flag alone, and
+ * this must refuse. Folding them into one function with a flag is how a
+ * const quietly degrades back into a let.
+ */
+bool table_define_const(VM *vm, Table *table, ObjString *key, Value value);
 
 /*
  * Is this name bound with const? Used by the VM to refuse an assignment, and
