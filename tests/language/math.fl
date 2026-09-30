@@ -1,0 +1,83 @@
+# math against the awkward values.
+#
+# every number in flint is a double, so most of this file is about what
+# happens at the edges: zero, negative zero, infinity, nan, and the boundary
+# where a double stops representing whole numbers.
+#
+# the thing being pinned down is the module's behaviour, not libm's. a libm
+# is not bit-identical across platforms and flint does not promise it is.
+# what flint does promise is that these answers do not surprise anyone.
+
+import math
+
+# --- ordinary values ---
+
+print(math.abs(-5))
+print(math.sqrt(16))
+print(math.cbrt(27))
+print(math.exp(0))
+print(math.log(1))
+print(math.pow(2, 10))
+print(math.floor(2.7))
+print(math.ceil(2.1))
+print(math.trunc(-2.7))
+
+# --- rounding, where the definitions differ between libraries ---
+#
+# round is half away from zero. that is what everyone means by it and it is
+# NOT what c's nearby() does, which is why the module does not call it.
+
+print(math.round(0.5))      # 1, not 0
+print(math.round(1.5))      # 2
+print(math.round(2.5))      # 3
+print(math.round(-0.5))     # -1, not 0
+print(math.round(-1.5))     # -2
+print(math.round(2.4))      # 2, down is not a tie
+print(math.round(-2.4))     # -2
+
+# floor and ceil are not round, and the difference is visible on halves
+print(math.floor(-0.5))     # -1
+print(math.ceil(-0.5))      # 0
+print(math.floor(0.5))      # 0
+print(math.ceil(0.5))       # 1
+
+# --- negative inputs where the sign matters ---
+
+print(math.sqrt(0))
+print(math.cbrt(-27))       # works, unlike pow(x, 1/3)
+print(math.abs(-0.25))
+
+# --- non-finite results ---
+#
+# 1/0 is inf because flint has no integer division to trap on. these are the
+# answers a script will actually meet, so they are pinned rather than left to
+# whichever platform the test happens to run on.
+
+print(math.isinf(1 / 0))
+print(math.isinf(-1 / 0))
+print(math.isnan(0 / 0))
+print(math.isfinite(1))
+print(math.isfinite(1 / 0))
+print(math.isfinite(0 / 0))
+
+# nan is not equal to itself, and a module that hid that would be lying
+print(0 / 0 == 0 / 0)
+
+# --- the boundaries that are easy to get wrong ---
+
+print(math.isfinite(1e308 * 10))    # overflows to inf
+print(math.isfinite(1e-308 / 1e10))  # underflows toward zero
+print(math.fmod(7, 3))
+print(math.copysign(3, -1))
+print(math.copysign(3, 1))
+
+# --- the constant that is worth being precise about ---
+#
+# pi is the closest double to pi, not pi. printing it gives you 16 digits and
+# that is what a double holds. this is the whole reason constants like this
+# are written as literals rather than computed.
+
+print(math.pi)
+print(math.e)
+print(math.tau)
+print(math.sqrt2)

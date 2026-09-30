@@ -9,6 +9,7 @@ bottom rather than dipping in.
 | [hello.fl](hello.fl) | the smallest complete program, and `type` |
 | [fizzbuzz.fl](fizzbuzz.fl) | ranges, `if`/`else if`, `%`, truthiness |
 | [as.fl](as.fl) | type assertions, and why they are not conversions |
+| [math.fl](math.fl) | the maths library, and the two rounding surprises |
 | [input.fl](input.fl) | prompts, lines, empty input, EOF, and a long line |
 | [closures.fl](closures.fl) | capture by reference, the factory pattern, `map`/`filter` |
 | [data.fl](data.fl) | lists, tables, strings, and the functions the library omits |
@@ -22,6 +23,7 @@ from the repository root:
 ./flint examples/hello.fl
 ./flint examples/fizzbuzz.fl
 ./flint examples/as.fl
+./flint examples/math.fl
 ./flint examples/closures.fl
 ./flint examples/data.fl
 printf 'Ada\nsecond\n\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nafter\nlast' | ./flint examples/input.fl

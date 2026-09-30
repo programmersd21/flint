@@ -1,0 +1,74 @@
+# math.fl -- the module you will reach for first.
+#
+#     ./flint examples/math.fl
+#
+# three things worth knowing about flint's numbers before reading on:
+#
+#   every number is a double. there is no integer type, so there is no
+#   integer division and nothing to overflow.
+#
+#   only nil and false are falsy, so zero is true. `if x` does not mean
+#   "if x is non-zero" and a loop condition is where that bites.
+#
+#   every number has a float implementation, so isfinite() is a real check
+#   rather than a formality. dividing by zero gives inf, not an error.
+
+import math
+
+# the useful one: distance between two points
+fn distance(x1, y1, x2, y2) {
+    let dx = x2 - x1
+    let dy = y2 - y1
+    return math.sqrt(dx * dx + dy * dy)
+}
+
+print("distance (0,0) to (3,4): " + str(distance(0, 0, 3, 4)))
+print("distance (1,1) to (4,5): " + str(distance(1, 1, 4, 5)))
+
+# a circle
+fn circle_area(radius) {
+    return math.pi * radius * radius
+}
+
+print("area of r=5: " + str(circle_area(5)))
+
+# trigonometry, in radians, because that is what the hardware does and
+# degrees would be a conversion on every call for a display nicety
+let angle = math.pi / 4
+print("sin(pi/4) = " + str(math.sin(angle)))
+print("cos(pi/4) = " + str(math.cos(angle)))
+
+# round is half away from zero, which is the part people get caught by.
+# c's nearby() rounds half to even, so 2.5 would come out as 2 there and 3
+# here. documented in lib/math.fl because the alternative is a bug report.
+print("round(0.5)  = " + str(math.round(0.5)))
+print("round(2.5)  = " + str(math.round(2.5)))
+print("round(-0.5) = " + str(math.round(-0.5)))
+
+# cbrt is not pow(x, 1/3). that expression returns nan for a negative x,
+# which is a fine answer from a function and a confusing one from a cube root.
+print("cbrt(-27)      = " + str(math.cbrt(-27)))
+print("pow(-27, 1/3)  = " + str(math.pow(-27, 1 / 3)))
+
+# asking whether a number is a number is normal after a division
+let good = 10 / 2
+let bad = 1 / 0
+let worse = 0 / 0
+
+print("10/2  isfinite: " + str(math.isfinite(good)))
+print("1/0   isinf:    " + str(math.isinf(bad)))
+print("0/0   isnan:    " + str(math.isnan(worse)))
+
+# a small numerical thing: the hypotenuse of a triangle, and the angle
+# opposite a side. enough trig to be worth having.
+fn hypotenuse(a, b) {
+    return math.sqrt(a * a + b * b)
+}
+
+fn angle_opposite(a, b, c) {
+    return math.acos((b * b + c * c - a * a) / (2 * b * c))
+}
+
+print("hypotenuse(3,4)     = " + str(hypotenuse(3, 4)))
+print("angle opposite 5     = " + str(angle_opposite(5, 4, 3)) + " rad")
+print("  ... in degrees     = " + str(angle_opposite(5, 4, 3) * 180 / math.pi))

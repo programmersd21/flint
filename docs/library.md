@@ -1,8 +1,7 @@
 # the library
 
-Everything a script can call, in three groups: the core language, strings, and
-the system functions that read files and start processes. Nothing else is
-reachable without importing a module.
+Everything a script can call. The core language and the system functions are
+built in; everything else is a module in `lib/`, imported by name.
 
 ## input
 
@@ -262,3 +261,53 @@ like any other. the wrappers live in `src/util/fl_math.c` so the language and
 the maths stay separate.
 
 contributed in [#1](https://github.com/programmersd21/flint/pull/1).
+
+## math
+
+```flint
+import math
+print(math.sqrt(2))
+```
+
+the first library anyone imports, and the one the rest of the standard
+library leans on. every function takes and returns numbers, because that is
+the only numeric type flint has.
+
+a bare name is a library, not a file. `import "foo.fl"` looks next to the
+importing file, `import math` looks in the standard library, and the module
+loader tells them apart. there is one module system, not two.
+
+| | |
+|---|---|
+| `math.pi` `math.e` `math.tau` | the usual constants |
+| `math.sqrt2` `math.ln2` `math.ln10` | the two-letter ones |
+| `math.abs(x)` | |
+| `math.sqrt(x)` `math.cbrt(x)` `math.exp(x)` `math.exp2(x)` | |
+| `math.log(x)` `math.log2(x)` `math.log10(x)` | |
+| `math.pow(x, y)` | there is no `^`. it is xor elsewhere, and flint does not pretend otherwise |
+| `math.sin` `cos` `tan` `asin` `acos` `atan` | radians. always. |
+| `math.atan2(y, x)` | |
+| `math.sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | |
+| `math.floor` `ceil` `trunc` | |
+| `math.round(x)` | **half away from zero** |
+| `math.fmod` `math.remainder` `math.copysign` | |
+| `math.isnan` `math.isinf` `math.isfinite` | |
+
+### the two that surprise people
+
+`round` is half away from zero, so `round(0.5)` is 1 and `round(-0.5)` is -1.
+the c library's `nearby()` rounds half to even and would give 0 and 0. flint
+does not use it, because "what everyone means by round" is worth more than
+consistency with a function whose name does not mean round.
+
+`cbrt(-27)` is -3. `pow(-27, 1/3)` is `nan`, and that is correct for a
+function that has to be right about negative zero and infinities. it is still
+the wrong tool for a cube root, which is why both exist.
+
+### what is not promised
+
+libm is not bit-identical across platforms, and the last digit of a
+transcendental function may differ. what flint promises is the behaviour at
+the edges: `sqrt(0)` is 0, `cbrt` works on negatives, division by zero gives
+infinity rather than an error, and `0/0` is `nan`, which is not equal to
+itself.
