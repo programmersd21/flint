@@ -311,3 +311,35 @@ transcendental function may differ. what flint promises is the behaviour at
 the edges: `sqrt(0)` is 0, `cbrt` works on negatives, division by zero gives
 infinity rather than an error, and `0/0` is `nan`, which is not equal to
 itself.
+
+## path
+
+```flint
+import path
+print(path.join("a", "b", "c"))
+```
+
+path manipulation, and nothing else. every function here is string
+arithmetic: this module never touches the disk. that is `fs`, and mixing the
+two is how a `join` ends up doing io when somebody expected a string.
+
+| | |
+|---|---|
+| `path.join(a, b)` | one separator, never two. empty parts are skipped |
+| `path.basename(p)` | after the last separator |
+| `path.dirname(p)` | before the last separator, or `"."` |
+| `path.ext(p)` | with the dot, or `""`. a leading dot is not an extension |
+| `path.stem(p)` | the name without the extension |
+| `path.isabs(p)` | starts at the root |
+| `path.has_ext(p, list)` | case-insensitive, list holds bare extensions |
+| `path.sep` | `"/"` |
+
+`has_ext("a.tar.gz", ["gz"])` matches on the *last* extension, which is what
+`ext` returns. asking for `tar.gz` is a different question and is not the one
+this answers.
+
+the separator is always `/`, including on windows, so a path that arrived in a
+config file behaves the same everywhere. a path written as `a\b` is treated as
+one component. that is a known limitation, not an oversight: a module that
+guesses at the host separator is a module that is wrong in one direction and
+surprising in the other.

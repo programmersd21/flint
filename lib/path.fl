@@ -1,0 +1,124 @@
+# path -- path strings, and the joining that is easy to get wrong.
+#
+#     import path
+#     print(path.join("a", "b", "c"))
+#
+# a flint string is bytes, not a filesystem object, and this module is about
+# strings. it never touches the disk. what is on the disk is fs, and mixing the
+# two is how a module ends up doing io when somebody expected a join.
+#
+# the separator is a forward slash on everything, because that is what a path
+# from a config file or a script looks like, and because it works on windows
+# too. see the note at the bottom.
+
+export const sep = "/"
+
+# join parts with a separator, skipping the empty ones.
+#
+# an empty part is skipped rather than producing "//", which is the whole
+# point of the function: joining a base that ended in a slash with a name
+# that did not should not depend on whether one of them had a trailing slash.
+export fn join(a, b) {
+    if len(a) == 0 { return b }
+    if len(b) == 0 { return a }
+
+    let out = a
+    if not ends_with(out, sep) {
+        out = out + sep
+    }
+    return out + b
+}
+
+# everything after the last separator, or the whole string
+export fn basename(p) {
+    let i = -1
+    let k = 0
+    while k < len(p) {
+        if p[k] == sep { i = k }
+        k += 1
+    }
+    return __slice(p, i + 1, len(p))
+}
+
+# everything before the last separator, or "." when there is none.
+#
+# "" rather than "." would be more literal and less useful. every caller that
+# wants the literal will have written the path themselves.
+export fn dirname(p) {
+    let i = -1
+    let k = 0
+    while k < len(p) {
+        if p[k] == sep { i = k }
+        k += 1
+    }
+    if i < 0 { return "." }
+    if i == 0 { return sep }
+    return __slice(p, 0, i)
+}
+
+# the extension including the dot, or "" when there is none.
+#
+# a leading dot is not an extension, so ".bashrc" has none. that is the rule
+# everyone expects and the one get_ext() guesses wrong.
+export fn ext(p) {
+    let name = basename(p)
+    let dot = -1
+    let k = 0
+    while k < len(name) {
+        if name[k] == "." { dot = k }
+        k += 1
+    }
+    if dot <= 0 { return "" }
+    return __slice(name, dot, len(name))
+}
+
+# the name with the extension removed
+export fn stem(p) {
+    let name = basename(p)
+    let e = ext(name)
+    if len(e) == 0 { return name }
+    return __slice(name, 0, len(name) - len(e))
+}
+
+# true when the path is absolute, meaning it starts at the root
+export fn isabs(p) {
+    return len(p) > 0 and p[0] == sep
+}
+
+# true when the extension matches one in the list.
+#
+# the list holds bare extensions, no dot: has_ext("a.tar.gz", ["gz", "zip"]).
+# an extension that keeps its dot is what `ext` returns, and the two are
+# different things -- the dot is punctuation, not part of the name.
+#
+# comparison is byte by byte rather than with `==`. `==` on flint strings is
+# identity, and while interning makes it usually come out right, "usually" is
+# not a property worth relying on in a predicate.
+export fn has_ext(p, exts) {
+    let e = lower(ext(p))
+    if len(e) > 0 and e[0] == "." {
+        e = __slice(e, 1, len(e))
+    }
+
+    let k = 0
+    while k < len(exts) {
+        let want = lower(exts[k])
+        if len(want) == len(e) {
+            let j = 0
+            while j < len(e) and e[j] == want[j] {
+                j += 1
+            }
+            if j == len(e) { return true }
+        }
+        k += 1
+    }
+    return false
+}
+
+# note on separators
+#
+# this module always uses "/". a windows path arriving as "a\\b" will be
+# treated as one component. that is a known limitation rather than an
+# oversight, and it is the right trade for now: a module that guesses at the
+# host separator is a module that is wrong in one direction and surprising in
+# the other. a fix means asking the platform, which is fs's job.

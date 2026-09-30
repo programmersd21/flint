@@ -399,13 +399,15 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	 * entries, so the scan is linear and the array is short-lived.
 	 */
 	ObjString **before_keys = NULL;
+	Value *before_vals = NULL;
 	int before_count = 0;
 	bool is_library = strchr(raw, '/') == NULL;
 	if (is_library && vm->globals.count > 0) {
 		before_count = vm->globals.count;
 		before_keys =
 		        malloc(sizeof(ObjString *) * (size_t)before_count);
-		if (before_keys == NULL) {
+		before_vals = malloc(sizeof(Value) * (size_t)before_count);
+		if (before_keys == NULL || before_vals == NULL) {
 			free(path);
 			vm_pop(vm);
 			vm_runtime_error(vm, "Out of memory in import.");
@@ -425,6 +427,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	free(path);
 	if (res != INTERPRET_OK) {
 		free(before_keys);
+		free(before_vals);
 		/* a module that failed partway is not "loaded". drop the
 		 * marker so a retry re-runs it rather than looking like
 		 * a cycle. its partial globals stay, which is flint's
@@ -454,6 +457,15 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 			ObjString *gname = vm->globals.entries[i].key;
 			if (gname == NULL)
 				continue;
+			bool redefined = false;
+			for (int k = 0; k < before_count; k++) {
+				if (before_keys[k] == gname &&
+				        !values_equal(before_vals[k],
+				                vm->globals.entries[i].value)) {
+					redefined = true;
+					break;
+				}
+			}
 			bool existed = false;
 			for (int k = 0; k < before_count; k++) {
 				if (before_keys[k] == gname) {
@@ -461,7 +473,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 					break;
 				}
 			}
-			if (existed)
+			if (existed && !redefined)
 				continue;
 			if (bag->count == bag->capacity) {
 				int old = bag->capacity;
@@ -498,6 +510,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		vm_pop(vm); /* the bag */
 	}
 	free(before_keys);
+	free(before_vals);
 
 	table_set(vm, &vm->modules, key, TRUE_VAL);
 	vm_pop(vm); /* the key */
@@ -505,6 +518,53 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 }
 
 /* called from vm_init(), before any user code runs. */
+/*
+ * __slice(s, from, to) -> string
+ *
+ * The one string operation flint was missing. half-open, like everything
+ * else here, and out-of-range clamps rather than erroring, which is what a
+ * slice wants: asking for past the end of a string is a normal thing to do
+ * when the length is not known in advance.
+ *
+ * a negative index counts from the end, so a caller that does not know the
+ * length can still take the last n.
+ */
+static Value slice_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0]) || !IS_NUMBER(argv[1]) || !IS_NUMBER(argv[2])) {
+		vm_runtime_error(
+		        vm, "__slice() takes a string and two numbers.");
+		return NIL_VAL;
+	}
+
+	ObjString *s = AS_STRING(argv[0]);
+	int len = s->length;
+	double fd = AS_NUMBER(argv[1]);
+	double td = AS_NUMBER(argv[2]);
+
+	if (fd != (double)(int)fd || td != (double)(int)td) {
+		vm_runtime_error(vm, "__slice() bounds must be whole numbers.");
+		return NIL_VAL;
+	}
+
+	int from = (int)fd;
+	int to = (int)td;
+	if (from < 0)
+		from += len;
+	if (to < 0)
+		to += len;
+	if (from < 0)
+		from = 0;
+	if (to > len)
+		to = len;
+	if (to < from)
+		to = from;
+
+	ObjString *out = copy_string(vm, s->chars + from, to - from);
+	return OBJ_VAL(out);
+}
+
 void register_natives(VM *vm)
 {
 	vm_define_native(vm, "clock", clock_native, 0);
@@ -516,6 +576,7 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "pop", pop_native, 1);
 	vm_define_native(vm, "str", str_native, 1);
 	vm_define_native(vm, "type", type_native, 1);
+	vm_define_native(vm, "__slice", slice_native, 3);
 	/* args, env, exit, read_file, write_file, exec. a different kind of
 	 * thing from the ones above, which is why they live in sys.c. */
 	register_sys_natives(vm);

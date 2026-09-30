@@ -1,0 +1,46 @@
+# path, which is string manipulation and never touches the disk.
+import path
+
+# joining must not depend on whether a part carried a trailing slash
+print(path.join("a", "b"))
+print(path.join("a/", "b"))
+print(path.join("", "b"))
+print(path.join("a", ""))
+print(path.join("a", "b/c"))
+
+# the last component
+print(path.basename("/a/b/c.fl"))
+print(path.basename("c.fl"))
+print(path.basename("/a/"))
+print(path.basename("a/b/"))
+
+# everything before it
+print(path.dirname("/a/b/c.fl"))
+print(path.dirname("c.fl"))
+print(path.dirname("/a"))
+print(path.dirname("/c.fl"))
+
+# the extension, with the dot, and nothing for a hidden file
+print(path.ext("/a/b/c.fl"))
+print(path.ext("c"))
+print(path.ext(".bashrc"))
+print(path.ext("/a/.config"))
+
+# the name without it
+print(path.stem("/a/b/c.fl"))
+print(path.stem("c"))
+print(path.stem("/a/.config"))
+
+# absolute or not
+print(path.isabs("/a"))
+print(path.isabs("a"))
+print(path.isabs(""))
+
+# extension matching, case-insensitive, against bare extensions
+print(path.has_ext("a.TXT", ["txt", "md"]))
+print(path.has_ext("a.tar.gz", ["gz", "zip"]))
+print(path.has_ext("a.rs", ["txt", "md"]))
+print(path.has_ext("noext", ["txt"]))
+
+# the separator is part of the api so callers can build paths with it
+print(path.sep)
