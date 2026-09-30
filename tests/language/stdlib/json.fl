@@ -1,0 +1,43 @@
+# json -- parse and stringify round-trips.
+#
+# the test avoids any object where key iteration order is unspecified.
+# a table with one key is fine; multiple keys are not, unless stringify
+# sorts them (it does not, and pretending otherwise is how a test lies).
+
+import json
+
+# primitives survive the round-trip
+print(json.parse("1"))         # 1
+print(json.parse("true"))      # true
+print(json.parse("false"))     # false
+print(json.parse("null"))      # nil
+print(json.parse("\"hello\"")) # hello
+
+# a list round-trips
+let arr = json.parse("[1, 2, 3]")
+print(arr[0])         # 1
+print(arr[1])         # 2
+print(arr[2])         # 3
+print(len(arr))       # 3
+
+# stringify a list
+print(json.stringify([1, 2, 3]))        # [1,2,3]
+print(json.stringify([]))               # []
+print(json.stringify(["a", "b"]))       # ["a","b"]
+
+# an object with one key
+let obj = json.parse("{\"x\": 42}")
+print(obj.x)           # 42
+
+# stringify a one-key table
+print(json.stringify({x: 1}))          # {"x":1}
+
+# null in json is nil in flint
+let with_null = json.parse("[null, 1]")
+print(with_null[0])    # nil
+print(with_null[1])    # 1
+
+# nested
+let nested = json.parse("{\"a\": [1, 2]}")
+print(nested.a[0])    # 1
+print(nested.a[1])    # 2

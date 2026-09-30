@@ -1,0 +1,32 @@
+# time -- verify the types are right without pinning wall-clock values.
+#
+# these tests check that time.now() returns a number, clock_ms() returns a
+# number, and str() returns a string. checking the actual values would make
+# the test wrong in a different timezone or on a different day, which is the
+# reason the module uses UTC and the tests use type().
+
+import time
+
+# now() is a number (unix epoch)
+print(type(time.now()) == "number")       # true
+print(time.now() > 0)                     # true
+
+# clock_ms() is a monotonic number
+print(type(time.clock_ms()) == "number")  # true
+print(time.clock_ms() > 0)               # true
+
+# clock_ms goes forward, not backward
+let t1 = time.clock_ms()
+let t2 = time.clock_ms()
+print(t2 >= t1)                           # true
+
+# str() returns a string in the right shape (starts with "20" for 21st c)
+let s = time.str(time.now())
+print(type(s) == "string")                # true
+print(starts_with(s, "20"))               # true
+
+# measure takes a named function
+fn noop() { let _ = 1 + 1 }
+let elapsed = time.measure(noop)
+print(type(elapsed) == "number")          # true
+print(elapsed >= 0)                       # true

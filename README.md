@@ -24,6 +24,11 @@ git clone https://github.com/programmersd21/flint
 cd flint && make release
 ```
 
+to use the standard library, copy `lib/` next to the binary, or point
+`FLINT_STDLIB` at the directory. the interpreter checks the environment
+variable first, then `<exe-dir>/lib`, then `~/.flint/stdlib`. pick whichever
+makes sense for the install layout.
+
 on arch, there is an aur package. it is community-maintained, not owned by
 this repo, so it may trail the releases here by a version:
 
@@ -59,6 +64,7 @@ make stress     # gc on every allocation, under asan and ubsan
 make test       # builds release, runs the language suite
 make diagnostic-test # checks human, short, JSON, and fix output
 make unit       # the value and chunk unit tests
+make check      # clean + build + test + unit. the gate. use before pushing.
 make lint       # clang-tidy, policy in .clang-tidy
 make fmt        # clang-format, policy in .clang-format
 make fmt-check  # same, but reports instead of rewriting. this is the ci one.
@@ -67,6 +73,10 @@ make fmt-check  # same, but reports instead of rewriting. this is the ci one.
 `make stress` is the one that finds things. it runs the whole suite with the
 collector firing on every single allocation, so a missing root turns into a
 use-after-free immediately rather than on a thursday.
+
+`make check` is the full gate: cleans the tree, builds from scratch, then
+runs every test. `make test` alone tests a potentially stale binary; this
+one does not. use it before tagging a release.
 
 ## running
 
@@ -175,8 +185,8 @@ functions later. the seven type names are the seven `type()` returns: `number`,
 
 ### modules
 
-one file is a module. `import` runs it, and everything it defines becomes
-global.
+one file is a module. `import` runs it, and everything it exports becomes
+available.
 
 ```flint
 # math.fl
@@ -192,31 +202,53 @@ print(square(6))
 ```
 
 **imports resolve against the importing file**, so a script runs from any
-directory:
-
-```sh
-$ flint myproject/main.fl     # works
-$ cd myproject && flint main.fl   # also works
-```
-
-a relative path is joined to the directory of the file doing the import, not
-to wherever you happen to be standing. an absolute path is used as given. that
-is the whole change, and it is the difference between a script that works and
-a script that works only from one place.
+directory. a relative path is joined to the directory of the file doing the
+import, not to wherever you happen to be standing.
 
 modules run once per VM. importing one again is a no-op, so a library's
 top-level code happens once however many files pull it in, and a repeated
-import is not a redeclaration of its constants. a file that imports itself is
-an error naming the file, not a stack overflow.
+import is not a redeclaration of its constants.
 
-there is still no `private` and no namespace: all files share one global
-table, so two modules defining the same name is a collision that import order
-decides. see [docs/modules.md](docs/modules.md).
+bare names import from the standard library:
 
-### the whole library
+```flint
+import json
+import math
+import fs
+```
 
-The built-ins cover core values, byte-string operations, and basic system
-access. There is no package manager and no external runtime dependency.
+the interpreter checks `FLINT_STDLIB`, then `<exe-dir>/lib`, then
+`~/.flint/stdlib`. see [docs/modules.md](docs/modules.md).
+
+### the standard library
+
+seven modules in `lib/`. import them by bare name. no package manager, no
+internet, no install step beyond copying the directory.
+
+| module | what it does |
+|---|---|
+| `math` | sin, cos, tan, exp, log, log2, sqrt, floor, ceil, round, abs, ... |
+| `random` | rand(), rand_int(), rand_float(), shuffle(list) |
+| `time` | now(), clock_ms(), sleep(ms), format(t), measure(fn) |
+| `fs` | read(path), write(path, s), append(path, s), exists(p), remove(p), mkdir(p), isdir(p) |
+| `path` | join(...), dir(p), base(p), ext(p), abs(p), strip_ext(p) |
+| `collections` | reverse(xs), contains(xs, v), min(xs), max(xs), sum(xs), flatten(xs), zip(a, b), uniq(xs) |
+| `json` | parse(s), stringify(v), pretty(v) |
+
+```flint
+import math
+import json
+import fs
+
+print(math.sin(math.PI / 2))      # 1
+let data = json.parse("{\"x\": 1}")
+fs.write("out.txt", json.pretty(data))
+```
+
+### the built-in functions
+
+the built-ins cover core values, byte-string operations, and basic system
+access. nothing external.
 
 ```flint
 let name = input("What is your name? ")   # a prompt, a line, no trailing \n
@@ -226,11 +258,6 @@ let text = read_file("in.txt")           # the whole file, as a string
 print(write_file("out.txt", text))
 exit(exec("grep", "-c", "error", "app.log"))   # no shell, ever
 ```
-
-`input()` writes its prompt with no newline and reads one line, so the typing
-starts where the prompt ends. an empty line gives `""` and end of file gives
-`nil`, which are different values on purpose: the script has to be able to
-tell "the user typed nothing" from "there is nothing left to read".
 
 `exec()` calls `execvp` and never a shell. there is no path from this API to
 `/bin/sh`, so a filename with a space or a semicolon in it is an argument
@@ -246,14 +273,7 @@ print(contains("hello", "ell"))   # true
 print(replace("a-b", "-", "+"))   # "a+b"
 ```
 
-still absent on purpose: no `sort`, no random, no environment listing, no
-process spawning beyond `exec`, and no regex. each is a portability question
-or a design argument, and the answer so far has been no. see
-[docs/library.md](docs/library.md) for the full list and the reasoning.
-
-there are also ten `__`-prefixed maths natives for a library that is not in
-this repository yet. the underscore means "not for you", and nothing in the
-documentation or the examples uses them.
+see [docs/library.md](docs/library.md) for the full list.
 
 ### the repl
 
@@ -262,7 +282,7 @@ flint
 ```
 
 ```
-flint v0.3.0
+flint v0.4.0
 a small scripting language. type an expression and press enter.
 :help for what works here, ctrl-d to leave.
 
@@ -296,9 +316,8 @@ error[E0100]: Expect expression.
 
 `short` prints one location line; `json` emits one object per diagnostic.
 `--fix` applies the machine-applicable closing-delimiter edits currently
-supported. `--explain E0102` prints a short explanation. Runtime spans still
-underline the executing source line, and the compiler does not yet collect
-multiple independent errors. See [docs/diagnostics.md](docs/diagnostics.md).
+supported. `--explain E0102` prints a short explanation. see
+[docs/diagnostics.md](docs/diagnostics.md).
 
 ## two things that catch everyone
 
@@ -320,8 +339,8 @@ project a bug:
 | [control](docs/control.md) | `if`, `while`, `for`, `break`, `continue` |
 | [functions](docs/functions.md) | functions, recursion, closures |
 | [data](docs/data.md) | strings, lists, tables |
-| [modules](docs/modules.md) | `import` and `export` |
-| [library](docs/library.md) | core, string, and system functions |
+| [modules](docs/modules.md) | `import` and `export`, stdlib resolution |
+| [library](docs/library.md) | built-ins, string, system, and stdlib modules |
 | [diagnostics](docs/diagnostics.md) | error formats, current coverage, and `--fix` |
 | [language reference](docs/language.md) | the language in one document |
 | [VM internals](docs/internals.md) | value representation, GC, closures, modules |
@@ -344,6 +363,13 @@ The module example uses paths relative to its own file.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the rest, including the list of things
 that are known to be wrong and where each fix belongs.
+
+## contributors
+
+[Artem Tsitronov](https://github.com/artemtsitronov) contributed the long
+opcode variants (`OP_*_LONG`) that lift the 256-global limit, and the initial
+math native bridge. both landed in v0.4.0 via
+[#9](https://github.com/programmersd21/flint/pull/9).
 
 ## license
 

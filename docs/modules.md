@@ -43,3 +43,53 @@ partial globals still in place.
 
 `const` belongs to the global binding. Once a module defines a constant, every
 file sees the same read-only name.
+
+## bare names and the standard library
+
+a bare name (no quotes, no path separator) imports a standard library module:
+
+```flint
+import math
+import json
+import fs
+```
+
+the interpreter searches in this order:
+
+1. `FLINT_STDLIB` environment variable — if set, look for `<name>.fl` there
+2. `<exe-dir>/lib` — the `lib/` directory next to the flint binary
+3. `~/.flint/stdlib` — a per-user fallback
+
+the first match wins. if none match, the import fails with a message naming
+the paths tried.
+
+shipping the standard library is as simple as copying `lib/` next to the
+binary. the interpreter finds it without configuration.
+
+```sh
+cp -r lib/ /usr/local/lib/flint
+cp flint /usr/local/bin/
+```
+
+or point the environment variable:
+
+```sh
+export FLINT_STDLIB=/opt/flint/lib
+```
+
+a bare import does not inhibit relative imports. both forms work in the same
+file.
+
+## the standard library modules
+
+| module | provides |
+|---|---|
+| `math` | sin, cos, tan, exp, log, sqrt, floor, ceil, ... and PI, E, TAU |
+| `random` | rand, rand_int, rand_float, shuffle, choice, seed |
+| `time` | now, clock_ms, sleep, format, measure |
+| `fs` | read, write, append, exists, remove, mkdir, isdir |
+| `path` | join, dir, base, ext, abs, strip_ext, sep |
+| `collections` | reverse, contains, min, max, sum, flatten, zip, uniq |
+| `json` | parse, stringify, pretty |
+
+see [library.md](library.md) for the full reference.

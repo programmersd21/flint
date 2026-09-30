@@ -174,7 +174,7 @@ distinction every repl makes and the one a first-time user expects:
 
 ```
 $ flint
-flint v0.3.0
+flint v0.4.0
 a small scripting language. type an expression and press enter.
 :help for what works here, ctrl-d to leave.
 

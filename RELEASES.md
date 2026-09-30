@@ -1,6 +1,60 @@
 # releases
 
+## v0.4.0
+
+a more useful flint. the language stays the same; the stdlib and runtime do not.
+
+**new: standard library modules**
+
+seven modules ship in `lib/` and import by bare name. no package manager, no
+network, no install step beyond copying the directory next to the binary.
+
+- `math` — full libm wrapper: sin, cos, tan, asin, acos, atan, atan2, exp, log,
+  log2, log10, sqrt, cbrt, pow, floor, ceil, round, trunc, abs, sign, clamp,
+  hypot, and the constants PI, E, TAU, INF, NAN
+- `random` — xorshift64* seeded from clock and pid. `rand()`, `rand_int(a, b)`,
+  `rand_float()`, `shuffle(list)`, `choice(list)`. not cryptographic; says so
+  in the source
+- `time` — `now()` (unix epoch as a number), `clock_ms()`, `sleep(ms)`,
+  `format(t)` (UTC string), `measure(fn)` (returns elapsed ms)
+- `fs` — `exists`, `read`, `write`, `append`, `remove`, `mkdir`, `isdir`.
+  everything a script needs to touch the filesystem without reaching for a
+  shell
+- `path` — string arithmetic over paths: `join`, `dir`, `base`, `ext`, `abs`,
+  `strip_ext`. never touches the filesystem
+- `collections` — `reverse`, `contains`, `min`, `max`, `sum`, `flatten`,
+  `zip`, `uniq`. the list operations that come up in every second script
+- `json` — `parse(s)`, `stringify(v)`, `pretty(v)`. objects and arrays
+  round-trip cleanly. numbers stay numbers
+
+**new: module resolution**
+
+bare import names resolve via `FLINT_STDLIB` env, then `<exe-dir>/lib`, then
+`~/.flint/stdlib`. install `lib/` next to the binary and it just works.
+
+**new: long opcode variants** *(contributed by Artem Tsitronov, [#9](https://github.com/programmersd21/flint/pull/9))*
+
+`OP_GET_GLOBAL_LONG`, `OP_DEFINE_GLOBAL_LONG`, `OP_SET_GLOBAL_LONG`,
+`OP_GET_FIELD_LONG`, `OP_SET_FIELD_LONG`, `OP_CLOSURE_LONG` lift the
+256-global and 256-constant limits that blocked programs with large global
+tables. each variable reference now emits a 1- or 3-byte index depending on
+pool size. programs with fewer than 256 globals pay nothing.
+
+**new: make check**
+
+`make check` runs clean → build → test → unit from scratch. the gate for
+anyone about to push.
+
+**fixed**
+
+- release workflow no longer auto-generates release notes from commit messages
+  (which were not written for end users). releases now get a manual body.
+- the `generate_release_notes` accident in the workflow is gone. a release that
+  says "Merge pull request #3" instead of what changed is not a release; it is
+  a git log with extra steps.
+
 ## v0.3.0
+
 
 a language for small unix programs. one binary, no dependencies, and a script
 that reads stdin, calls a program, and writes a line is the whole toolchain.

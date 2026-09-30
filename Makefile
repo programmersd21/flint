@@ -83,7 +83,7 @@ DBG_CFLAGS := -O0 -g3 -DFL_DEBUG_PRINT_CODE -DFL_DEBUG_TRACE_EXECUTION
 STR_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFL_GC_STRESS
 STR_LDFLAGS := -fsanitize=address,undefined
 
-.PHONY: all release debug stress test diagnostic-test unit bench lint fmt fmt-check clean help
+.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help
 .SUFFIXES:
 
 # If a compile fails partway, do not leave a truncated object behind. Make
@@ -196,6 +196,15 @@ bench: flint
 		echo "bench/run.sh does not exist. nothing to benchmark yet."; \
 	fi
 
+# Full gate: clean build then every test suite. The only target that proves the
+# tree is green from scratch. `make test` alone tests a possibly stale binary;
+# this one does not. Use it before pushing or tagging.
+check:
+	$(MAKE) clean
+	$(MAKE) release
+	$(MAKE) test
+	$(MAKE) unit
+
 # Static analysis. Reads .clang-tidy for the check list and the reason each
 # exclusion is there, so the policy lives in one reviewable place.
 #
@@ -279,8 +288,10 @@ help:
 	@echo "make stress     gc stress + asan/ubsan, runs the suite"
 	@echo "make test       release build, runs the language suite"
 	@echo "make unit       value and chunk unit tests"
+	@echo "make check      clean + build + test + unit (gate quality)"
+	@echo "make bench      benchmarks (bench/run.sh)"
 	@echo "make lint       clang-tidy, policy in .clang-tidy"
 	@echo "make clean      remove build/ and the binaries"
 	@echo ""
 	@echo "add CFLAGS=... to override flags, CC=clang to change compiler."
-	@echo "every target works with -j. nothing is order-dependent."
+	@echo "every target works with -j. check does not (intentionally sequential)."

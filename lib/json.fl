@@ -33,9 +33,3 @@ export fn pretty(v) {
     return __json_stringify_pretty(v)
 }
 
-# a small number of conveniences, because every script needs them and
-# writing them each time is how they end up subtly different.
-export fn get(obj, key, fallback) {
-    if obj == nil { return fallback }
-    return obj[key] == nil ? fallback : obj[key]
-}

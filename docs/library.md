@@ -233,9 +233,10 @@ statement, and you should not call it yourself. see [modules.md](modules.md).
 
 ## missing pieces
 
-There is no random number generator, sorting, or conversion of a printed
-container into a string. `str([1, 2])` is still `<object>`. The `print`
-statement knows how to render containers; `str()` does not.
+`str([1, 2])` is still `<object>`. `print` knows how to render containers;
+`str()` does not. sorting is not a built-in; use a comparison loop or reach
+for `collections` which has `min` and `max`.
+
 
 ## internal math
 
@@ -343,3 +344,108 @@ config file behaves the same everywhere. a path written as `a\b` is treated as
 one component. that is a known limitation, not an oversight: a module that
 guesses at the host separator is a module that is wrong in one direction and
 surprising in the other.
+
+## random
+
+```flint
+import random
+print(random.rand())              # a float in [0, 1)
+print(random.rand_int(1, 6))     # an integer in [1, 6]
+random.shuffle(my_list)          # shuffles in place, returns nil
+print(random.choice(my_list))    # picks one element
+```
+
+xorshift64* seeded from the clock and process id at first use. fast and
+adequate for scripts; not cryptographic. the source says so explicitly.
+
+`seed(n)` resets the state to a known value, which makes a run reproducible.
+useful in tests; not an invitation to assume global state across modules.
+
+## time
+
+```flint
+import time
+let t = time.now()           # unix epoch, fractional seconds
+print(time.format(t))        # "2006-01-02T15:04:05Z" (always UTC)
+time.sleep(500)              # milliseconds. blocks.
+print(time.clock_ms())       # monotonic wall clock, milliseconds
+
+let ms = time.measure(fn() {
+    # something you want to time
+})
+print("took " + str(ms) + "ms")
+```
+
+`now()` and `format()` use wall clock time. `clock_ms()` is monotonic and
+suitable for benchmarking. `sleep()` takes milliseconds and calls `nanosleep`
+internally; a sleep of zero is a yield.
+
+## fs
+
+```flint
+import fs
+
+if fs.exists("config.txt") {
+    let content = fs.read("config.txt")
+    print(content)
+}
+
+fs.write("out.txt", "hello\n")
+fs.append("log.txt", "one more line\n")
+fs.mkdir("new_dir")
+print(fs.isdir("new_dir"))   # true
+fs.remove("tmp.txt")
+```
+
+`read` returns the entire file as a string. `write` and `append` return `nil`.
+`exists`, `isdir` return booleans. `mkdir` creates one directory level (not
+recursive). `remove` deletes a file; removing a directory that is not empty is
+an error.
+
+these are thin wrappers over `fopen`/`fread`/`fwrite`/`stat`. no buffering,
+no magic. what posix gives you is what you get.
+
+## collections
+
+```flint
+import collections as c
+
+let xs = [3, 1, 4, 1, 5, 9]
+print(c.min(xs))               # 1
+print(c.max(xs))               # 9
+print(c.sum(xs))               # 23
+print(c.reverse(xs))           # [9, 5, 1, 4, 1, 3]
+print(c.uniq(xs))              # [3, 1, 4, 5, 9]  (order preserved)
+print(c.contains(xs, 4))       # true
+print(c.flatten([[1,2],[3]]))  # [1, 2, 3]
+print(c.zip([1,2], ["a","b"])) # [[1, "a"], [2, "b"]]
+```
+
+`reverse` returns a new list; the original is unchanged. `uniq` preserves
+first occurrence. `zip` stops at the shorter list. `min`, `max`, `sum` require
+a non-empty list and operate on numbers.
+
+## json
+
+```flint
+import json
+
+let obj = json.parse("{\"x\": 1, \"ys\": [2, 3]}")
+print(obj.x)           # 1
+print(obj.ys[0])       # 2
+
+let s = json.stringify(obj)      # {"x":1,"ys":[2,3]}
+let p = json.pretty(obj)         # indented, 2 spaces
+```
+
+`parse` returns a table for objects, a list for arrays, a number for numbers,
+a string for strings, a bool for booleans, and `nil` for null. a JSON error
+is a runtime error naming the offset.
+
+`stringify` and `pretty` accept numbers, strings, booleans, nil, lists, and
+tables with string keys. a function in the value tree is a runtime error,
+because a function is not JSON and pretending it is makes round-trips wrong.
+
+circular references are not detected. the vm will overflow the call stack
+first, which is a fine outcome: a circular structure is a bug, not an edge
+case to handle gracefully.
