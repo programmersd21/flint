@@ -30,7 +30,7 @@ CFLAGS ?=
 # string literal. Without them -D hands the preprocessor a bare token and
 # the build fails in a way that looks nothing like a quoting problem.
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-ALL_CFLAGS := $(STD) $(WARN) $(INCLUDES) $(CFLAGS) -DFLINT_VERSION="\"$(VERSION)\""
+ALL_CFLAGS := $(STD) $(WARN) $(INCLUDES) -D_POSIX_C_SOURCE=200809L $(CFLAGS) -DFLINT_VERSION="\"$(VERSION)\""
 
 SRCDIRS := src src/core src/frontend src/runtime src/util
 
@@ -205,6 +205,7 @@ bench: flint
 # lint failure on a machine that happens to have a different clang.
 CLANG_TIDY ?= clang-tidy
 TIDY_FLAGS := --quiet --extra-arg=-std=c11 \
+	--extra-arg=-D_POSIX_C_SOURCE=200809L \
 	--extra-arg=-Isrc/core --extra-arg=-Isrc/frontend \
 	--extra-arg=-Isrc/runtime --extra-arg=-Isrc/util
 

@@ -1983,10 +1983,36 @@ static void synchronize(void)
  * result. The path is a raw string constant because escapes have already
  * been processed and a file path has no use for them.
  */
+/*
+ * `import "foo.fl"` and `import math` are the same statement with two
+ * spellings, because they are the same thing: ask the module loader for a
+ * source file. The loader decides whether the name is a relative path or a
+ * library.
+ *
+ * Keeping the distinction in one place matters. The alternative is a second
+ * import form for packages, and then the language has two module systems that
+ * have to be kept in agreement about what an import means. The package manager
+ * will sit in front of import_file(), not beside it.
+ */
 static void import_declaration(void)
 {
-	consume(TOKEN_STRING, "expect module file path string after 'import'.");
-	Token path_token = state.parser.previous;
+	const char *src;
+	int len;
+	Token path_token;
+
+	if (match(TOKEN_STRING)) {
+		path_token = state.parser.previous;
+		/* the quotes are at both ends; the path is what is between */
+		src = path_token.start + 1;
+		len = path_token.length - 2;
+	} else if (match(TOKEN_IDENTIFIER)) {
+		path_token = state.parser.previous;
+		src = path_token.start;
+		len = path_token.length;
+	} else {
+		error("expect a module path or a library name after 'import'.");
+		return;
+	}
 	consume_terminator();
 
 	Token import_fn = {TOKEN_IDENTIFIER,
@@ -1998,8 +2024,6 @@ static void import_declaration(void)
 	uint8_t fn_const = identifier_constant(&import_fn);
 	emit_bytes(OP_GET_GLOBAL, fn_const);
 
-	const char *src = path_token.start + 1;
-	int len = path_token.length - 2;
 	ObjString *str = copy_string(state.vm, src, len);
 	emit_constant(OBJ_VAL(str));
 

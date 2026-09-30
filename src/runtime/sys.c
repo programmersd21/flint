@@ -139,6 +139,99 @@ void sys_set_source_dir_for_file(const char *file)
  * Resolve relative to the importing file. Absolute paths pass through.
  * The caller owns the returned buffer.
  */
+/*
+ * Where the standard library lives.
+ *
+ * A bare name like `math` is not a file in the caller's directory, it is a
+ * library, and something has to know where libraries are kept. Three places
+ * are tried, in order:
+ *
+ *   $FLINT_STDLIB         the user, or a packager, sets it
+ *   <executable>/lib      so a copy of the tree works from anywhere
+ *   $HOME/.flint/stdlib   the ordinary install location
+ *
+ * The executable-relative one is what makes a tarball relocatable. The
+ * compiled-in FLINT_STDLIB_DIR from the build directory is the last resort
+ * and is only right for a build tree that is not moved, which is exactly the
+ * case it is for.
+ */
+static const char *stdlib_dir(void)
+{
+	static const char *cached = NULL;
+	static bool looked = false;
+
+	if (looked)
+		return cached;
+	looked = true;
+
+	const char *env = getenv("FLINT_STDLIB");
+	if (env != NULL && env[0] != '\0') {
+		cached = env;
+		return cached;
+	}
+
+	/* next to the binary: readlink on /proc/self/exe rather than argv[0],
+	 * because argv[0] is whatever the shell felt like and /proc is where
+	 * the truth is. if it is not there, the other two still work. */
+	{
+		char buf[4096];
+		ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+		if (n > 0) {
+			buf[n] = '\0';
+			char *slash = strrchr(buf, '/');
+			if (slash != NULL) {
+				/* the buffer is halved before the
+				 * suffix so the two halves cannot
+				 * collide. snprintf into a buffer that
+				 * already holds the source would
+				 * truncate silently, and a truncated
+				 * path here is a confusing "cannot open"
+				 * several steps away. */
+				static char lib[4096];
+				size_t dirlen = (size_t)(slash - buf);
+				if (dirlen + 5 < sizeof(lib)) {
+					memcpy(lib, buf, dirlen);
+					memcpy(lib + dirlen, "/lib", 5);
+					lib[dirlen + 4] = '\0';
+					if (access(lib, R_OK) == 0) {
+						cached = lib;
+						return cached;
+					}
+				}
+			}
+		}
+	}
+
+	const char *home = getenv("HOME");
+	if (home != NULL) {
+		static char lib[4096];
+		snprintf(lib, sizeof(lib), "%s/.flint/stdlib", home);
+		if (access(lib, R_OK) == 0) {
+			cached = lib;
+			return cached;
+		}
+	}
+
+#ifdef FLINT_STDLIB_DIR
+	if (access(FLINT_STDLIB_DIR, R_OK) == 0) {
+		cached = FLINT_STDLIB_DIR;
+		return cached;
+	}
+#endif
+
+	cached = "";
+	return cached;
+}
+
+/* true when a name is a bare library name: no slash, no .fl, not a keyword */
+static bool is_library_name(const char *path)
+{
+	const char *dot = strrchr(path, '.');
+	if (dot != NULL && strcmp(dot, ".fl") == 0)
+		return false;
+	return strchr(path, '/') == NULL;
+}
+
 char *sys_resolve_module(const char *path)
 {
 	size_t pathlen = strlen(path);
@@ -150,6 +243,28 @@ char *sys_resolve_module(const char *path)
 		if (out != NULL)
 			memcpy(out, path, pathlen + 1);
 		return out;
+	}
+
+	/*
+	 * A bare name is a library, not a relative path. This is the one
+	 * place the module loader learns that libraries exist, and it learns
+	 * exactly that: resolve a name to a file and get out. The package
+	 * manager, when there is one, will sit in front of this rather
+	 * than beside it, so there is one module loader and not two.
+	 */
+	if (is_library_name(path)) {
+		const char *dir = stdlib_dir();
+		if (dir[0] != '\0') {
+			size_t dirlen = strlen(dir);
+			size_t need = dirlen + 1 + pathlen + 3 + 1;
+			char *out = malloc(need);
+			if (out != NULL)
+				snprintf(out, need, "%s/%s.fl", dir, path);
+			return out;
+		}
+		/* nowhere to look. fall through and produce the ordinary
+		 * relative path, so the error names the file the script
+		 * asked for rather than a path nobody recognises. */
 	}
 
 	const char *dir = source_dir != NULL ? source_dir : "";

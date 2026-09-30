@@ -393,10 +393,38 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	 * difference between 'lib/math.fl' meaning one thing and meaning
 	 * whatever the last nested import left behind.
 	 */
+	/*
+	 * Snapshot the global names so we can tell which ones the module
+	 * added. only needed for a library, and only for a few hundred
+	 * entries, so the scan is linear and the array is short-lived.
+	 */
+	ObjString **before_keys = NULL;
+	int before_count = 0;
+	bool is_library = strchr(raw, '/') == NULL;
+	if (is_library && vm->globals.count > 0) {
+		before_count = vm->globals.count;
+		before_keys =
+		        malloc(sizeof(ObjString *) * (size_t)before_count);
+		if (before_keys == NULL) {
+			free(path);
+			vm_pop(vm);
+			vm_runtime_error(vm, "Out of memory in import.");
+			return NIL_VAL;
+		}
+		int seen = 0;
+		for (int i = 0; i < vm->globals.capacity && seen < before_count;
+		        i++)
+			if (vm->globals.entries[i].key != NULL)
+				before_keys[seen++] =
+				        vm->globals.entries[i].key;
+		before_count = seen;
+	}
+
 	InterpretResult res = vm_interpret_named(vm, buffer, path);
 	free(buffer);
 	free(path);
 	if (res != INTERPRET_OK) {
+		free(before_keys);
 		/* a module that failed partway is not "loaded". drop the
 		 * marker so a retry re-runs it rather than looking like
 		 * a cycle. its partial globals stay, which is flint's
@@ -406,7 +434,71 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		return NIL_VAL;
 	}
 
-	/* now genuinely loaded */
+	/*
+	 * A library import binds what the module defined to a table named
+	 * after the library, so `import math` gives you `math.sqrt` rather
+	 * than a flat `sqrt` that collides with whatever the caller
+	 * already had.
+	 *
+	 * "what the module defined" is found by diffing the globals table
+	 * across the run, which is crude. it is also honest about why: a
+	 * real export list is a compiler change, and this needs no new
+	 * syntax, no new state, and no second module system. `export` stays
+	 * a convention and this is the one place it is enforced.
+	 */
+	if (is_library) {
+		ObjTable *bag = new_flint_table(vm);
+		vm_push(vm, OBJ_VAL(bag));
+
+		for (int i = 0; i < vm->globals.capacity; i++) {
+			ObjString *gname = vm->globals.entries[i].key;
+			if (gname == NULL)
+				continue;
+			bool existed = false;
+			for (int k = 0; k < before_count; k++) {
+				if (before_keys[k] == gname) {
+					existed = true;
+					break;
+				}
+			}
+			if (existed)
+				continue;
+			if (bag->count == bag->capacity) {
+				int old = bag->capacity;
+				bag->capacity = old > 0 ? old * 2 : 8;
+				bag->keys = realloc(bag->keys,
+				        sizeof(ObjString *) *
+				                (size_t)bag->capacity);
+				bag->values = realloc(bag->values,
+				        sizeof(Value) * (size_t)bag->capacity);
+				if (bag->keys == NULL || bag->values == NULL) {
+					vm_runtime_error(
+					        vm, "Out of memory in import.");
+					return NIL_VAL;
+				}
+			}
+			vm_push(vm, OBJ_VAL(gname));
+			bag->keys[bag->count] = gname;
+			bag->values[bag->count] = vm->globals.entries[i].value;
+			bag->count++;
+			vm_pop(vm);
+		}
+
+		/*
+		 * Bind under the name that was *asked for*, not the
+		 * resolved path. `key` is the interned resolved path, so
+		 * using it here would define a global called
+		 * "lib/math.fl" and leave `math` undefined, which is
+		 * exactly the bug this replaced.
+		 */
+		ObjString *libname = copy_string(vm, raw, (int)strlen(raw));
+		vm_push(vm, OBJ_VAL(libname));
+		table_set(vm, &vm->globals, libname, OBJ_VAL(bag));
+		vm_pop(vm);
+		vm_pop(vm); /* the bag */
+	}
+	free(before_keys);
+
 	table_set(vm, &vm->modules, key, TRUE_VAL);
 	vm_pop(vm); /* the key */
 	return TRUE_VAL;

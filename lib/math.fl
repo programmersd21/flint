@@ -1,0 +1,90 @@
+# math -- the flagship library, and the first thing anyone imports.
+#
+#     import math
+#     print(math.sqrt(2))
+#
+# Every function here is a thin wrapper. The heavy lifting is in libm, reached
+# through the __ natives, and those stay internal: a user should never have to
+# know that __sqrt exists. This module is what turns eleven runtime
+# primitives into an API someone can hold in their head.
+#
+# Everything returns a number, because that is the only numeric type flint
+# has. There is no integer division and no overflow, and the docs say so
+# rather than pretending otherwise.
+
+# constants, to the precision a double can actually hold
+export const pi = 3.141592653589793
+export const e = 2.718281828459045
+export const tau = 6.283185307179586
+export const sqrt2 = 1.4142135623730951
+export const ln2 = 0.6931471805599453
+export const ln10 = 2.302585092994046
+
+# --- basic ---
+
+export fn abs(x) { return __fabs(x) }
+export fn sqrt(x) { return __sqrt(x) }
+export fn exp(x) { return __exp(x) }
+export fn exp2(x) { return __exp2(x) }
+export fn log(x) { return __log(x) }
+export fn log2(x) { return __log2(x) }
+export fn log10(x) { return __log10(x) }
+
+# pow is spelled out rather than reusing the ^ token, because there is no ^.
+# x^y is bitwise xor in most languages and flint does not pretend otherwise.
+export fn pow(x, y) { return __pow(x, y) }
+
+# cbrt is the one that has no libm constant. it is the cube root and it
+# works on negatives, which is the whole reason it exists separately from
+# pow(x, 1/3): that one returns nan for a negative x and users should not
+# have to know that.
+export fn cbrt(x) {
+    if x < 0 { return -__pow(-x, 1 / 3) }
+    return __pow(x, 1 / 3)
+}
+
+# --- trigonometry. all in radians. flint has no degrees and adding a unit
+# system to a language that stores numbers as doubles would be a way of
+# making every trig call slower in the name of a convenience. ---
+
+export fn sin(x) { return __sin(x) }
+export fn cos(x) { return __cos(x) }
+export fn tan(x) { return __tan(x) }
+export fn asin(x) { return __asin(x) }
+export fn acos(x) { return __acos(x) }
+export fn atan(x) { return __atan(x) }
+export fn atan2(y, x) { return __atan2(y, x) }
+
+# --- hyperbolic ---
+
+export fn sinh(x) { return __sinh(x) }
+export fn cosh(x) { return __cosh(x) }
+export fn tanh(x) { return __tanh(x) }
+export fn asinh(x) { return __asinh(x) }
+export fn acosh(x) { return __acosh(x) }
+export fn atanh(x) { return __atanh(x) }
+
+# --- rounding ---
+
+export fn floor(x) { return __floor(x) }
+export fn ceil(x) { return __ceil(x) }
+export fn trunc(x) { return __trunc(x) }
+
+# round is half away from zero, which is what everyone expects and is NOT
+# what the c library's nearby() does. documented here because the alternative
+# is a bug someone files.
+export fn round(x) {
+    if x >= 0 { return __floor(x + 0.5) }
+    return __ceil(x - 0.5)
+}
+
+# --- float helpers. these are the ones worth having on a machine where every
+# number is a double: asking whether a result is a number at all is a normal
+# thing to want to do after a division. ---
+
+export fn fmod(x, y) { return __fmod(x, y) }
+export fn remainder(x, y) { return __remainder(x, y) }
+export fn copysign(x, y) { return __copysign(x, y) }
+export fn isnan(x) { return x != x }
+export fn isinf(x) { return x == 1 / 0 or x == -1 / 0 }
+export fn isfinite(x) { return not isnan(x) and not isinf(x) }

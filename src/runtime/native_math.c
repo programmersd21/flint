@@ -145,8 +145,242 @@ static Value from_bits_native(VM *vm, int argc, Value *argv)
 	return NUMBER_VAL(fl_math_double(u));
 }
 
+static Value exp_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "exp", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(exp(x));
+}
+
+static Value exp2_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "exp2", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(exp2(x));
+}
+
+static Value log_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "log", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(log(x));
+}
+
+static Value log2_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "log2", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(log2(x));
+}
+
+static Value log10_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "log10", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(log10(x));
+}
+
+static Value sin_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "sin", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(sin(x));
+}
+
+static Value cos_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "cos", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(cos(x));
+}
+
+static Value tan_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "tan", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(tan(x));
+}
+
+static Value asin_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "asin", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(asin(x));
+}
+
+static Value acos_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "acos", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(acos(x));
+}
+
+static Value atan_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "atan", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(atan(x));
+}
+
+static Value sinh_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "sinh", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(sinh(x));
+}
+
+static Value cosh_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "cosh", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(cosh(x));
+}
+
+static Value tanh_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "tanh", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(tanh(x));
+}
+
+static Value asinh_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "asinh", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(asinh(x));
+}
+
+static Value acosh_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "acosh", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(acosh(x));
+}
+
+static Value atanh_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "atanh", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(atanh(x));
+}
+
+static Value ceil_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "ceil", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(ceil(x));
+}
+
+static Value trunc_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x;
+	if (!number_arg(vm, argv[0], "trunc", &x))
+		return NIL_VAL;
+	return NUMBER_VAL(trunc(x));
+}
+
+static Value pow_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x, y;
+	if (!number_arg(vm, argv[0], "pow_x", &x) ||
+	        !number_arg(vm, argv[1], "pow_y", &y))
+		return NIL_VAL;
+	return NUMBER_VAL(pow(x, y));
+}
+
+static Value atan2_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x, y;
+	if (!number_arg(vm, argv[0], "atan2_x", &x) ||
+	        !number_arg(vm, argv[1], "atan2_y", &y))
+		return NIL_VAL;
+	return NUMBER_VAL(atan2(x, y));
+}
+
+static Value fmod_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x, y;
+	if (!number_arg(vm, argv[0], "fmod_x", &x) ||
+	        !number_arg(vm, argv[1], "fmod_y", &y))
+		return NIL_VAL;
+	return NUMBER_VAL(fmod(x, y));
+}
+
+static Value remainder_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	double x, y;
+	if (!number_arg(vm, argv[0], "remainder_x", &x) ||
+	        !number_arg(vm, argv[1], "remainder_y", &y))
+		return NIL_VAL;
+	return NUMBER_VAL(remainder(x, y));
+}
+
 void register_math_natives(VM *vm)
 {
+	vm_define_native(vm, "__exp", exp_native, 1);
+	vm_define_native(vm, "__exp2", exp2_native, 1);
+	vm_define_native(vm, "__log", log_native, 1);
+	vm_define_native(vm, "__log2", log2_native, 1);
+	vm_define_native(vm, "__log10", log10_native, 1);
+	vm_define_native(vm, "__sin", sin_native, 1);
+	vm_define_native(vm, "__cos", cos_native, 1);
+	vm_define_native(vm, "__tan", tan_native, 1);
+	vm_define_native(vm, "__asin", asin_native, 1);
+	vm_define_native(vm, "__acos", acos_native, 1);
+	vm_define_native(vm, "__atan", atan_native, 1);
+	vm_define_native(vm, "__sinh", sinh_native, 1);
+	vm_define_native(vm, "__cosh", cosh_native, 1);
+	vm_define_native(vm, "__tanh", tanh_native, 1);
+	vm_define_native(vm, "__asinh", asinh_native, 1);
+	vm_define_native(vm, "__acosh", acosh_native, 1);
+	vm_define_native(vm, "__atanh", atanh_native, 1);
+	vm_define_native(vm, "__ceil", ceil_native, 1);
+	vm_define_native(vm, "__trunc", trunc_native, 1);
+	vm_define_native(vm, "__pow", pow_native, 2);
+	vm_define_native(vm, "__atan2", atan2_native, 2);
+	vm_define_native(vm, "__fmod", fmod_native, 2);
+	vm_define_native(vm, "__remainder", remainder_native, 2);
 	vm_define_native(vm, "__floor", floor_native, 1);
 	vm_define_native(vm, "__sqrt", sqrt_native, 1);
 	vm_define_native(vm, "__fma", fma_native, 3);
