@@ -5,7 +5,9 @@
  */
 #include "sys.h"
 
-void register_json_natives(VM *vm);
+#include "jsonp.h"
+
+#include <stdint.h>
 
 #include "memory.h"
 #include "object.h"
@@ -771,7 +773,6 @@ static Value exec_native(VM *vm, int argc, Value *argv)
 	return NUMBER_VAL(1);
 }
 
-
 /*
  * The primitives the fs, random and time modules are built from.
  *
@@ -848,7 +849,7 @@ static uint64_t next_random(void)
 		/* seeding from both, because two flint scripts started in the
 		 * same microsecond should not produce the same stream */
 		rand_state = (uint64_t)time(NULL) * 6364136223846793005ULL +
-		              (uint64_t)getpid();
+		             (uint64_t)getpid();
 		if (rand_state == 0)
 			rand_state = 0x9E3779B97F4A7C15ULL;
 	}
@@ -869,8 +870,7 @@ static Value rand_native(VM *vm, int argc, Value *argv)
 	/* 53 bits is the most a double can hold exactly, and the divisor is
 	 * 2^53. anything more and the result is not uniformly distributed over
 	 * the range it claims. */
-	return NUMBER_VAL((double)(next_random() >> 11) /
-	                   9007199254740992.0);
+	return NUMBER_VAL((double)(next_random() >> 11) / 9007199254740992.0);
 }
 
 /* __seed(n). makes a test reproducible and nothing else. returns nil because
@@ -946,7 +946,8 @@ static Value time_str_native(VM *vm, int argc, Value *argv)
 {
 	(void)argc;
 	if (!IS_NUMBER(argv[0])) {
-		vm_runtime_error(vm, "Argument to time_str() must be a number.");
+		vm_runtime_error(
+		        vm, "Argument to time_str() must be a number.");
 		return NIL_VAL;
 	}
 	time_t t = (time_t)AS_NUMBER(argv[0]);
