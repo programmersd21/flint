@@ -1,0 +1,47 @@
+# time -- the small useful part.
+#
+#     import time
+#     print(time.now())
+#
+# a number, not a formatted string, because formatting is somebody else's
+# opinion and a number is not. time.str() exists for when you want one.
+
+# seconds since the unix epoch, as a number
+export fn now() {
+    return __now()
+}
+
+# cpu milliseconds, for measuring something. clock() is seconds as a double
+# and loses resolution on some platforms; this is the one for a benchmark.
+export fn clock_ms() {
+    return __clock_ms()
+}
+
+# "YYYY-MM-DD HH:MM:SS" in UTC.
+#
+# UTC, not local time. a formatter that depends on the machine's timezone is
+# right on one machine and wrong on the next, and a test that depends on it
+# fails at midnight.
+export fn str(t) {
+    return __time_str(t)
+}
+
+# str() of now(), because that is nearly always what is wanted
+export fn now_str() {
+    return __time_str(__now())
+}
+
+# block for a while. seconds, and it takes a double, so 0.5 is half a second.
+export fn sleep(seconds) {
+    __sleep(seconds)
+}
+
+# how long something took, in seconds, to three decimal places.
+#
+# the closure is called immediately, which reads a little strangely and saves
+# every caller from the same before/after pair.
+export fn measure(f) {
+    let start = __clock_ms()
+    f()
+    return (__clock_ms() - start) / 1000
+}

@@ -5,6 +5,8 @@
  */
 #include "sys.h"
 
+void register_json_natives(VM *vm);
+
 #include "memory.h"
 #include "object.h"
 #include "value.h"
@@ -15,8 +17,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <sys/stat.h> /* stat, mkdir */
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 /*
@@ -767,6 +771,193 @@ static Value exec_native(VM *vm, int argc, Value *argv)
 	return NUMBER_VAL(1);
 }
 
+
+/*
+ * The primitives the fs, random and time modules are built from.
+ *
+ * Each one is deliberately thin. The module in lib/ is the public api and
+ * this is the implementation; neither one should grow into the other, and a
+ * user should never have to know a __ name exists.
+ */
+
+/* exists(path) -> bool. a directory counts: fs is about paths existing, not
+ * about what they are. */
+static Value exists_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "Argument to exists() must be a string.");
+		return NIL_VAL;
+	}
+	return access(AS_CSTRING(argv[0]), F_OK) == 0 ? TRUE_VAL : FALSE_VAL;
+}
+
+/* remove(path) -> bool. false for "it was not there", which is a filesystem
+ * fact and not a failure worth stopping a script for. */
+static Value remove_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "Argument to remove() must be a string.");
+		return NIL_VAL;
+	}
+	return unlink(AS_CSTRING(argv[0])) == 0 ? TRUE_VAL : FALSE_VAL;
+}
+
+/* mkdir(path) -> bool. one level. recursive creation is a decision, and
+ * making it silently is how scripts end up with trees nobody planned. */
+static Value mkdir_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "Argument to mkdir() must be a string.");
+		return NIL_VAL;
+	}
+	return mkdir(AS_CSTRING(argv[0]), 0777) == 0 ? TRUE_VAL : FALSE_VAL;
+}
+
+/* isdir(path) -> bool */
+static Value isdir_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "Argument to isdir() must be a string.");
+		return NIL_VAL;
+	}
+	struct stat st;
+	if (stat(AS_CSTRING(argv[0]), &st) != 0)
+		return FALSE_VAL;
+	return S_ISDIR(st.st_mode) ? TRUE_VAL : FALSE_VAL;
+}
+
+/* __rand() -> number in [0, 1)
+ *
+ * xorshift64*, seeded from the clock and the pid on first use. this is not
+ * cryptography and the module says so: it is for sampling, shuffling and
+ * jitter, and anyone reaching for it for a token or a key should be using
+ * something else entirely.
+ *
+ * the state is a function-static because there is nowhere better to put it,
+ * and a random module that cannot generate a second number would be a joke.
+ */
+static uint64_t rand_state = 0;
+
+static uint64_t next_random(void)
+{
+	if (rand_state == 0) {
+		/* seeding from both, because two flint scripts started in the
+		 * same microsecond should not produce the same stream */
+		rand_state = (uint64_t)time(NULL) * 6364136223846793005ULL +
+		              (uint64_t)getpid();
+		if (rand_state == 0)
+			rand_state = 0x9E3779B97F4A7C15ULL;
+	}
+	/* xorshift64*: three shifts and three xors */
+	uint64_t x = rand_state;
+	x ^= x >> 12;
+	x ^= x << 25;
+	x ^= x >> 27;
+	rand_state = x;
+	return x * 0x2545F4914F6CDD1DULL;
+}
+
+static Value rand_native(VM *vm, int argc, Value *argv)
+{
+	(void)vm;
+	(void)argc;
+	(void)argv;
+	/* 53 bits is the most a double can hold exactly, and the divisor is
+	 * 2^53. anything more and the result is not uniformly distributed over
+	 * the range it claims. */
+	return NUMBER_VAL((double)(next_random() >> 11) /
+	                   9007199254740992.0);
+}
+
+/* __seed(n). makes a test reproducible and nothing else. returns nil because
+ * there is nothing useful to report and a value would suggest there is. */
+static Value seed_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	(void)vm;
+	if (!IS_NUMBER(argv[0])) {
+		vm_runtime_error(vm, "Argument to seed() must be a number.");
+		return NIL_VAL;
+	}
+	rand_state = (uint64_t)(long)AS_NUMBER(argv[0]);
+	if (rand_state == 0)
+		rand_state = 0x9E3779B97F4A7C15ULL;
+	return NIL_VAL;
+}
+
+/* time.now() -> seconds, unix. a number, not a table, because formatting
+ * a date is somebody else's problem and a good library's. */
+static Value time_now_native(VM *vm, int argc, Value *argv)
+{
+	(void)vm;
+	(void)argc;
+	(void)argv;
+	return NUMBER_VAL((double)time(NULL));
+}
+
+/* __clock_ms() -> cpu milliseconds, for measuring a thing. clock() is
+ * seconds as a double and loses resolution below a millisecond on some
+ * platforms; this is the one to use in a benchmark. */
+static Value clock_ms_native(VM *vm, int argc, Value *argv)
+{
+	(void)vm;
+	(void)argc;
+	(void)argv;
+	return NUMBER_VAL((double)clock() * 1000.0);
+}
+
+/* __sleep(seconds). interrupts, so ctrl-c works while a script waits. */
+static Value sleep_native(VM *vm, int argc, Value *argv)
+{
+	(void)vm;
+	(void)argc;
+	if (!IS_NUMBER(argv[0])) {
+		vm_runtime_error(vm, "Argument to sleep() must be a number.");
+		return NIL_VAL;
+	}
+	double d = AS_NUMBER(argv[0]);
+	if (d < 0) {
+		vm_runtime_error(vm, "sleep() needs a non-negative number.");
+		return NIL_VAL;
+	}
+	struct timespec ts;
+	ts.tv_sec = (time_t)d;
+	ts.tv_nsec = (long)((d - (double)ts.tv_sec) * 1e9);
+	/* a truncated nanos field would be a short sleep nobody notices,
+	 * and every caller would be subtly wrong */
+	if (ts.tv_nsec < 0)
+		ts.tv_nsec = 0;
+	if (ts.tv_nsec > 999999999L)
+		ts.tv_nsec = 999999999L;
+	nanosleep(&ts, NULL);
+	return NIL_VAL;
+}
+
+/* __time_str(t) -> "YYYY-MM-DD HH:MM:SS" in UTC.
+ *
+ * gmtime, not localtime. a formatting function that silently depends on the
+ * machine's timezone is a library that is right on one machine and wrong on
+ * the next, and a test that depends on it fails at midnight. */
+static Value time_str_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_NUMBER(argv[0])) {
+		vm_runtime_error(vm, "Argument to time_str() must be a number.");
+		return NIL_VAL;
+	}
+	time_t t = (time_t)AS_NUMBER(argv[0]);
+	struct tm tm;
+	if (gmtime_r(&t, &tm) == NULL)
+		return OBJ_VAL(copy_string(vm, "", 0));
+	char buf[64];
+	strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
+	return OBJ_VAL(copy_string(vm, buf, (int)strlen(buf)));
+}
+
 void register_sys_natives(VM *vm)
 {
 	vm_define_native(vm, "args", args_native, 0);
@@ -777,4 +968,19 @@ void register_sys_natives(VM *vm)
 	vm_define_native(vm, "read_file", read_file_native, 1);
 	vm_define_native(vm, "write_file", write_file_native, 2);
 	vm_define_native(vm, "exec", exec_native, -1);
+
+	/* the fs, random and time modules are written in flint over these.
+	 * they are the only system-level entry points they need, so the
+	 * public api stays in lib/ where it can be read. */
+	vm_define_native(vm, "__exists", exists_native, 1);
+	vm_define_native(vm, "__remove", remove_native, 1);
+	vm_define_native(vm, "__mkdir", mkdir_native, 1);
+	vm_define_native(vm, "__isdir", isdir_native, 1);
+	vm_define_native(vm, "__rand", rand_native, 0);
+	vm_define_native(vm, "__seed", seed_native, 1);
+	vm_define_native(vm, "__now", time_now_native, 0);
+	vm_define_native(vm, "__clock_ms", clock_ms_native, 0);
+	vm_define_native(vm, "__sleep", sleep_native, 1);
+	vm_define_native(vm, "__time_str", time_str_native, 1);
+	register_json_natives(vm);
 }

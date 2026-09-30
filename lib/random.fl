@@ -1,0 +1,69 @@
+# random -- numbers, and not cryptography.
+#
+#     import random
+#     random.seed(42)
+#     print(random.int(1, 6))
+#
+# THIS IS NOT CRYPTOGRAPHICALLY SECURE. it is xorshift64*, which is fine for
+# sampling, shuffling, jitter and tests, and unfit for a token, a password or
+# a key. anyone needing that needs a different tool entirely, and this module
+# should not pretend to be one.
+
+export fn seed(n) {
+    __seed(n)
+}
+
+# a float in [0, 1)
+export fn float() {
+    return __rand()
+}
+
+# a float in [low, high)
+export fn range(low, high) {
+    return low + __rand() * (high - low)
+}
+
+# an integer in [low, high)
+#
+# high is excluded, matching the half-open convention used everywhere else in
+# flint. random.int(0, 6) is a die.
+export fn int(low, high) {
+    let span = high - low
+    if span <= 0 {
+        return low
+    }
+    return low + __floor(__rand() * span)
+}
+
+# an element of a list, or nil if it is empty
+export fn choice(xs) {
+    if len(xs) == 0 {
+        return nil
+    }
+    return xs[int(0, len(xs))]
+}
+
+# true with probability p, so p = 0.1 gives a tenth
+export fn chance(p) {
+    return __rand() < p
+}
+
+# a shuffled copy. the original is untouched, because "shuffle in place" and
+# "return a new list" are different functions and one of them is a surprise.
+export fn shuffle(xs) {
+    let out = []
+    let i = 0
+    while i < len(xs) {
+        push(out, xs[i])
+        i += 1
+    }
+    i = len(out) - 1
+    while i > 0 {
+        let j = int(0, i + 1)
+        let tmp = out[i]
+        out[i] = out[j]
+        out[j] = tmp
+        i -= 1
+    }
+    return out
+}

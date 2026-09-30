@@ -1,0 +1,41 @@
+# json -- parse and stringify, and nothing else.
+#
+#     import json
+#     let cfg = json.parse(read_file("config.json"))
+#     print(cfg.name)
+#
+# objects become flint tables, arrays become lists, strings become strings,
+# numbers become numbers, and true/false/null become true/false/nil. those
+# are the only container types flint has, so those are the only things json
+# can become. a json null is flint nil, which is right: there is no null in
+# flint, and nil is what "no value" already means.
+#
+# parse() returns nil and prints an error on malformed input. it does not
+# raise, because flint has no exceptions, and a script that wants to know can
+# check the result.
+
+# text -> a value, or nil if the text is not valid json
+export fn parse(text) {
+    return __json_parse(text)
+}
+
+# a value -> json text.
+#
+# compact, with no spaces. pretty-printing is a separate function rather than
+# a flag, because the flag would be checked on every value and the second
+# entry point is free.
+export fn stringify(v) {
+    return __json_stringify(v)
+}
+
+# the same, indented. for a file a person is going to read.
+export fn pretty(v) {
+    return __json_stringify_pretty(v)
+}
+
+# a small number of conveniences, because every script needs them and
+# writing them each time is how they end up subtly different.
+export fn get(obj, key, fallback) {
+    if obj == nil { return fallback }
+    return obj[key] == nil ? fallback : obj[key]
+}

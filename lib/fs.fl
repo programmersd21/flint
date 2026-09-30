@@ -1,0 +1,53 @@
+# fs -- the filesystem, thinly.
+#
+#     import fs
+#     if fs.exists("notes.txt") { print(read_file("notes.txt")) }
+#
+# strings go in and out. no file objects, no open modes, no cursors: a
+# scripting language that reads whole files does not need any of that, and
+# every one of them is a way to get the file offset wrong.
+#
+# paths here are whatever the operating system takes. path.fl manipulates
+# them as strings and this module passes them through untouched.
+
+export fn exists(p) {
+    return __exists(p)
+}
+
+export fn isdir(p) {
+    return __isdir(p)
+}
+
+# one level. creating parents is a decision, and a silent one is how a script
+# ends up with a tree nobody planned.
+export fn mkdir(p) {
+    return __mkdir(p)
+}
+
+# false when it was not there, which is a fact about the filesystem and not a
+# reason to stop a script. unlink(2) has the same property.
+export fn remove(p) {
+    return __remove(p)
+}
+
+# the whole file, newline and all. a script that wants lines calls split() and
+# does not have to know whether the file ended with a newline.
+export fn read(p) {
+    return read_file(p)
+}
+
+# truncates. write_file exists and does the same thing; this is the name
+# people reach for first.
+export fn write(p, data) {
+    return write_file(p, data)
+}
+
+# append is a read and a write, which is two operations and a race. it is here
+# anyway because every script needs it and doing it honestly is better than
+# making everybody write the race themselves.
+export fn append(p, data) {
+    if __exists(p) {
+        return write_file(p, read_file(p) + data)
+    }
+    return write_file(p, data)
+}

@@ -1,0 +1,111 @@
+# collections -- the list helpers everyone writes twice.
+#
+#     import collections
+#     print(collections.sum([1, 2, 3]))
+#
+# everything here works on a list and returns a new one where that makes
+# sense. nothing mutates its argument unless its name says it does. that rule
+# is why `sort` is not here yet: sorting has to mutate or copy, and picking
+# one silently is how a library loses somebody's data.
+
+# the total. an empty list is 0, which is what an empty total is.
+export fn sum(xs) {
+    let total = 0
+    let i = 0
+    while i < len(xs) {
+        total += xs[i]
+        i += 1
+    }
+    return total
+}
+
+# the largest, or nil for an empty list. nil rather than an error, because
+# "the list was empty" is a normal thing to ask about and a caller that does
+# not care can ignore the answer.
+export fn max(xs) {
+    if len(xs) == 0 { return nil }
+    let best = xs[0]
+    let i = 1
+    while i < len(xs) {
+        if xs[i] > best { best = xs[i] }
+        i += 1
+    }
+    return best
+}
+
+export fn min(xs) {
+    if len(xs) == 0 { return nil }
+    let best = xs[0]
+    let i = 1
+    while i < len(xs) {
+        if xs[i] < best { best = xs[i] }
+        i += 1
+    }
+    return best
+}
+
+export fn avg(xs) {
+    if len(xs) == 0 { return nil }
+    return sum(xs) / len(xs)
+}
+
+# a copy, in the other order
+export fn reverse(xs) {
+    let out = []
+    let i = len(xs) - 1
+    while i >= 0 {
+        push(out, xs[i])
+        i -= 1
+    }
+    return out
+}
+
+# the first element equal to v, or nil. a list helper, not a generic search.
+export fn index_of(xs, v) {
+    let i = 0
+    while i < len(xs) {
+        if xs[i] == v { return i }
+        i += 1
+    }
+    return nil
+}
+
+export fn contains(xs, v) {
+    return index_of(xs, v) != nil
+}
+
+# a copy with the duplicates dropped, order kept. this is what a script
+# usually means by "unique" and what a set would give in another order.
+export fn unique(xs) {
+    let out = []
+    let i = 0
+    while i < len(xs) {
+        if not contains(out, xs[i]) {
+            push(out, xs[i])
+        }
+        i += 1
+    }
+    return out
+}
+
+# the first n, or all of them
+export fn take(xs, n) {
+    let out = []
+    let i = 0
+    while i < len(xs) and i < n {
+        push(out, xs[i])
+        i += 1
+    }
+    return out
+}
+
+# everything after the first n
+export fn drop(xs, n) {
+    let out = []
+    let i = n
+    while i < len(xs) {
+        push(out, xs[i])
+        i += 1
+    }
+    return out
+}
