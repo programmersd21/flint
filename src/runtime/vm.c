@@ -889,6 +889,15 @@ static InterpretResult run(VM *vm, int base_frame)
 #define READ_CONSTANT()                                                        \
 	(frame->closure->function->chunk.constants.values[READ_BYTE()])
 #define READ_STRING() AS_STRING(READ_CONSTANT())
+#define READ_U24()                                                             \
+	(frame->ip += 3,                                                       \
+	        (uint32_t)((frame->ip[-3] << 16) | (frame->ip[-2] << 8) |      \
+	                   frame->ip[-1]))
+#define READ_CONSTANT_LONG()                                                   \
+	(frame->closure->function->chunk.constants.values[READ_U24()])
+#define READ_STRING_AS(long_op)                                                \
+	AS_STRING(instruction == (long_op) ? READ_CONSTANT_LONG()              \
+	                                   : READ_CONSTANT())
 
 /*
  * Arithmetic and comparison on numbers, shared by six opcodes. Pops right
@@ -930,7 +939,8 @@ static InterpretResult run(VM *vm, int base_frame)
 		                frame->closure->function->chunk.code));
 #endif
 
-		switch (READ_BYTE()) {
+		uint8_t instruction = READ_BYTE();
+		switch (instruction) {
 		case OP_CONSTANT: {
 			Value constant = READ_CONSTANT();
 			vm_push(vm, constant);
@@ -972,8 +982,9 @@ static InterpretResult run(VM *vm, int base_frame)
 			frame->slots[slot] = peek(vm, 0);
 			break;
 		}
-		case OP_GET_GLOBAL: {
-			ObjString *name = READ_STRING();
+		case OP_GET_GLOBAL:
+		case OP_GET_GLOBAL_LONG: {
+			ObjString *name = READ_STRING_AS(OP_GET_GLOBAL_LONG);
 			Value value;
 			if (!table_get(&vm->globals, name, &value)) {
 				vm_runtime_error(vm,
@@ -984,9 +995,10 @@ static InterpretResult run(VM *vm, int base_frame)
 			vm_push(vm, value);
 			break;
 		}
-		case OP_DEFINE_GLOBAL: {
+		case OP_DEFINE_GLOBAL:
+		case OP_DEFINE_GLOBAL_LONG: {
 			/* let at top level. overwrites, unlike assignment. */
-			ObjString *name = READ_STRING();
+			ObjString *name = READ_STRING_AS(OP_DEFINE_GLOBAL_LONG);
 
 			/*
 			 * `let` on a name that is already const. Redeclaration
@@ -1012,7 +1024,8 @@ static InterpretResult run(VM *vm, int base_frame)
 			vm_pop(vm);
 			break;
 		}
-		case OP_DEFINE_GLOBAL_CONST: {
+		case OP_DEFINE_GLOBAL_CONST:
+		case OP_DEFINE_GLOBAL_CONST_LONG: {
 			/*
 			 * `const` at the top level. The flag goes on the
 			 * binding rather than into the bytecode, so the name
@@ -1032,7 +1045,8 @@ static InterpretResult run(VM *vm, int base_frame)
 			 * The value is on the stack across the call, so it is
 			 * rooted if the table grows and collection happens.
 			 */
-			ObjString *name = READ_STRING();
+			ObjString *name =
+			        READ_STRING_AS(OP_DEFINE_GLOBAL_CONST_LONG);
 			if (table_is_const(&vm->globals, name)) {
 				Value existing;
 				table_get(&vm->globals, name, &existing);
@@ -1050,8 +1064,9 @@ static InterpretResult run(VM *vm, int base_frame)
 			vm_pop(vm);
 			break;
 		}
-		case OP_SET_GLOBAL: {
-			ObjString *name = READ_STRING();
+		case OP_SET_GLOBAL:
+		case OP_SET_GLOBAL_LONG: {
+			ObjString *name = READ_STRING_AS(OP_SET_GLOBAL_LONG);
 
 			/*
 			 * The const check, which is the whole reason this fix
@@ -1257,8 +1272,12 @@ static InterpretResult run(VM *vm, int base_frame)
 			frame = &vm->frames[vm->frame_count - 1];
 			break;
 		}
-		case OP_CLOSURE: {
-			ObjFunction *function = AS_FUNCTION(READ_CONSTANT());
+		case OP_CLOSURE:
+		case OP_CLOSURE_LONG: {
+			ObjFunction *function =
+			        AS_FUNCTION(instruction == OP_CLOSURE_LONG
+			                            ? READ_CONSTANT_LONG()
+			                            : READ_CONSTANT());
 
 			/* push before the upvalues are filled in, so a
 			 * collection triggered below sees a rooted closure */
@@ -1416,8 +1435,9 @@ static InterpretResult run(VM *vm, int base_frame)
 			vm_push(vm, val); /* assignment yields the value */
 			break;
 		}
-		case OP_GET_FIELD: {
-			ObjString *name = READ_STRING();
+		case OP_GET_FIELD:
+		case OP_GET_FIELD_LONG: {
+			ObjString *name = READ_STRING_AS(OP_GET_FIELD_LONG);
 			Value target = vm_pop(vm);
 			if (IS_FLINT_TABLE(target)) {
 				/*
@@ -1445,8 +1465,9 @@ field_done:;
 			}
 			break;
 		}
-		case OP_SET_FIELD: {
-			ObjString *name = READ_STRING();
+		case OP_SET_FIELD:
+		case OP_SET_FIELD_LONG: {
+			ObjString *name = READ_STRING_AS(OP_SET_FIELD_LONG);
 			Value val = vm_pop(vm);
 			Value target = vm_pop(vm);
 			if (IS_FLINT_TABLE(target)) {
@@ -1487,7 +1508,8 @@ field_set_done:;
 			}
 			break;
 		}
-		case OP_SET_FIELD_TOP: {
+		case OP_SET_FIELD_TOP:
+		case OP_SET_FIELD_TOP_LONG: {
 			/*
 			 * The table literal's opcode. The table is on the
 			 * stack, the value is on top of it, and the table has
@@ -1502,7 +1524,7 @@ field_set_done:;
 			 * already there, so the literal set a field on the
 			 * function.
 			 */
-			ObjString *name = READ_STRING();
+			ObjString *name = READ_STRING_AS(OP_SET_FIELD_TOP_LONG);
 			Value val = vm_pop(vm);
 			Value target = vm->stack_top[-1];
 
@@ -1568,6 +1590,9 @@ field_set_done:;
 #undef READ_SHORT
 #undef READ_CONSTANT
 #undef READ_STRING
+#undef READ_U24
+#undef READ_CONSTANT_LONG
+#undef READ_STRING_AS
 #undef BINARY_OP
 }
 
