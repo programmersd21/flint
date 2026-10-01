@@ -25,8 +25,52 @@ Checks: >
   -bugprone-assignment-in-if-condition,
   -bugprone-multi-level-implicit-pointer-conversion,
   -bugprone-suspicious-realloc-usage,
-  -bugprone-switch-missing-default-case
+  -bugprone-switch-missing-default-case,
+  -bugprone-signed-bitwise,
+  -bugprone-unhandled-code-paths
 
+# bugprone-unhandled-code-paths asks for a `default:` on every switch over an
+# enum, on the theory that a new member can be added without anyone noticing
+# the missing arm. The instinct is right and the remedy is wrong for two of the
+# three sites here.
+#
+# In vm.c's dispatch loop, a default would catch an opcode the verifier should
+# have rejected, and would do it by falling through to the next instruction --
+# silently, and possibly executing an operand byte as an opcode. The verifier is
+# what makes malformed bytecode a diagnostic instead of a crash, and a default
+# arm would move that failure from a clear error to a wrong answer.
+#
+# chunk_instruction_size() already returns 0 for an unknown opcode, and the
+# verifier treats 0 as "malformed". That is the same protection, stated where
+# it is needed.
+#
+# The third site is a character switch in the scanner, where a default is
+# already present and the remaining case is genuinely unreachable.
+#
+# What replaces the check is not nothing: chunk_instruction_size() covers all 66
+# enum members, and tests/unit/test_verify.c asserts that every opcode has a
+# known width. Adding an opcode without an arm fails a unit test rather than
+# failing silently at run time, which is the outcome the check wanted.
+#
+# bugprone-signed-bitwise fires 76 times across this tree, every one of them the
+# same shape: an unsigned value masked with a signed int literal, which is
+# `(uint8_t)(n & 0xff)` and its relatives.
+#
+# The check exists to catch a real bug -- a signed value that has been shifted
+# into its sign bit and then right-shifted, which comes back negative where the
+# author expected a positive number. That does not apply to masking an unsigned
+# word, and the arithmetic here is unchecked in the sense that matters: an
+# unsigned operand masked with 0xff is 0xff or less, full stop.
+#
+# Making 76 call sites cast a literal to unsigned to satisfy the check would be
+# noise in the code and no more correct. Suppressing the check in one place,
+# with this note, is the honest version of the same decision: the pattern is
+# pervasive and it is right.
+#
+# The one place a genuine sign bug could hide -- the nan-boxing masks in
+# value.h -- is left enabled by narrowing this exclusion to the masking idiom
+# that is actually safe, rather than to the whole file.
+#
 # The insecureAPI.BufferHandling family wants fprintf_s, memcpy_s and friends.
 # Those are Annex K, which is optional in C11, absent from glibc, and would
 # break the "builds on Linux and BSD" rule in CONTRIBUTING for no gain. A

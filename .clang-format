@@ -110,9 +110,15 @@ ReflowComments: false
 # these out by hand, and a formatter that adds them back is a formatter you
 # start fighting.
 #
-# KeepEmptyLines is a nested block in clang 19 and later. It replaced the
-# older KeepEmptyLinesAtEOF and KeepEmptyLinesAtTheStartOfBlocks, and writing
-# the old flat booleans is a hard error on any current clang, not a warning.
+# KeepEmptyLines is a nested block in clang 19 and later, and replaced the
+# older flat booleans. This file uses the new form because the project's own
+# clang-format is new; CI pins a current LLVM for the same reason, in
+# .github/workflows/ci.yml.
+#
+# It is worth knowing that this is a version-dependent key. On clang 18 and
+# earlier clang-tidy does not merely warn about it -- it errors out and checks
+# nothing at all, which looks exactly like a clean run. If the lint target
+# suddenly goes quiet, check the clang-format version before believing it.
 KeepEmptyLines:
   AtEndOfFile:     false
   AtStartOfBlock:  false

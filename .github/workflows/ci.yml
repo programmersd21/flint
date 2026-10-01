@@ -57,11 +57,32 @@ jobs:
         sh tests/run_tests.sh ./flint-goto
 
     # clang-tidy, which reports include-hygiene problems the compiler does not.
-    # Advisory by design -- the target says so -- but it is the check that
-    # caught six missing includes in one release, so it runs on every push
-    # rather than on request.
+    #
+    # The LLVM apt packages are the point. The runner's preinstalled
+    # clang-format/tidy are whatever Ubuntu shipped, and .clang-format uses
+    # KeepEmptyLines as a nested block, which only exists in clang 19+. On the
+    # runner's version clang-tidy aborted before checking a single line, so
+    # this step had never actually run -- it just exited 2 and was marked
+    # continue-on-error.
+    #
+    # Pinning the toolchain is what makes it run. The --depth=1 packages are
+    # from the LLVM apt repo and always current.
+    - name: install llvm
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget apt-transport-https gpg
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key           | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+        echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] \
+          http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs) main" \
+          | sudo tee /etc/apt/sources.list.d/llvm.list
+        sudo apt-get update
+        sudo apt-get install -y clang-tidy
+
     - name: clang-tidy
       run: make lint
+      # Advisory by design: the target says so, and a lint policy change
+      # should not be able to block a push. The annotations it produces are
+      # the report, not a gate.
       continue-on-error: true
 
     # A file with no trailing newline is a compile error under clang
