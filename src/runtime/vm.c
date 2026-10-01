@@ -14,7 +14,6 @@
 #include "config.h"
 #include "diagnostic.h"
 #include "profile.h"
-#include "verify.h"
 /* the disassembler is called from run(), and only under
  * FL_DEBUG_TRACE_EXECUTION. Same reasoning as the compiler: an include that
  * nothing references in a release build is noise the analyser has to be told

@@ -55,12 +55,10 @@
  */
 #include "verify.h"
 #include "chunk.h"
-#include "common.h"
-#include "config.h"
-#include "memory.h"
 #include "object.h"
 #include "value.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -16,12 +16,15 @@
 #include "chunk.h"
 #include "compiler.h"
 #include "object.h"
+#include "profile.h"
 #include "table.h"
 #include "value.h"
 #include "vm.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 static void mark_value(VM *vm, Value value);
 
