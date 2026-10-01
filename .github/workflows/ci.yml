@@ -16,6 +16,12 @@ jobs:
       matrix:
         compiler: [gcc, clang]
 
+    env:
+      # The clang-tidy major version CI installs. Must be >= 19 for the
+      # KeepEmptyLines block in .clang-format, and must currently exist in
+      # apt.llvm.org for the runner's codename. See the install step.
+      LLVM_MAJOR: '24'
+
     steps:
     - uses: actions/checkout@v4
 
@@ -69,14 +75,34 @@ jobs:
     # from the LLVM apt repo and always current.
     - name: install llvm
       run: |
+        set -euo pipefail
         sudo apt-get update
         sudo apt-get install -y wget apt-transport-https gpg
-        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key           | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
-        echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] \
-          http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs) main" \
+        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+          | sudo gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+        codename=$(lsb_release -cs)
+        echo "deb [signed-by=/usr/share/keyrings/llvm.gpg]" \
+          "http://apt.llvm.org/${codename}/ llvm-toolchain-${codename} main" \
           | sudo tee /etc/apt/sources.list.d/llvm.list
         sudo apt-get update
-        sudo apt-get install -y clang-tidy
+        # The major version is pinned rather than left to float.
+        #
+        # Asking for bare `clang-tidy` makes apt resolve to clang-tidy-<N> for
+        # whatever N it judges newest, and the snapshot repo carries one major
+        # per distro release. When that resolution picks a version the repo
+        # does not have, apt fails with "not installable" and the step dies
+        # before linting anything -- the same silent failure as before, only
+        # louder.
+        #
+        # The apt.llvm.org llvm-toolchain repo carries exactly one major
+        # version per distro release, so the only safe pin is one that is
+        # currently published. Verified against the noble package index:
+        # clang-tidy and clang-tidy-24, and nothing else. Pinning to 20 --
+        # which is what this was first written as -- fails the same way the
+        # unpinned version did, with 'clang-tidy-20 is not installable'.
+        #
+        # Bump it when a new major lands, and check the index first.
+        sudo apt-get install -y "clang-tidy-${LLVM_MAJOR}"
 
     - name: clang-tidy
       run: make lint
