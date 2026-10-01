@@ -116,8 +116,8 @@ file through a temporary in the same directory. It does not follow a symlink.
 
 The offer is generated from the message, not from where the parser ran out of
 input. That distinction was the whole bug for a while: a missing `)` at end of
-file got a fix, and a missing `}` in the middle of a function — which is the
-common case — got neither a fix nor the right span.
+file got a fix, and a missing `}` in the middle of a function -- which is the
+common case -- got neither a fix nor the right span.
 
 ```
 $ flint t.fl --fix

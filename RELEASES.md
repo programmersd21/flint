@@ -115,22 +115,22 @@ a more useful flint. the language stays the same; the stdlib and runtime do not.
 seven modules ship in `lib/` and import by bare name. no package manager, no
 network, no install step beyond copying the directory next to the binary.
 
-- `math` — full libm wrapper: sin, cos, tan, asin, acos, atan, atan2, exp, log,
+- `math` -- full libm wrapper: sin, cos, tan, asin, acos, atan, atan2, exp, log,
   log2, log10, sqrt, cbrt, pow, floor, ceil, round, trunc, abs, sign, clamp,
   hypot, and the constants PI, E, TAU, INF, NAN
-- `random` — xorshift64* seeded from clock and pid. `rand()`, `rand_int(a, b)`,
+- `random` -- xorshift64* seeded from clock and pid. `rand()`, `rand_int(a, b)`,
   `rand_float()`, `shuffle(list)`, `choice(list)`. not cryptographic; says so
   in the source
-- `time` — `now()` (unix epoch as a number), `clock_ms()`, `sleep(ms)`,
+- `time` -- `now()` (unix epoch as a number), `clock_ms()`, `sleep(ms)`,
   `format(t)` (UTC string), `measure(fn)` (returns elapsed ms)
-- `fs` — `exists`, `read`, `write`, `append`, `remove`, `mkdir`, `isdir`.
+- `fs` -- `exists`, `read`, `write`, `append`, `remove`, `mkdir`, `isdir`.
   everything a script needs to touch the filesystem without reaching for a
   shell
-- `path` — string arithmetic over paths: `join`, `dir`, `base`, `ext`, `abs`,
+- `path` -- string arithmetic over paths: `join`, `dir`, `base`, `ext`, `abs`,
   `strip_ext`. never touches the filesystem
-- `collections` — `reverse`, `contains`, `min`, `max`, `sum`, `flatten`,
+- `collections` -- `reverse`, `contains`, `min`, `max`, `sum`, `flatten`,
   `zip`, `uniq`. the list operations that come up in every second script
-- `json` — `parse(s)`, `stringify(v)`, `pretty(v)`. objects and arrays
+- `json` -- `parse(s)`, `stringify(v)`, `pretty(v)`. objects and arrays
   round-trip cleanly. numbers stay numbers
 
 **new: module resolution**

@@ -1,4 +1,4 @@
-# collections — the list helpers. every result here is deterministic.
+# collections -- the list helpers. every result here is deterministic.
 
 import collections
 

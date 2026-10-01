@@ -56,9 +56,9 @@ import fs
 
 the interpreter searches in this order:
 
-1. `FLINT_STDLIB` environment variable — if set, look for `<name>.fl` there
-2. `<exe-dir>/lib` — the `lib/` directory next to the flint binary
-3. `~/.flint/stdlib` — a per-user fallback
+1. `FLINT_STDLIB` environment variable -- if set, look for `<name>.fl` there
+2. `<exe-dir>/lib` -- the `lib/` directory next to the flint binary
+3. `~/.flint/stdlib` -- a per-user fallback
 
 the first match wins. if none match, the import fails with a message naming
 the paths tried.

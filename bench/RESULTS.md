@@ -2,8 +2,8 @@
 
 Two builds are measured here:
 
-- **switch** — `make release`, the portable C11 interpreter. `flint`
-- **goto** — `make flint-goto`, the computed-goto interpreter. `flint-goto`
+- **switch** -- `make release`, the portable C11 interpreter. `flint`
+- **goto** -- `make flint-goto`, the computed-goto interpreter. `flint-goto`
 
 `make bench` prints the goto build; `make flint-goto && make bench-goto`
 prints both.
