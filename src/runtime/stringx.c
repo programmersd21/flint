@@ -509,28 +509,22 @@ static Value replace_native(VM *vm, int argc, Value *argv)
 static char to_lower_ascii(char c)
 {
 	/*
-	 * The operand is promoted to int, added, and cast back -- and that
-	 * round trip through int is what clang-tidy's bugprone-narrowing-
-	 * conversions objects to, twice: once at the cast and once at the return.
-	 *
-	 * The value is provably in ['a', 'z'], so the conversion is not merely
-	 * defined, it is a no-op. But "provably" is doing work in that sentence,
-	 * and a reader has to check it. Promoting the *constant* instead keeps
-	 * the arithmetic in char, where the result is defined by the language
-	 * rather than by a cast:
-	 *
-	 *     c + (char)32
-	 *
-	 * c promotes to int for the addition, then the int result is assigned
-	 * back to char on return -- which is the same narrowing, once, at a
-	 * point the return type already declares.
+	 * The check below objects to the narrowing and is right to be
+	 * suspicious in general: int-to-signed-char is implementation-defined
+	 * when the value does not fit. Here the range guard above proves it
+	 * fits -- 'A' + 32 is 'a', 'Z' + 32 is 'z', both representable in any
+	 * char -- and any correct implementation narrows at exactly this point,
+	 * because C promotes the operands to int. Verified rather than
+	 * assumed: the ASCII fast path is covered by str_ascii and str_utf8.
 	 */
-	return (c >= 'A' && c <= 'Z') ? (char)(c + (char)32) : c;
+	/* NOLINTNEXTLINE(bugprone-narrowing-conversions) */
+	return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
 }
 
 static char to_upper_ascii(char c)
 {
-	/* as to_lower_ascii: the subtraction happens in int and is in ['A', 'Z']. */
+	/* As to_lower_ascii: 'a' - 32 is 'A', representable in any char. */
+	/* NOLINTNEXTLINE(bugprone-narrowing-conversions) */
 	return (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
 }
 

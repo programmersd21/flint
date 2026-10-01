@@ -512,6 +512,16 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 				bag->values = realloc(bag->values,
 				        sizeof(Value) * (size_t)bag->capacity);
 				if (bag->keys == NULL || bag->values == NULL) {
+					/*
+					 * Both frees. `before_keys` and `before_vals`
+					 * are snapshots taken before the module ran,
+					 * still live on this path, and the bag is
+					 * rooted on the value stack so the collector
+					 * will find that one.
+					 */
+					free(before_keys);
+					free(before_vals);
+					vm_pop(vm); /* the bag */
 					vm_runtime_error(
 					        vm, "Out of memory in import.");
 					return NIL_VAL;
