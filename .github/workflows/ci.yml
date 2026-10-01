@@ -47,5 +47,36 @@ jobs:
     - name: gc stress and sanitizers
       run: make clean && make stress
 
+    # The computed-goto interpreter. It is a separate binary and a separate
+    # build script, so nothing else in this workflow exercises it, and a
+    # transformation bug in scripts/to_computed_goto.py shows up as a crash at
+    # run time rather than as a compile error.
+    - name: computed-goto interpreter
+      run: |
+        make flint-goto
+        sh tests/run_tests.sh ./flint-goto
+
+    # clang-tidy, which reports include-hygiene problems the compiler does not.
+    # Advisory by design -- the target says so -- but it is the check that
+    # caught six missing includes in one release, so it runs on every push
+    # rather than on request.
+    - name: clang-tidy
+      run: make lint
+      continue-on-error: true
+
+    # A file with no trailing newline is a compile error under clang
+    # (-Wnewline-eof) and accepted by gcc. That asymmetry cost a CI run before
+    # it was noticed, and it is trivially checkable.
+    - name: files end with a newline
+      run: |
+        bad=0
+        for f in $(git ls-files '*.c' '*.h' '*.fl' '*.md' '*.py' '*.sh'); do
+          if [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ]; then
+            echo "no newline at end of file: $f"
+            bad=1
+          fi
+        done
+        exit $bad
+
     - name: ccache stats
       run: ccache -s
