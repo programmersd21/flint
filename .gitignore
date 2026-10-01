@@ -3,6 +3,8 @@ broken/
 flint
 flint-debug
 flint-stress
+flint-goto
+build/
 *.o
 *.d
 *.bin

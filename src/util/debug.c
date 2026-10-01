@@ -241,6 +241,8 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return simple_instruction("OP_CLOSE_UPVALUE", offset);
 	case OP_RETURN:
 		return simple_instruction("OP_RETURN", offset);
+	case OP_LIST_LEN:
+		return simple_instruction("OP_LIST_LEN", offset);
 	case OP_BUILD_LIST:
 		return byte_instruction("OP_BUILD_LIST", chunk, offset);
 	/*
@@ -291,6 +293,30 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		        "OP_SET_FIELD_TOP_LONG", chunk, offset);
 	case OP_CLOSURE_LONG:
 		return closure_long_instruction(chunk, offset);
+	case OP_ADD_NUM:
+		return simple_instruction("OP_ADD_NUM", offset);
+	case OP_SUB_NUM:
+		return simple_instruction("OP_SUB_NUM", offset);
+	case OP_MUL_NUM:
+		return simple_instruction("OP_MUL_NUM", offset);
+	case OP_DIV_NUM:
+		return simple_instruction("OP_DIV_NUM", offset);
+	case OP_MOD_NUM:
+		return simple_instruction("OP_MOD_NUM", offset);
+	case OP_LT_NUM:
+		return simple_instruction("OP_LT_NUM", offset);
+	case OP_LE_NUM:
+		return simple_instruction("OP_LE_NUM", offset);
+	case OP_GT_NUM:
+		return simple_instruction("OP_GT_NUM", offset);
+	case OP_GE_NUM:
+		return simple_instruction("OP_GE_NUM", offset);
+	case OP_EQ_NUM:
+		return simple_instruction("OP_EQ_NUM", offset);
+	case OP_NEQ_NUM:
+		return simple_instruction("OP_NEQ_NUM", offset);
+	case OP_NEG_NUM:
+		return simple_instruction("OP_NEG_NUM", offset);
 	default:
 		printf("Unknown opcode %d\n", instruction);
 		return offset + 1;

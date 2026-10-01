@@ -47,9 +47,24 @@
  * returned an unrooted value and left the rooting to its caller would be one
  * more place to forget.
  */
+/*
+ * Build a string that came out of an operation: a slice, a split piece, a case
+ * mapping.
+ *
+ * Not interned, and that is the change that matters. These strings are produced
+ * by text processing and used once; interning each of them meant a hash, a
+ * probe and an insertion into a weak table the collector then had to walk and
+ * clean, in exchange for making a second identical string share an object --
+ * which for a split of a log file never happens, because two identical pieces
+ * of a log file are rare.
+ *
+ * Equality still works: fl_strings_equal() compares lengths and bytes. The cost
+ * moved from creation to comparison, and comparison happens far less often than
+ * creation.
+ */
 static ObjString *make_string(VM *vm, const char *chars, int length)
 {
-	return copy_string(vm, chars, length);
+	return new_string(vm, chars, length);
 }
 
 /*
@@ -111,7 +126,7 @@ static Value split_native(VM *vm, int argc, Value *argv)
 		for (int i = 0; i < s->length; i++) {
 			char one = s->chars[i];
 			ObjString *piece = make_string(vm, &one, 1);
-			vm_push(vm, OBJ_VAL(piece));
+			vm_push(vm, STR_VAL(piece));
 			if (out->count == out->capacity) {
 				int old_cap = out->capacity;
 				out->capacity = GROW_CAPACITY(old_cap);
@@ -145,7 +160,7 @@ static Value split_native(VM *vm, int argc, Value *argv)
 			                (size_t)sep->length - 1) == 0) {
 				ObjString *piece = make_string(
 				        vm, s->chars + start, at - start);
-				vm_push(vm, OBJ_VAL(piece));
+				vm_push(vm, STR_VAL(piece));
 				if (out->count == out->capacity) {
 					int old_cap = out->capacity;
 					out->capacity = GROW_CAPACITY(old_cap);
@@ -173,7 +188,7 @@ emit_tail:;
 	 * gives one, and a script never has to tell "no separator" from
 	 * "trailing separator". */
 	ObjString *tail = make_string(vm, s->chars + start, s->length - start);
-	vm_push(vm, OBJ_VAL(tail));
+	vm_push(vm, STR_VAL(tail));
 	if (out->count == out->capacity) {
 		int old_cap = out->capacity;
 		out->capacity = GROW_CAPACITY(old_cap);
@@ -200,7 +215,7 @@ static Value substring(VM *vm, ObjString *s, int from, int to)
 		to = s->length;
 	if (from > to)
 		from = to;
-	return OBJ_VAL(make_string(vm, s->chars + from, to - from));
+	return STR_VAL(make_string(vm, s->chars + from, to - from));
 }
 
 /*
@@ -245,11 +260,7 @@ static Value join_native(VM *vm, int argc, Value *argv)
 			total += sep->length;
 	}
 
-	char *buffer = malloc((size_t)total + 1);
-	if (buffer == NULL) {
-		vm_runtime_error(vm, "out of memory in join().");
-		return NIL_VAL;
-	}
+	char *buffer = ALLOCATE(vm, char, (size_t)total + 1);
 
 	long used = 0;
 	for (int i = 0; i < list->count; i++) {
@@ -263,9 +274,8 @@ static Value join_native(VM *vm, int argc, Value *argv)
 	}
 	buffer[total] = '\0';
 
-	ObjString *out = make_string(vm, buffer, (int)total);
-	free(buffer);
-	return OBJ_VAL(out);
+	/* take_string owns buffer. */
+	return STR_VAL(take_string(vm, buffer, (int)total));
 }
 
 /* the C library's whitespace set, spelled out so flint's trim does not
@@ -443,11 +453,7 @@ static Value replace_native(VM *vm, int argc, Value *argv)
 	}
 	int total = s->length + hits * (to->length - from->length);
 
-	char *buffer = malloc((size_t)total + 1);
-	if (buffer == NULL) {
-		vm_runtime_error(vm, "out of memory in replace().");
-		return NIL_VAL;
-	}
+	char *buffer = ALLOCATE(vm, char, (size_t)total + 1);
 
 	/*
 	 * The second pass. Same shape as the counting pass, but copying
@@ -495,9 +501,7 @@ static Value replace_native(VM *vm, int argc, Value *argv)
 	}
 	buffer[used] = '\0';
 
-	ObjString *out = make_string(vm, buffer, used);
-	free(buffer);
-	return OBJ_VAL(out);
+	return STR_VAL(take_string(vm, buffer, used));
 }
 
 /* the C library's case mapping, which is ASCII-only and therefore does not
@@ -513,25 +517,24 @@ static char to_upper_ascii(char c)
 }
 
 /* lower(s) -> string. leaves non-ASCII bytes alone: flint strings are bytes,
- * and pretending otherwise would corrupt utf-8. */
+ * and pretending otherwise would corrupt utf-8.
+ *
+ * Uses ALLOCATE so take_string can own the buffer and avoid a second copy.
+ * The malloc+make_string+free pattern paid for three operations; this pays
+ * for one allocation and one memcpy. */
 static Value lower_native(VM *vm, int argc, Value *argv)
 {
 	(void)argc;
 	REQUIRE_STRING(vm, argv[0], "lower()");
 	ObjString *s = AS_STRING(argv[0]);
 
-	char *buffer = malloc((size_t)s->length + 1);
-	if (buffer == NULL) {
-		vm_runtime_error(vm, "out of memory in lower().");
-		return NIL_VAL;
-	}
+	char *buffer = ALLOCATE(vm, char, s->length + 1);
 	for (int i = 0; i < s->length; i++)
 		buffer[i] = to_lower_ascii(s->chars[i]);
 	buffer[s->length] = '\0';
 
-	ObjString *out = make_string(vm, buffer, s->length);
-	free(buffer);
-	return OBJ_VAL(out);
+	/* take_string owns buffer and frees it if the string is interned. */
+	return STR_VAL(take_string(vm, buffer, s->length));
 }
 
 /* upper(s) -> string */
@@ -541,18 +544,12 @@ static Value upper_native(VM *vm, int argc, Value *argv)
 	REQUIRE_STRING(vm, argv[0], "upper()");
 	ObjString *s = AS_STRING(argv[0]);
 
-	char *buffer = malloc((size_t)s->length + 1);
-	if (buffer == NULL) {
-		vm_runtime_error(vm, "out of memory in upper().");
-		return NIL_VAL;
-	}
+	char *buffer = ALLOCATE(vm, char, s->length + 1);
 	for (int i = 0; i < s->length; i++)
 		buffer[i] = to_upper_ascii(s->chars[i]);
 	buffer[s->length] = '\0';
 
-	ObjString *out = make_string(vm, buffer, s->length);
-	free(buffer);
-	return OBJ_VAL(out);
+	return STR_VAL(take_string(vm, buffer, s->length));
 }
 
 void register_string_natives(VM *vm)

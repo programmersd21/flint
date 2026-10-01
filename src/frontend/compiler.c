@@ -574,6 +574,7 @@ static void init_compiler(Compiler *compiler, FunctionType type)
 	local->name.start = "";
 	local->name.length = 0;
 	local->name_offset = 0;
+	state.current->function->chunk.local_count = state.current->local_count;
 }
 
 /* Pop the compiler, emit the implicit return, and hand back the function. */
@@ -626,7 +627,7 @@ static void end_scope(void)
 static int identifier_constant(Token *name)
 {
 	return make_constant(
-	        OBJ_VAL(copy_string(state.vm, name->start, name->length)));
+	        STR_VAL(copy_string(state.vm, name->start, name->length)));
 }
 
 static bool identifiers_equal(Token *a, Token *b)
@@ -748,6 +749,27 @@ static void add_local(Token name, bool is_const)
 	local->depth = -1;
 	local->is_captured = false;
 	local->is_const = is_const;
+
+	/*
+	 * Published on the chunk as each local is added, so the verifier can
+	 * check an OP_GET_LOCAL operand against something real. An operand is a
+	 * byte, so it can never exceed MAX_LOCALS and a check against that limit
+	 * catches nothing; only the function's own peak slot count means
+	 * anything.
+	 *
+	 * A peak, and only ever raised. Slots are reused: end_scope() drops
+	 * local_count back so a sibling scope can have the same slots, which
+	 * means the current count goes down and up across a function. Assigning
+	 * the current count here would lower the recorded peak when a later
+	 * scope happens to be shallower than an earlier one, and then every slot
+	 * index the earlier scope used would look out of range to the verifier.
+	 * That is not hypothetical: `for x in xs` followed by `for i in 0..n`
+	 * at the same level did exactly that.
+	 */
+	if (state.current->local_count >
+	        state.current->function->chunk.local_count)
+		state.current->function->chunk.local_count =
+		        state.current->local_count;
 }
 
 /*
@@ -980,7 +1002,7 @@ static void string(bool can_assign)
 
 	ObjString *str = copy_string(state.vm, chars, out);
 	free(chars);
-	emit_constant(OBJ_VAL(str));
+	emit_constant(STR_VAL(str));
 }
 
 static void emit_variable_op(uint8_t op, int arg)
@@ -1690,25 +1712,15 @@ static void for_statement(void)
 		/*
 		 * Condition: idx < len(list).
 		 *
-		 * There is no opcode for a list length, so the compiler
-		 * calls the len() native: push the global, push the list,
-		 * OP_CALL 1. That works, and it does mean for-in-over-a-list
-		 * calls a C function on every iteration. Emitting a real
-		 * OP_LIST_LEN would be a one-line VM change and a
-		 * two-line compiler change, if anyone ever profiles it.
+		 * OP_LIST_LEN reads the count out of the list header. It used
+		 * to load the `len` global, push the list, and make a real call
+		 * into C on every single iteration -- a global hash lookup, an
+		 * arity check and a native frame, to read an int that is
+		 * already in the object.
 		 */
 		emit_bytes(OP_GET_LOCAL, (uint8_t)idx_slot);
-
-		Token len_tok = {TOKEN_IDENTIFIER,
-		        "len",
-		        3,
-		        var_name.line,
-		        false,
-		        var_name.offset};
-		int len_const = identifier_constant(&len_tok);
-		emit_indexed(OP_GET_GLOBAL, OP_GET_GLOBAL_LONG, len_const);
 		emit_bytes(OP_GET_LOCAL, (uint8_t)list_slot);
-		emit_bytes(OP_CALL, 1);
+		emit_byte(OP_LIST_LEN);
 
 		emit_byte(OP_LESS);
 
@@ -2036,7 +2048,7 @@ static void import_declaration(void)
 	emit_indexed(OP_GET_GLOBAL, OP_GET_GLOBAL_LONG, fn_const);
 
 	ObjString *str = copy_string(state.vm, src, len);
-	emit_constant(OBJ_VAL(str));
+	emit_constant(STR_VAL(str));
 
 	emit_bytes(OP_CALL, 1);
 	emit_byte(OP_POP);

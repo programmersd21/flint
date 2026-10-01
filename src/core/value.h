@@ -20,6 +20,21 @@
 
 typedef uint64_t Value;
 
+/*
+ * Strings are declared here rather than in object.h because values_equal()
+ * below has to call fl_strings_equal() and this header is not allowed to
+ * include a runtime header. The only member it touches is chars/length, which
+ * is a fixed layout, so a forward declaration is enough to pass a pointer
+ * without knowing the struct.
+ */
+typedef struct ObjString ObjString;
+
+/*
+ * Two strings with equal contents. Defined in object.c, which does know the
+ * layout.
+ */
+bool fl_strings_equal(const ObjString *a, const ObjString *b);
+
 /* the 13 high bits. all set means "boxed". */
 #define FL_BOX_MASK     UINT64_C(0xFFF8000000000000)
 #define FL_TAG_SHIFT    48
@@ -30,6 +45,20 @@ typedef uint64_t Value;
 #define FL_TAG_FALSE UINT64_C(2)
 #define FL_TAG_TRUE  UINT64_C(3)
 #define FL_TAG_OBJ   UINT64_C(4)
+/*
+ * Strings get their own tag rather than sharing OBJ.
+ *
+ * Two reasons, and both are hot. IS_STRING becomes a mask-and-compare instead
+ * of a pointer chase to read the type byte, which matters because every string
+ * test in the VM and every string primitive starts with one. And equality
+ * stops being able to assume that equal means identical: two equal strings can
+ * now be two objects, so the tag is what tells values_equal that it has to ask
+ * somebody rather than compare bits.
+ *
+ * There is room: three bits hold eight tags and five were in use, so this
+ * spends one.
+ */
+#define FL_TAG_STR UINT64_C(5)
 
 /* one expression, not a function, so it stays usable in a static initializer */
 #define FL_MAKE_BOXED(tag, payload)                                            \
@@ -69,7 +98,14 @@ static inline bool IS_TRUE(Value v) { return v == TRUE_VAL; }
 static inline bool IS_BOOL(Value v) { return IS_TRUE(v) || IS_FALSE(v); }
 static inline bool IS_OBJ(Value v)
 {
-	return fl_is_boxed(v) && fl_tag_of(v) == FL_TAG_OBJ;
+	return fl_is_boxed(v) &&
+	       (fl_tag_of(v) == FL_TAG_OBJ || fl_tag_of(v) == FL_TAG_STR);
+}
+
+/* the type byte inside the object, for a value known to be a heap object */
+static inline const void *fl_obj_ptr(Value v)
+{
+	return (const void *)(uintptr_t)(v & FL_PAYLOAD_MASK);
 }
 
 /* only nil and false. zero, "" and [] are all true. */
@@ -190,21 +226,67 @@ static inline Value OBJ_VAL(void *p)
 	return (Value)FL_MAKE_BOXED(FL_TAG_OBJ, u);
 }
 
+/* the string form of OBJ_VAL. every string reaching the stack comes from here,
+ * so that IS_STRING never has to load a type byte to answer. */
+static inline Value STR_VAL(void *p)
+{
+	uintptr_t u = (uintptr_t)p;
+	assert((u & ~(uintptr_t)FL_PAYLOAD_MASK) == 0);
+	return (Value)FL_MAKE_BOXED(FL_TAG_STR, u);
+}
+
+/*
+ * Wrap a string object, with the type checked by the compiler.
+ *
+ * STR_VAL takes a void* because value.h cannot see ObjString. That is the
+ * wrong trade for call sites: passing an ObjList to STR_VAL compiles cleanly
+ * and produces a value that claims to be a string, which then fails every
+ * IS_STRING test and every string operation on it. It happened, and the
+ * symptom was a program that failed several calls away from the mistake.
+ *
+ * So the header with no runtime knowledge declares the typed form, and object.h
+ * defines it once the layout is known. Every string leaving the runtime goes
+ * through one of these two, and a wrong one is a compile error.
+ *
+ * Declared here, defined in object.h. The body needs the struct, and the
+ * struct lives in the runtime header, so a definition in this one would be a
+ * circular include. A declaration is not a warning; an unused *definition*
+ * would be, which is exactly the failure that made this worth writing down.
+ */
+
 static inline void *AS_OBJ_PTR(Value v)
 {
 	return (void *)(uintptr_t)(v & FL_PAYLOAD_MASK);
 }
 
 /*
- * Numbers compare by value, everything else by bit pattern. Because strings
- * are interned, two equal strings are the same pointer, and because boxes
- * are canonical, no two distinct values share a bit pattern.
+ * Numbers compare by value, everything else by bit pattern.
+ *
+ * Strings are the exception, and they used not to be. This used to be able to
+ * say "because strings are interned, two equal strings are the same pointer"
+ * and that was true and fast. Runtime strings are no longer interned -- the
+ * cost of interning a string built once was higher than the cost of comparing
+ * it once -- so equality has to ask about string contents. fl_strings_equal()
+ * starts with a pointer compare anyway, so the interned case is still one test.
  */
 static inline bool values_equal(Value a, Value b)
 {
 	if (IS_NUMBER(a) && IS_NUMBER(b))
 		return AS_NUMBER(a) == AS_NUMBER(b);
-	return a == b;
+	if (a == b)
+		return true;
+	/*
+	 * Two equal strings can be two different objects now that runtime
+	 * strings are not interned, so this is the one case where equal bit
+	 * patterns do not settle it. The tag test is a mask and a compare,
+	 * which is why strings got their own tag: no dereference, and no
+	 * having to load a type byte to find out whether to bother asking.
+	 */
+	if (fl_is_boxed(a) && fl_is_boxed(b) && fl_tag_of(a) == FL_TAG_STR &&
+	        fl_tag_of(b) == FL_TAG_STR)
+		return fl_strings_equal((const ObjString *)fl_obj_ptr(a),
+		        (const ObjString *)fl_obj_ptr(b));
+	return false;
 }
 
 #endif /* FL_VALUE_H */

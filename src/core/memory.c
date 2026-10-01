@@ -11,6 +11,7 @@
  * Running out of memory is not recoverable and is not worth pretending
  * otherwise, so the collector panics on allocation failure.
  */
+#include "config.h"
 #include "memory.h"
 #include "chunk.h"
 #include "compiler.h"
@@ -21,10 +22,50 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-/* collect again once the heap has doubled since the last collection. */
-#define GC_HEAP_GROW_FACTOR 2
 
 static void mark_value(VM *vm, Value value);
+
+/*
+ * Should this allocation trigger a collection?
+ *
+ * Two tests, and both are load-bearing. The size cutoff is the large-allocation
+ * exemption in config.h: one big buffer says nothing about how many small
+ * objects are alive, and counting it makes the next small allocation collect a
+ * heap that has nothing to do with the buffer. The bytes_allocated test comes
+ * second, because next_gc is only meaningful once the accounting runs.
+ *
+ * Kept out of fl_reallocate's body only because it needs to run *before* the
+ * realloc, while the caller is still free to grow the counter.
+ */
+static bool should_collect(VM *vm, size_t old_size, size_t new_size)
+{
+	/*
+	 * Growth only.
+	 *
+	 * A free can push the heap below next_gc -- sweeping does exactly
+	 * that -- and collecting at that moment is collecting *because* we
+	 * freed, which re-enters mark_roots over a runtime that is halfway
+	 * through tearing itself down. At exit that walks the globals table
+	 * after vm_free has already freed it, and ASan reports a
+	 * use-after-free inside the collector.
+	 *
+	 * The threshold is only ever crossed by growth, so nothing is lost by
+	 * requiring it.
+	 */
+	if (new_size <= old_size)
+		return false;
+	if (vm->counters.bytes <= vm->next_gc)
+		return false;
+	if (new_size - old_size > FL_GC_UNCOUNTED_ABOVE)
+		return false;
+	/*
+	 * FL_GC_STRESS collects on every *allocation* regardless of the
+	 * threshold. A missing GC root almost always shows up as a
+	 * use-after-free within a few allocations rather than never, and
+	 * `make stress` is the only build that defines it.
+	 */
+	return true;
+}
 
 /*
  * The one allocator. Also the GC trigger, which is why every growing
@@ -36,17 +77,40 @@ static void mark_value(VM *vm, Value value);
 void *fl_reallocate(VM *vm, void *pointer, size_t old_size, size_t new_size)
 {
 	if (vm != NULL) {
-		vm->bytes_allocated += new_size - old_size;
-		if (new_size > old_size) {
-#ifdef FL_GC_STRESS
-			/* collect on every single allocation. slow, and it
-			 * finds roots that are missing in the normal build. */
+		/*
+		 * Accounting before the realloc, because the collection this
+		 * may trigger runs reentrantly and anything the realloc would
+		 * have done to the counter afterwards would be attributed to
+		 * the wrong allocation.
+		 *
+		 * bytes_allocated stays as a field rather than becoming a
+		 * macro over counters.bytes because collect_garbage() and
+		 * free_objects() both read it and neither should have to know
+		 * how the number is spelled.
+		 */
+		size_t delta = new_size - old_size;
+		if (new_size > old_size)
+			vm->counters.allocations++;
+		else if (new_size == 0)
+			vm->counters.frees++;
+
+		if (should_collect(vm, old_size, new_size))
 			collect_garbage(vm);
-#else
-			if (vm->bytes_allocated > vm->next_gc)
-				collect_garbage(vm);
-#endif
-		}
+
+		/*
+		 * Applied after the collection, not before. free_object()
+		 * goes through here too, so the bytes a sweep reclaims come
+		 * straight back off the total, and the threshold stays
+		 * measured against what is actually live. Doing it the other
+		 * way round -- add, then collect -- would let the collector
+		 * see a heap one allocation larger than it really is and
+		 * would leave the total permanently inflated by whatever the
+		 * last sweep reclaimed.
+		 */
+		vm->counters.bytes += delta;
+		vm->bytes_allocated = vm->counters.bytes;
+		if (vm->counters.bytes > vm->counters.peak_bytes)
+			vm->counters.peak_bytes = vm->counters.bytes;
 	}
 
 	if (new_size == 0) {
@@ -118,9 +182,14 @@ static void blacken_object(VM *vm, Obj *object)
 	switch (object->type) {
 	case OBJ_STRING:
 		/*
-		 * a flexible array member of bytes, and a C function pointer
-		 * for OBJ_NATIVE. neither is a heap pointer the collector
-		 * traces, so they share the one empty arm.
+		 * A flexible array member of bytes, and a C function pointer for
+		 * OBJ_NATIVE. Neither is a heap pointer the collector traces,
+		 * so they share the one empty arm.
+		 *
+		 * Strings used to also be keys in vm->strings, which the table
+		 * marks as a root. Runtime strings are not interned any more,
+		 * so most of them are in no table at all and are reached
+		 * exactly once, from whatever holds them.
 		 */
 	case OBJ_NATIVE:
 		break;
@@ -232,6 +301,7 @@ static void sweep(VM *vm)
 			else
 				vm->objects = object;
 
+			vm->counters.gc_swept++;
 			free_object(vm, unreached);
 		}
 	}
@@ -242,7 +312,11 @@ void collect_garbage(VM *vm)
 	if (vm == NULL)
 		return;
 
+	uint64_t started = fl_now_ns();
+
 	mark_roots(vm);
+	vm->counters.gc_cycles++;
+	vm->counters.gc_visited += (uint64_t)vm->gray_count;
 	trace_references(vm);
 
 	/*
@@ -252,9 +326,18 @@ void collect_garbage(VM *vm)
 	 */
 	table_remove_white(&vm->strings);
 
+	/* measured here, before the sweep, because sweep() frees through
+	 * fl_reallocate() which has its own accounting. the delta below is
+	 * what the collector itself reclaimed, not what the program did. */
+	size_t before = vm->counters.bytes;
 	sweep(vm);
+	vm->counters.gc_freed_bytes += vm->counters.bytes - before;
 
-	vm->next_gc = vm->bytes_allocated * GC_HEAP_GROW_FACTOR;
+	vm->counters.gc_ns += fl_now_ns() - started;
+
+	vm->next_gc = vm->counters.bytes * FL_GC_HEAP_GROW_FACTOR;
+	if (vm->next_gc < FL_GC_FIRST_THRESHOLD)
+		vm->next_gc = FL_GC_FIRST_THRESHOLD;
 }
 
 /*

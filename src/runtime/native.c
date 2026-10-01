@@ -128,10 +128,10 @@ static Value input_native(VM *vm, int argc, Value *argv)
 	/* copy_string() interns and can collect. buffer is malloc'd and is
 	 * not a gc object, so it survives, but nothing below this point
 	 * reads it again once the copy is in flight. */
-	ObjString *line = copy_string(vm, buffer, (int)length);
+	ObjString *line = new_string(vm, buffer, (int)length);
 	free(buffer);
 
-	return OBJ_VAL(line);
+	return STR_VAL(line);
 }
 
 /* strings and lists. byte length for strings, element count for lists. */
@@ -171,6 +171,7 @@ static Value push_native(VM *vm, int argc, Value *argv)
 		list->capacity = GROW_CAPACITY(old_cap);
 		list->items = GROW_ARRAY(
 		        vm, Value, list->items, old_cap, list->capacity);
+		vm->counters.list_grows++;
 	}
 	list->items[list->count++] = item;
 	return item;
@@ -218,16 +219,16 @@ static Value str_native(VM *vm, int argc, Value *argv)
 		} else {
 			snprintf(buf, sizeof(buf), "%.15g", d);
 		}
-		return OBJ_VAL(copy_string(vm, buf, (int)strlen(buf)));
+		return STR_VAL(new_string(vm, buf, (int)strlen(buf)));
 	}
 	if (IS_BOOL(val))
-		return OBJ_VAL(copy_string(vm,
+		return STR_VAL(new_string(vm,
 		        AS_BOOL(val) ? "true" : "false",
 		        AS_BOOL(val) ? 4 : 5));
 	if (IS_NIL(val))
-		return OBJ_VAL(copy_string(vm, "nil", 3));
+		return STR_VAL(new_string(vm, "nil", 3));
 	/* no structure is rendered, so everything else is one opaque token */
-	return OBJ_VAL(copy_string(vm, "<object>", 8));
+	return STR_VAL(new_string(vm, "<object>", 8));
 }
 
 /* the type name, as a string. type() is the only way to introspect. */
@@ -244,7 +245,7 @@ static Value type_native(VM *vm, int argc, Value *argv)
 	 * because no other name in the language can reach that branch.
 	 */
 	const char *name = flint_type_name(argv[0]);
-	return OBJ_VAL(copy_string(vm, name, (int)strlen(name)));
+	return STR_VAL(copy_string(vm, name, (int)strlen(name)));
 }
 
 /*
@@ -293,7 +294,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	 * running it again would recurse forever.
 	 */
 	ObjString *key = copy_string(vm, path, (int)strlen(path));
-	vm_push(vm, OBJ_VAL(key)); /* rooted: every call below can collect */
+	vm_push(vm, STR_VAL(key)); /* rooted: every call below can collect */
 
 	Value cached;
 	if (table_get(&vm->modules, key, &cached)) {
@@ -489,7 +490,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 					return NIL_VAL;
 				}
 			}
-			vm_push(vm, OBJ_VAL(gname));
+			vm_push(vm, STR_VAL(gname));
 			bag->keys[bag->count] = gname;
 			bag->values[bag->count] = vm->globals.entries[i].value;
 			bag->count++;
@@ -504,7 +505,7 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		 * exactly the bug this replaced.
 		 */
 		ObjString *libname = copy_string(vm, raw, (int)strlen(raw));
-		vm_push(vm, OBJ_VAL(libname));
+		vm_push(vm, STR_VAL(libname));
 		table_set(vm, &vm->globals, libname, OBJ_VAL(bag));
 		vm_pop(vm);
 		vm_pop(vm); /* the bag */
@@ -561,8 +562,8 @@ static Value slice_native(VM *vm, int argc, Value *argv)
 	if (to < from)
 		to = from;
 
-	ObjString *out = copy_string(vm, s->chars + from, to - from);
-	return OBJ_VAL(out);
+	ObjString *out = new_string(vm, s->chars + from, to - from);
+	return STR_VAL(out);
 }
 
 void register_natives(VM *vm)

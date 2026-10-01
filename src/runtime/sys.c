@@ -335,7 +335,7 @@ static Value args_native(VM *vm, int argc, Value *argv)
 		Value *items = ALLOCATE(vm, Value, (size_t)n);
 		for (int k = 0; k < n; k++)
 			vm_push(vm,
-			        OBJ_VAL(copy_string(vm,
+			        STR_VAL(new_string(vm,
 			                args_vec[k + 2],
 			                (int)strlen(args_vec[k + 2]))));
 
@@ -375,7 +375,7 @@ static Value env_native(VM *vm, int argc, Value *argv)
 
 	/* getenv returns a pointer the C library owns. copy it into a flint
 	 * string so the script is not holding a pointer into environ. */
-	return OBJ_VAL(copy_string(vm, value, (int)strlen(value)));
+	return STR_VAL(new_string(vm, value, (int)strlen(value)));
 }
 
 /*
@@ -610,9 +610,9 @@ static Value read_file_native(VM *vm, int argc, Value *argv)
 
 	/* copy_string can collect. buffer is malloc'd and is not a gc
 	 * object, so it survives, but nothing reads it after this. */
-	ObjString *text = copy_string(vm, buffer, (int)size);
+	ObjString *text = new_string(vm, buffer, (int)size);
 	free(buffer);
-	return OBJ_VAL(text);
+	return STR_VAL(text);
 }
 
 /*
@@ -953,10 +953,10 @@ static Value time_str_native(VM *vm, int argc, Value *argv)
 	time_t t = (time_t)AS_NUMBER(argv[0]);
 	struct tm tm;
 	if (gmtime_r(&t, &tm) == NULL)
-		return OBJ_VAL(copy_string(vm, "", 0));
+		return STR_VAL(new_string(vm, "", 0));
 	char buf[64];
 	strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
-	return OBJ_VAL(copy_string(vm, buf, (int)strlen(buf)));
+	return STR_VAL(new_string(vm, buf, (int)strlen(buf)));
 }
 
 void register_sys_natives(VM *vm)

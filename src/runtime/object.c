@@ -10,6 +10,7 @@
 #include "chunk.h"
 #include "memory.h"
 #include "stdint.h"
+#include "profile.h"
 #include "table.h"
 #include "value.h"
 #include "vm.h"
@@ -30,6 +31,8 @@ static Obj *allocate_object(VM *vm, size_t size, ObjType type)
 	Obj *object = (Obj *)fl_reallocate(vm, NULL, 0, size);
 	object->type = type;
 	object->is_marked = false;
+	if (vm != NULL)
+		vm->counters.objects++;
 
 	if (vm != NULL) {
 		object->next = vm->objects;
@@ -44,6 +47,10 @@ static Obj *allocate_object(VM *vm, size_t size, ObjType type)
  * FNV-1a. Not cryptographic, not trying to be. It just has to spread
  * short identifier-like strings across the table, and it does that with one
  * multiply per byte.
+ *
+ * Only interned strings need a hash now -- it is the intern table's probe
+ * function -- so new_string() does not compute one. That is part of why
+ * building a string at run time got cheaper.
  */
 static uint32_t hash_string(const char *key, int length)
 {
@@ -55,13 +62,61 @@ static uint32_t hash_string(const char *key, int length)
 	return hash;
 }
 
+bool fl_bytes_are_ascii(const char *chars, int length)
+{
+	/* word-at-a-time, because this runs on every string the program makes
+	 * and a byte loop would show up. The load is safe because the caller
+	 * has at least `length` valid bytes and the read stops at the first
+	 * non-ASCII byte, which is by definition within them. */
+	const uint8_t *p = (const uint8_t *)chars;
+	while (length >= (int)sizeof(uint64_t)) {
+		uint64_t word;
+		memcpy(&word, p, sizeof word);
+		if ((word & UINT64_C(0x8080808080808080)) != 0)
+			return false;
+		p += sizeof word;
+		length -= (int)sizeof(uint64_t);
+	}
+	while (length-- > 0) {
+		if (*p++ >= 0x80)
+			return false;
+	}
+	return true;
+}
+
+bool fl_strings_equal(const ObjString *a, const ObjString *b)
+{
+	if (a == b)
+		return true;
+	if (a->length != b->length)
+		return false;
+	/*
+	 * memcmp, not a loop. The compiler turns a short fixed-length memcmp
+	 * into a couple of loads and compares, and a loop has a branch per
+	 * byte, so this is the version that matters for the one-byte and
+	 * two-byte strings that most string operations produce.
+	 *
+	 * Length zero is the case worth calling out: memcmp with a zero
+	 * length is defined to return zero, which is the right answer here,
+	 * and it is reachable -- slicing to an empty string is legal.
+	 */
+	return memcmp(a->chars, b->chars, (size_t)a->length) == 0;
+}
+
 /*
- * Copy the bytes and intern. The string is pushed on the stack across the
- * table_set() call because that call can trigger a collection, and an
- * unrooted new object does not survive one.
+ * Allocate, copy, and optionally intern.
+ *
+ * `intern` is a parameter rather than two near-identical functions because
+ * everything except the last six lines is shared, and a duplicated
+ * constructor is a duplicated bug. See the two public wrappers for which one a
+ * caller should reach for.
+ *
+ * The string is pushed on the stack across the table_set() call because that
+ * call can trigger a collection, and an unrooted new object does not survive
+ * one.
  */
 static ObjString *allocate_string(
-        VM *vm, const char *chars, int length, uint32_t hash)
+        VM *vm, const char *chars, int length, bool intern)
 {
 	/* length is signed, and every caller passes a strlen or a compile-time
 	 * literal. The assert is here because a negative one would size the
@@ -72,15 +127,29 @@ static ObjString *allocate_string(
 	ObjString *string = (ObjString *)allocate_object(
 	        vm, sizeof(ObjString) + (size_t)length + 1, OBJ_STRING);
 	string->length = length;
-	string->hash = hash;
+	/*
+	 * Only an interned string is ever looked up by hash, so only an
+	 * interned string pays for a hash. This used to be unconditional and
+	 * was one of the two costs that made building a string at run time
+	 * slower than it needed to be.
+	 */
+	string->hash = intern ? hash_string(chars, length) : 0;
+	string->flags =
+	        (uint8_t)(fl_bytes_are_ascii(chars, length) ? FL_STRING_ASCII
+	                                                    : 0);
 	memcpy(string->chars, chars, length);
 	string->chars[length] = '\0';
 
 	if (vm != NULL) {
-		/* root before the table_set, which can collect */
-		vm_push(vm, OBJ_VAL(string));
-		table_set(vm, &vm->strings, string, NIL_VAL);
-		vm_pop(vm);
+		vm->counters.strings_created++;
+		vm->counters.string_bytes += (uint64_t)length;
+		if (intern) {
+			string->flags |= FL_STRING_INTERNED;
+			/* root before the table_set, which can collect */
+			vm_push(vm, STR_VAL(string));
+			table_set(vm, &vm->strings, string, NIL_VAL);
+			vm_pop(vm);
+		}
 	}
 
 	return string;
@@ -94,19 +163,52 @@ static ObjString *allocate_string(
  */
 ObjString *take_string(VM *vm, char *chars, int length)
 {
-	uint32_t hash = hash_string(chars, length);
-	if (vm != NULL) {
-		ObjString *interned =
-		        table_find_string(&vm->strings, chars, length, hash);
-		if (interned != NULL) {
-			fl_reallocate(vm, chars, length + 1, 0);
-			return interned;
-		}
-	}
-
-	ObjString *result = allocate_string(vm, chars, length, hash);
+	ObjString *result = allocate_string(vm, chars, length, false);
 	fl_reallocate(vm, chars, length + 1, 0);
 	return result;
+}
+
+/*
+ * The fast path for a string that is about to be built from two others.
+ *
+ * The length-1 and length-0 cases are the ones that actually occur. Every
+ * concatenation of a number calls str(), which produces one digit, and every
+ * element of a split produces a short piece, so if concatenation is going to
+ * avoid an allocation at all it is going to do it here. Interning does not
+ * help: the operand cannot be found in the intern table unless it was put
+ * there, and putting it there is the cost being avoided.
+ *
+ * The caller has to do the rooting: pushing `a` is not enough if the buffer
+ * allocation below collects, because `b` is only reachable through `a`.
+ */
+ObjString *concat_strings(VM *vm, const ObjString *a, const ObjString *b)
+{
+	int length = a->length + b->length;
+
+	if (length <= FL_SMALL_STRING_MAX) {
+		/* one allocation: the string and its bytes together */
+		ObjString *result = (ObjString *)allocate_object(
+		        vm, sizeof(ObjString) + (size_t)length + 1, OBJ_STRING);
+		result->length = length;
+		result->hash = 0;
+		result->flags = (uint8_t)((FL_IS_ASCII(a) && FL_IS_ASCII(b))
+		                                  ? FL_STRING_ASCII
+		                                  : 0);
+		memcpy(result->chars, a->chars, (size_t)a->length);
+		memcpy(result->chars + a->length, b->chars, (size_t)b->length);
+		result->chars[length] = '\0';
+		if (vm != NULL) {
+			vm->counters.strings_created++;
+			vm->counters.string_bytes += (uint64_t)length;
+		}
+		return result;
+	}
+
+	int a_length = a->length;
+	char *chars = (char *)fl_reallocate(vm, NULL, 0, (size_t)length + 1);
+	memcpy(chars, a->chars, (size_t)a_length);
+	memcpy(chars + a_length, b->chars, (size_t)b->length);
+	return take_string(vm, chars, length);
 }
 
 /*
@@ -120,10 +222,18 @@ ObjString *copy_string(VM *vm, const char *chars, int length)
 	if (vm != NULL) {
 		ObjString *interned =
 		        table_find_string(&vm->strings, chars, length, hash);
-		if (interned != NULL)
+		if (interned != NULL) {
+			vm->counters.intern_hits++;
 			return interned;
+		}
+		vm->counters.intern_misses++;
 	}
-	return allocate_string(vm, chars, length, hash);
+	return allocate_string(vm, chars, length, true);
+}
+
+ObjString *new_string(VM *vm, const char *chars, int length)
+{
+	return allocate_string(vm, chars, length, false);
 }
 
 ObjFunction *new_function(VM *vm)
@@ -133,6 +243,9 @@ ObjFunction *new_function(VM *vm)
 	function->arity = 0;
 	function->upvalue_count = 0;
 	function->name = NULL;
+	function->call_count = 0;
+	function->loop_count = 0;
+	function->jit_code = NULL;
 	chunk_init(&function->chunk);
 	return function;
 }
@@ -189,6 +302,8 @@ ObjList *new_list(VM *vm)
 	list->count = 0;
 	list->capacity = 0;
 	list->items = NULL;
+	if (vm != NULL)
+		vm->counters.lists_created++;
 	return list;
 }
 
@@ -200,6 +315,8 @@ ObjTable *new_flint_table(VM *vm)
 	table->capacity = 0;
 	table->keys = NULL;
 	table->values = NULL;
+	if (vm != NULL)
+		vm->counters.tables_created++;
 	return table;
 }
 

@@ -35,13 +35,50 @@ struct Obj {
 /*
  * Header and bytes in one allocation. chars is a flexible array member, so
  * the string is copied into space that is already there.
+ *
+ * flags rather than separate subclasses, because the whole point of the flag
+ * is to decide whether a comparison can stop at the first byte. See
+ * value_strings_equal() for what each one buys.
+ *
+ * FL_STRING_INTERNED means "this exact object is registered in vm->strings",
+ * which implies two equal interned strings are the same pointer. Uninterned
+ * strings carry no such promise, so equality has to compare bytes.
+ *
+ * FL_STRING_ASCII means every byte is below 0x80. It is set on the way in for
+ * the literals the compiler produces and computed for short strings, and it
+ * makes the byte scans (upper, lower, index) cheaper: they can work on plain
+ * char instead of worrying about multi-byte sequences, and more usefully, a
+ * UTF-8 search for an ASCII needle can stop at the first byte >= 0x80.
  */
+#define FL_STRING_INTERNED 1u
+#define FL_STRING_ASCII    2u
+
 struct ObjString {
 	Obj obj;
 	int length;
 	uint32_t hash;
+	uint8_t flags;
 	char chars[];
 };
+
+/* the flags, as read from a string value. */
+#define FL_IS_INTERNED(s) (((s)->flags & FL_STRING_INTERNED) != 0)
+#define FL_IS_ASCII(s)    (((s)->flags & FL_STRING_ASCII) != 0)
+
+/*
+ * Wrap a string object as a Value, with the type checked.
+ *
+ * This is the one to use at runtime call sites. STR_VAL in value.h cannot
+ * check its argument because it does not know what a string is; by the time
+ * the layout is known this can, so a mistake here is a compiler error rather
+ * than a value that lies about being a string.
+ */
+static inline Value fl_str_val(const ObjString *s)
+{
+	return STR_VAL((void *)(uintptr_t)s);
+}
+
+#define STR_VAL(s) fl_str_val(s)
 
 typedef struct {
 	Obj obj;
@@ -49,6 +86,28 @@ typedef struct {
 	int upvalue_count;
 	Chunk chunk;
 	ObjString *name; /* NULL for the top-level script */
+
+	/*
+	 * Hotness, and where a compiled body would go.
+	 *
+	 * call_count and loop_count are read by the profiler and written by
+	 * the interpreter on two instructions, which is cheap enough to leave
+	 * in a release build: a field in a struct the VM already touched,
+	 * rather than a branch on a mode flag at every call site.
+	 *
+	 * jit_code is a struct pointer rather than void* because the JIT
+	 * needs the code pointer, the size, and the deoptimization table
+	 * together, and reinterpreting a void* at each use would hide the
+	 * only interesting field behind three casts. It is a forward
+	 * declaration so the runtime does not have to include jit.h, and
+	 * the collector has to learn about it in blacken_object() -- the
+	 * compiled code holds no Value references of its own, but a future
+	 * specialization cache might, and a missed root is a use-after-free
+	 * that only shows up in optimized builds.
+	 */
+	uint32_t call_count;
+	uint32_t loop_count;
+	struct FlJitCode *jit_code;
 } ObjFunction;
 
 /* a C function exposed to flint. arity of -1 means variadic. */
@@ -107,7 +166,16 @@ static inline bool is_obj_type(Value value, ObjType type)
 	return IS_OBJ(value) && AS_OBJ(value)->type == type;
 }
 
-#define IS_STRING(value)      is_obj_type(value, OBJ_STRING)
+/*
+ * Strings answer from the tag alone, with no dereference. Every string
+ * primitive and every OP_ADD begins with this test, so the version that reads
+ * a type byte out of the heap is the version that shows up in a profile.
+ */
+static inline bool IS_STRING(Value v)
+{
+	return fl_is_boxed(v) && fl_tag_of(v) == FL_TAG_STR;
+}
+
 #define IS_FUNCTION(value)    is_obj_type(value, OBJ_FUNCTION)
 #define IS_NATIVE(value)      is_obj_type(value, OBJ_NATIVE)
 #define IS_CLOSURE(value)     is_obj_type(value, OBJ_CLOSURE)
@@ -122,8 +190,61 @@ static inline bool is_obj_type(Value value, ObjType type)
 #define AS_LIST(value)        ((ObjList *)AS_OBJ_PTR(value))
 #define AS_FLINT_TABLE(value) ((ObjTable *)AS_OBJ_PTR(value))
 
-/* all of these allocate, so all of them can trigger a collection. */
+/*
+ * Are these bytes all below 0x80?
+ *
+ * Run once per string at creation, over bytes that are about to be copied
+ * anyway, so it rides along with an operation the constructor was performing
+ * regardless. It is what lets the ASCII fast paths skip UTF-8 reasoning.
+ */
+bool fl_bytes_are_ascii(const char *chars, int length);
+
+/*
+ * Strings up to this length come out of one allocation together with their
+ * bytes: no separate buffer, no copy through an intermediate.
+ *
+ * Not tuned to anything measured. It is the point below which a string's
+ * payload is smaller than the bookkeeping an operation needs anyway, so below
+ * it the extra step is pure overhead, and above it the copy is a small
+ * fraction of the work. Eight is where those two cross.
+ */
+#define FL_SMALL_STRING_MAX 8
+
+/*
+ * Concatenate two strings.
+ *
+ * Rooting contract: `a` must already be reachable from a GC root when this is
+ * called, because the allocation below can collect and `b` is reached only
+ * through it.
+ */
+ObjString *concat_strings(VM *vm, const ObjString *a, const ObjString *b);
+
+/*
+ * Copy and intern. This is for strings whose identity matters: identifiers,
+ * literals, and anything used as a table key. Two copies of the same bytes
+ * give the same pointer, and equality is then a pointer compare.
+ *
+ * Do not use it for strings a program builds at run time. Interning a string
+ * that is used once costs a hash, a probe and an insertion, and buys nothing,
+ * because nothing will look the string up again. See new_string().
+ */
 ObjString *copy_string(VM *vm, const char *chars, int length);
+
+/*
+ * Copy, do not intern.
+ *
+ * This is the right constructor for a string that came out of an operation:
+ * concatenation, a slice, str(), parsing, formatting. The bytes are compared
+ * for equality when equality is asked for, which costs a length check and a
+ * memcmp and is cheaper than the interning this skips.
+ *
+ * The one thing to be careful about is using the result as a table key.
+ * vm->strings and vm->globals both compare keys by pointer, so a key that was
+ * never interned is never found. Field names in the bytecode come from
+ * constants the compiler interned, so t.name is safe; a key computed at run
+ * time must be interned explicitly with copy_string().
+ */
+ObjString *new_string(VM *vm, const char *chars, int length);
 
 /* takes ownership of chars, which must come from ALLOCATE. frees it either way. */
 ObjString *take_string(VM *vm, char *chars, int length);

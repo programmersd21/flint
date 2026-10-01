@@ -13,6 +13,9 @@
 #include "compiler.h"
 #include "diagnostic.h"
 #include "object.h"
+#include "debug.h"
+#include "profile.h"
+#include "verify.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -143,6 +146,95 @@ static int repl(VM *vm)
 	return worst;
 }
 
+/*
+ * What to do with a script, beyond running it. One struct so that adding a mode
+ * is one field rather than another parameter threaded through every call site,
+ * and so that main() can build it once and hand the same value everywhere.
+ */
+typedef struct {
+	bool check; /* compile and verify, do not run */
+	bool dump_bytecode; /* print the bytecode before running */
+	bool trace; /* print every instruction as it executes */
+	bool profile; /* print counters after the run */
+} FlRunMode;
+
+/*
+ * Compile a source text and either dump it or run it.
+ *
+ * The three modes share a setup path on purpose. --check, --dump-bytecode and
+ * running are the same pipeline up to the point where bytecode stops being an
+ * internal representation, and three separate copies of "make a VM, set the
+ * diagnostics, set the flags" is three places for them to disagree about
+ * whether verification runs.
+ *
+ * Returns a sysexits code.
+ */
+static int compile_and_maybe_run(
+        VM *vm, const char *source, const char *name, const FlRunMode *mode)
+{
+	bool check_only = mode->check;
+	bool dump_bytecode = mode->dump_bytecode;
+	bool profile = mode->profile;
+	ObjFunction *function = compile_named(vm, source, name);
+	if (function == NULL)
+		return 65;
+
+	/* the verifier runs before the dump, so a dump of malformed bytecode
+	 * is reported rather than printed. */
+	FlVerifyError error;
+	if (!fl_verify_function(function, &error)) {
+		fprintf(stderr,
+		        "internal error: malformed bytecode in %s at byte %d "
+		        "(%s)\n",
+		        function->name != NULL ? function->name->chars : name,
+		        error.offset,
+		        error.message != NULL ? error.message : "unknown");
+		return 65;
+	}
+
+	if (dump_bytecode) {
+		chunk_disassemble(&function->chunk,
+		        function->name != NULL ? function->name->chars : name);
+		/* a dump of one function's chunk is not a program: the nested
+		 * functions are separate chunks with their own code. */
+		for (int i = 0; i < function->chunk.constants.count; i++) {
+			Value constant = function->chunk.constants.values[i];
+			if (IS_FUNCTION(constant)) {
+				ObjFunction *nested = AS_FUNCTION(constant);
+				printf("\n; %s\n",
+				        nested->name != NULL
+				                ? nested->name->chars
+				                : "<anonymous>");
+				chunk_disassemble(&nested->chunk,
+				        nested->name != NULL
+				                ? nested->name->chars
+				                : "<anonymous>");
+			}
+		}
+	}
+
+	if (check_only)
+		return 0;
+
+	uint64_t started = profile ? fl_now_ns() : 0;
+	InterpretResult result =
+	        vm_interpret_function(vm, function, source, name);
+	if (profile) {
+		uint64_t elapsed = fl_now_ns() - started;
+		fprintf(stderr, "\n");
+		fl_profile_report(stderr, &vm->counters);
+		fprintf(stderr,
+		        "\nwall clock                  %8.2f ms\n",
+		        (double)elapsed / 1e6);
+	}
+
+	if (result == INTERPRET_COMPILE_ERROR)
+		return 65;
+	if (result == INTERPRET_RUNTIME_ERROR)
+		return 70;
+	return 0;
+}
+
 /* slurp a whole file. the caller frees the result. */
 static char *read_file(const char *path)
 {
@@ -205,7 +297,7 @@ static char *read_file(const char *path)
 }
 
 /* run one file, with the imports resolved relative to *its* directory */
-static void run_file(VM *vm, const char *path)
+static int run_file(VM *vm, const char *path, const FlRunMode *mode)
 {
 	/*
 	 * Set the source directory so `import "lib/x.fl"` inside this file
@@ -216,13 +308,9 @@ static void run_file(VM *vm, const char *path)
 	sys_set_source_dir_for_file(path);
 
 	char *source = read_file(path);
-	InterpretResult result = vm_interpret_named(vm, source, path);
+	int code = compile_and_maybe_run(vm, source, path, mode);
 	free(source);
-
-	if (result == INTERPRET_COMPILE_ERROR)
-		exit(65);
-	if (result == INTERPRET_RUNTIME_ERROR)
-		exit(70);
+	return code;
 }
 
 static int fix_file(const char *path, FlDiagFormat format, FlColorMode color)
@@ -554,6 +642,10 @@ int main(int argc, char *argv[])
 	int arg = 1;
 	bool apply_fixes = false;
 	bool quiet = false;
+	bool dump_bytecode = false;
+	bool check_only = false;
+	bool trace = false;
+	bool profile = false;
 	FlWarnMode warnings = FL_WARN_DEFAULT;
 
 	/*
@@ -646,6 +738,22 @@ int main(int argc, char *argv[])
 				quiet = true;
 				continue;
 			}
+			if (strcmp(a, "--dump-bytecode") == 0) {
+				dump_bytecode = true;
+				continue;
+			}
+			if (strcmp(a, "--check") == 0) {
+				check_only = true;
+				continue;
+			}
+			if (strcmp(a, "--trace") == 0) {
+				trace = true;
+				continue;
+			}
+			if (strcmp(a, "--profile") == 0) {
+				profile = true;
+				continue;
+			}
 			if (strncmp(a, "--warnings=", 11) == 0) {
 				const char *value = a + 11;
 				if (strcmp(value, "default") == 0)
@@ -677,6 +785,13 @@ int main(int argc, char *argv[])
 		arg = 1;
 		free(kept);
 	}
+
+	FlRunMode mode = {
+	        .check = check_only,
+	        .dump_bytecode = dump_bytecode,
+	        .trace = trace,
+	        .profile = profile,
+	};
 
 	/* what the script will see: itself, then everything flint did not
 	 * claim. args() skips the first two. */
@@ -733,14 +848,10 @@ int main(int argc, char *argv[])
 			/* code has no file, so imports resolve against the
 			 * working directory, which is the only thing they can
 			 * sensibly mean */
-			InterpretResult result = vm_interpret_named(
-			        &vm, argv[arg + 1], "<command line>");
+			int code = compile_and_maybe_run(
+			        &vm, argv[arg + 1], "<command line>", &mode);
 			vm_free(&vm);
-			if (result == INTERPRET_COMPILE_ERROR)
-				return 65;
-			if (result == INTERPRET_RUNTIME_ERROR)
-				return 70;
-			return 0;
+			return code;
 		}
 		if (strcmp(flag, "-") == 0) {
 			/* the script comes from stdin. imports inside it
@@ -753,15 +864,11 @@ int main(int argc, char *argv[])
 			vm.warnings = warnings;
 			vm.quiet = quiet;
 			char *source = read_stdin();
-			InterpretResult result =
-			        vm_interpret_named(&vm, source, "<stdin>");
+			int code = compile_and_maybe_run(
+			        &vm, source, "<stdin>", &mode);
 			free(source);
 			vm_free(&vm);
-			if (result == INTERPRET_COMPILE_ERROR)
-				return 65;
-			if (result == INTERPRET_RUNTIME_ERROR)
-				return 70;
-			return 0;
+			return code;
 		}
 	}
 
@@ -780,7 +887,7 @@ int main(int argc, char *argv[])
 		 * `flint x.fl -v` runs x.fl with "-v" as an argument rather
 		 * than printing the version and running nothing. that is what
 		 * a script author expects, and it is what args() is for. */
-		run_file(&vm, argv[arg]);
+		worst = run_file(&vm, argv[arg], &mode);
 	}
 
 	vm_free(&vm);

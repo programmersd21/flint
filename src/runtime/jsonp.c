@@ -217,7 +217,7 @@ static bool parse_string(Json *j, Value *out)
 	}
 	j->p++; /* the closing quote */
 	buf[len] = '\0';
-	*out = OBJ_VAL(copy_string(j->vm, buf, len));
+	*out = STR_VAL(new_string(j->vm, buf, len));
 	free(buf);
 	return true;
 }
@@ -273,7 +273,24 @@ static bool parse_object(Json *j, Value *out)
 				return false;
 			}
 		}
-		t->keys[t->count] = AS_STRING(key);
+		/*
+		 * The key has to be interned, even though nothing else here
+		 * does that any more.
+		 *
+		 * Field lookup compares key *pointers*: t.x compiles to a
+		 * constant string the compiler interned, and OP_GET_FIELD walks
+		 * the table looking for that exact object. A parsed json key is
+		 * a fresh uninterned string, so it is equal in content to the
+		 * constant and still not found. The symptom is `nested.a`
+		 * being nil on a document that plainly has an "a" in it.
+		 *
+		 * So: keys are interned, values are not. That is the correct
+		 * split, not a compromise -- a key is looked up by identity and
+		 * a value is only ever compared by content.
+		 */
+		ObjString *interned_key = copy_string(
+		        j->vm, AS_STRING(key)->chars, AS_STRING(key)->length);
+		t->keys[t->count] = interned_key;
 		t->values[t->count] = v;
 		t->count++;
 
@@ -674,9 +691,9 @@ static Value stringify_native(VM *vm, int argc, Value *argv)
 		free(buf);
 		return NIL_VAL;
 	}
-	ObjString *out = copy_string(vm, buf, (int)len);
+	ObjString *out = new_string(vm, buf, (int)len);
 	free(buf);
-	return OBJ_VAL(out);
+	return STR_VAL(out);
 }
 
 static Value stringify_pretty_native(VM *vm, int argc, Value *argv)
@@ -693,9 +710,9 @@ static Value stringify_pretty_native(VM *vm, int argc, Value *argv)
 		free(buf);
 		return NIL_VAL;
 	}
-	ObjString *out = copy_string(vm, buf, (int)len);
+	ObjString *out = new_string(vm, buf, (int)len);
 	free(buf);
-	return OBJ_VAL(out);
+	return STR_VAL(out);
 }
 
 void register_json_natives(VM *vm)

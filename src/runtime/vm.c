@@ -11,7 +11,10 @@
 #include "chunk.h"
 #include "common.h"
 #include "compiler.h"
+#include "config.h"
 #include "diagnostic.h"
+#include "profile.h"
+#include "verify.h"
 /* the disassembler is called from run(), and only under
  * FL_DEBUG_TRACE_EXECUTION. Same reasoning as the compiler: an include that
  * nothing references in a release build is noise the analyser has to be told
@@ -552,7 +555,7 @@ static bool value_to_index(
  */
 void vm_define_native(VM *vm, const char *name, NativeFn function, int arity)
 {
-	vm_push(vm, OBJ_VAL(copy_string(vm, name, (int)strlen(name))));
+	vm_push(vm, STR_VAL(copy_string(vm, name, (int)strlen(name))));
 	vm_push(vm, OBJ_VAL(new_native(vm, function, arity)));
 	table_set(vm, &vm->globals, AS_STRING(vm->stack[0]), vm->stack[1]);
 	vm_pop(vm);
@@ -584,13 +587,25 @@ void vm_init(VM *vm)
 	vm->repl_leaves_value = false;
 	vm->diag_format = FL_DIAG_LEGACY;
 	vm->diag_color = FL_COLOR_AUTO;
+	vm->verify = true;
 
 	vm->objects = NULL;
 	vm->bytes_allocated = 0;
-	/* first collection after a megabyte, so startup does not collect.
-	 * the multiply is size_t so it is done in the type it is stored
-	 * in, rather than in int and widening afterwards. */
-	vm->next_gc = (size_t)1024 * 1024;
+	/*
+	 * The counters start at zero, which is the one time they are memset
+	 * rather than assigned individually. vm_init has to clear the whole
+	 * struct anyway -- it is inside the caller's frame, so it is whatever
+	 * was there before -- and listing forty fields here to assign them one
+	 * at a time is a list that has to be edited every time a counter is
+	 * added.
+	 */
+	memset(&vm->counters, 0, sizeof(vm->counters));
+	/*
+	 * first collection after a megabyte, so startup does not collect.
+	 * see FL_GC_FIRST_THRESHOLD in config.h for why this is a floor and
+	 * not just a multiple of a live set that does not exist yet.
+	 */
+	vm->next_gc = FL_GC_FIRST_THRESHOLD;
 	vm->gray_count = 0;
 	vm->gray_capacity = 0;
 	vm->gray_stack = NULL;
@@ -621,10 +636,27 @@ bool vm_pop_value(VM *vm, Value *out)
 
 void vm_free(VM *vm)
 {
+	/*
+	 * Objects first, then the tables.
+	 *
+	 * The reverse order looks harmless and is not. free_objects() calls
+	 * free_object(), which calls fl_reallocate(), which can trigger a
+	 * collection. That collection calls mark_roots(), which reads
+	 * vm->globals. If the globals table has already been freed, the mark
+	 * phase walks freed memory and the collector either faults or, worse,
+	 * follows a pointer out of it.
+	 *
+	 * The general rule: freeing anything while a collector can still run
+	 * requires the roots to still be readable, so the reachable structure
+	 * has to outlive the objects that point into it. The strings table
+	 * holds weak references to objects, which is why it has to go after
+	 * the sweep and not before it -- the same ordering requirement,
+	 * pointing the other way.
+	 */
+	free_objects(vm);
 	table_free(vm, &vm->globals);
 	table_free(vm, &vm->strings);
 	table_free(vm, &vm->modules);
-	free_objects(vm);
 }
 
 /*
@@ -739,12 +771,23 @@ static bool call(VM *vm, ObjClosure *closure, int arg_count)
  */
 static bool call_value(VM *vm, Value callee, int arg_count)
 {
+	vm->counters.calls++;
 	if (IS_OBJ(callee)) {
 		switch (OBJ_TYPE(callee)) {
-		case OBJ_CLOSURE:
-			return call(vm, AS_CLOSURE(callee), arg_count);
+		case OBJ_CLOSURE: {
+			ObjClosure *closure = AS_CLOSURE(callee);
+			/*
+			 * Hotness lives on the function, not the closure. Two
+			 * closures over one function are the same code and would
+			 * be compiled twice, which is the same waste as compiling
+			 * a loop twice.
+			 */
+			closure->function->call_count++;
+			return call(vm, closure, arg_count);
+		}
 		case OBJ_NATIVE: {
 			ObjNative *native = AS_NATIVE(callee);
+			vm->counters.primitives++;
 			/* arity -1 is variadic and skips the check */
 			if (native->arity != -1 && arg_count != native->arity) {
 				vm_runtime_error(vm,
@@ -844,17 +887,22 @@ static bool concatenate(VM *vm)
 		return false;
 	}
 
-	int length = a->length + b->length;
-	char *chars = ALLOCATE(vm, char, length + 1);
-	memcpy(chars, a->chars, a->length);
-	memcpy(chars + a->length, b->chars, b->length);
-	chars[length] = '\0';
-
-	/* take_string frees chars, and both operands are still rooted. */
-	ObjString *result = take_string(vm, chars, length);
+	/*
+	 * The result is not interned. It used to be, on the theory that a
+	 * repeated concatenation would then be free, and the theory is wrong in
+	 * both halves: a repeated concatenation is a loop that builds a *new*
+	 * string each time, so the repeats are not the same bytes and the
+	 * interning never hits; and the cost is paid every time whether or not
+	 * anything looks the result up again.
+	 *
+	 * Both operands are rooted across the allocation inside
+	 * concat_strings(), so this pops them after the result exists rather
+	 * than before it.
+	 */
+	ObjString *result = concat_strings(vm, a, b);
 	vm_pop(vm);
 	vm_pop(vm);
-	vm_push(vm, OBJ_VAL(result));
+	vm_push(vm, STR_VAL(result));
 	return true;
 }
 
@@ -1242,8 +1290,18 @@ static InterpretResult run(VM *vm, int base_frame)
 		}
 		case OP_LOOP: {
 			/* signed 16-bit backward offset, negated on the way in */
+			/*
+			 * signed 16-bit backward offset, negated on the way in
+			 *
+			 * This is the only backward branch in the instruction set,
+			 * which makes it the loop counter. Counting it here rather
+			 * than trying to recognize loop shapes in the bytecode is
+			 * one increment, and it is exactly right: a loop is
+			 * whatever this instruction is in.
+			 */
 			uint16_t offset = READ_SHORT();
 			frame->ip -= offset;
+			vm->counters.backedges++;
 			break;
 		}
 		case OP_CALL: {
@@ -1333,7 +1391,28 @@ static InterpretResult run(VM *vm, int base_frame)
 			 * then leave the result where the callee was */
 			vm->stack_top = frame->slots;
 			vm_push(vm, result);
+			vm->counters.returns++;
 			frame = &vm->frames[vm->frame_count - 1];
+			break;
+		}
+		case OP_LIST_LEN: {
+			/*
+			 * The list's own count, in place like a cast.
+			 *
+			 * The error is the one len() reports, and it is checked
+			 * rather than assumed: a script can shadow `len` with its
+			 * own function, so for-in-over-a-table is legal-looking
+			 * and has to fail the way it always did.
+			 */
+			Value target = peek(vm, 0);
+			if (!IS_LIST(target)) {
+				vm_runtime_error(vm,
+				        "argument to len() must be a string or "
+				        "list.");
+				return INTERPRET_RUNTIME_ERROR;
+			}
+			vm->stack_top[-1] =
+			        NUMBER_VAL((double)AS_LIST(target)->count);
 			break;
 		}
 		case OP_BUILD_LIST: {
@@ -1402,7 +1481,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				 * freed, but reading through a pointer the collector
 				 * just walked past is a habit not worth forming. */
 				char c[2] = {str->chars[idx], '\0'};
-				vm_push(vm, OBJ_VAL(copy_string(vm, c, 1)));
+				vm_push(vm, STR_VAL(copy_string(vm, c, 1)));
 			} else {
 				vm_runtime_error(vm,
 				        "can only index lists and strings.");
@@ -1583,6 +1662,84 @@ field_set_done:;
 			 * disassembler agree on the opcode list.
 			 */
 			break;
+
+		/*
+		 * Specialized numeric ops: no type check, straight arithmetic.
+		 * The compiler emits these when both operands are provably
+		 * numbers (e.g. literal + literal, or typed locals). The
+		 * savings is the tag test and branch that OP_ADD etc. pay.
+		 */
+		case OP_ADD_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, NUMBER_VAL(a + b));
+			break;
+		}
+		case OP_SUB_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, NUMBER_VAL(a - b));
+			break;
+		}
+		case OP_MUL_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, NUMBER_VAL(a * b));
+			break;
+		}
+		case OP_DIV_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, NUMBER_VAL(a / b));
+			break;
+		}
+		case OP_MOD_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, NUMBER_VAL(fmod(a, b)));
+			break;
+		}
+		case OP_LT_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, BOOL_VAL(a < b));
+			break;
+		}
+		case OP_LE_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, BOOL_VAL(a <= b));
+			break;
+		}
+		case OP_GT_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, BOOL_VAL(a > b));
+			break;
+		}
+		case OP_GE_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, BOOL_VAL(a >= b));
+			break;
+		}
+		case OP_EQ_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, BOOL_VAL(a == b));
+			break;
+		}
+		case OP_NEQ_NUM: {
+			double b = AS_NUMBER(vm_pop(vm));
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, BOOL_VAL(a != b));
+			break;
+		}
+		case OP_NEG_NUM: {
+			double a = AS_NUMBER(vm_pop(vm));
+			vm_push(vm, NUMBER_VAL(-a));
+			break;
+		}
 		}
 	}
 
@@ -1607,8 +1764,34 @@ InterpretResult vm_interpret(VM *vm, const char *source)
 
 InterpretResult vm_interpret_named(VM *vm, const char *source, const char *name)
 {
+	ObjFunction *function = compile_named(vm, source, name);
+	if (function == NULL)
+		return INTERPRET_COMPILE_ERROR;
+	return vm_interpret_function(vm, function, source, name);
+}
+
+/*
+ * Run an already-compiled function.
+ *
+ * Everything about the entry sequence lives here: base frame, base stack top,
+ * verification, and the closure-and-call that starts execution. The stack
+ * unwinding and restoration are the same in every case, which is why
+ * vm_interpret_named() is now a two-line wrapper.
+ */
+InterpretResult vm_interpret_function(
+        VM *vm, ObjFunction *function, const char *source, const char *name)
+{
 	const char *saved_text = vm->source_text;
 	const char *saved_name = vm->source_name;
+	/*
+	 * Publish the source for the whole run. vm_runtime_error() reads
+	 * vm->source_text to place a span and a caret, so this has to be set
+	 * here rather than only around the compile -- which is what
+	 * vm_interpret_named() used to do, back when compiling and running were
+	 * one function. Splitting them left it unset, and the symptom was
+	 * runtime errors with a code and a message and no span, which reads as
+	 * "there is no location" rather than "the caller forgot".
+	 */
 	vm->source_text = source;
 	vm->source_name = name;
 	/*
@@ -1644,14 +1827,6 @@ InterpretResult vm_interpret_named(VM *vm, const char *source, const char *name)
 
 	vm->base_frame = base_frame;
 	vm->base_top = base_top;
-
-	ObjFunction *function = compile_named(vm, source, name);
-	if (function == NULL) {
-		vm->base_frame = saved_base;
-		vm->source_text = saved_text;
-		vm->source_name = saved_name;
-		return INTERPRET_COMPILE_ERROR;
-	}
 
 	/*
 	 * The function is rooted on the stack across the new_closure() call,

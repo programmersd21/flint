@@ -7,6 +7,7 @@
 
 #include "chunk.h"
 #include "object.h"
+#include "profile.h"
 #include "table.h"
 #include "value.h"
 #include "../util/diagnostic.h"
@@ -73,6 +74,16 @@ struct VM {
 	 * where the value sits above the frame's closure rather than
 	 * being the thing the return pops. */
 	bool repl_leaves_value;
+	/*
+	 * Run the bytecode verifier before executing.
+	 *
+	 * On by default and not a debugging option: the JIT depends on it,
+	 * and a build flag that a user can turn off does not make the JIT
+	 * safer, it only makes it untestable. The flag exists so that
+	 * --check can measure the cost, and so a future path that has
+	 * already verified the same chunk can skip the repeat pass.
+	 */
+	bool verify;
 	FlDiagFormat diag_format;
 	FlColorMode diag_color;
 
@@ -104,6 +115,21 @@ struct VM {
 	size_t bytes_allocated;
 	size_t next_gc;
 
+	/*
+	 * Counters, and the one switch that decides whether anything writes
+	 * to them. `profile` is what --profile sets; `counters` is always
+	 * there because the collector needs the byte total anyway and
+	 * splitting the two would mean two sources for one number.
+	 *
+	 * The counters are incremented unconditionally. A branch on
+	 * vm->profile around every increment would be a load and a
+	 * predictable test on every allocation in the program, which is
+	 * exactly the kind of tax a release build should not pay for a mode
+	 * that is off. Writing a counter is a load and a store to a struct
+	 * the VM already owns, so it is cheaper than the branch would be.
+	 */
+	FlCounters counters;
+
 	/* explicit gray stack. see the tracing note in memory.c. */
 	int gray_count;
 	int gray_capacity;
@@ -131,6 +157,17 @@ void vm_set_diagnostics(VM *vm, FlDiagFormat format, FlColorMode color);
 InterpretResult vm_interpret(VM *vm, const char *source);
 InterpretResult vm_interpret_named(
         VM *vm, const char *source, const char *name);
+
+/*
+ * Run a function that has already been compiled.
+ *
+ * Separate from vm_interpret_named() so that a caller which needed the
+ * ObjFunction for something else -- a bytecode dump, a verifier report, a
+ * bytecode cache -- does not have to compile it twice. The function is rooted
+ * by this caller's own frame, so it must stay alive across the call.
+ */
+InterpretResult vm_interpret_function(
+        VM *vm, ObjFunction *function, const char *source, const char *name);
 
 /*
  * Stack primitives. These are also the GC roots, so an object must be on the
