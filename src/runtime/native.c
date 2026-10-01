@@ -408,19 +408,46 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		before_keys =
 		        malloc(sizeof(ObjString *) * (size_t)before_count);
 		before_vals = malloc(sizeof(Value) * (size_t)before_count);
+		/*
+		 * Both frees, not just the one that failed.
+		 *
+		 * malloc returning NULL for the second call and not the first is
+		 * entirely ordinary, and taking the early return while holding
+		 * the successful one is a leak that only shows up under memory
+		 * pressure -- which is exactly when a leak is most expensive and
+		 * least likely to be noticed. This is the shape clang-analyzer
+		 * flags as a leak on both buffers, and it was a real leak.
+		 */
 		if (before_keys == NULL || before_vals == NULL) {
+			free(before_keys);
+			free(before_vals);
 			free(path);
 			vm_pop(vm);
 			vm_runtime_error(vm, "Out of memory in import.");
 			return NIL_VAL;
 		}
-		int seen = 0;
-		for (int i = 0; i < vm->globals.capacity && seen < before_count;
-		        i++)
-			if (vm->globals.entries[i].key != NULL)
-				before_keys[seen++] =
-				        vm->globals.entries[i].key;
-		before_count = seen;
+		/*
+		 * count is decremented as entries are written, not fixed up
+		 * afterwards.
+		 *
+		 * The loop below stops early when it runs out of slots with a
+		 * real key, so a fixed before_count would leave the tail of both
+		 * arrays uninitialised -- and the comparison loops further down
+		 * read up to before_count. Sizing the count to what was actually
+		 * written makes the arrays' extent and the loop bound the same
+		 * number, which is the only way they cannot disagree.
+		 */
+		int written = 0;
+		for (int i = 0;
+		        i < vm->globals.capacity && written < before_count;
+		        i++) {
+			if (vm->globals.entries[i].key == NULL)
+				continue;
+			before_keys[written] = vm->globals.entries[i].key;
+			before_vals[written] = vm->globals.entries[i].value;
+			written++;
+		}
+		before_count = written;
 	}
 
 	InterpretResult res = vm_interpret_named(vm, buffer, path);

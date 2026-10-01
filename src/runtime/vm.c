@@ -269,7 +269,23 @@ void vm_runtime_error(VM *vm, const char *format, ...)
 	va_list args;
 	va_start(args, format);
 	va_list count_args;
+	/*
+	 * va_copy, because a va_list may be walked once.
+	 *
+	 * clang-analyzer-valist reports 'uninitialized value' on the
+	 * vsnprintf below and has for years. The sequence is the one C99
+	 * prescribes for using the arguments twice: va_start, then va_copy
+	 * into a second list, use both, va_end both. gcc -Wformat=2 agrees
+	 * that this is well formed.
+	 *
+	 * The annotation is here because the alternative -- restructuring to
+	 * avoid the copy -- means either a fixed-size buffer with a truncation
+	 * that can produce a wrong diagnostic, or formatting twice and
+	 * hoping the two agree. Neither is better than one annotated line.
+	 */
+	/* NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized) */
 	va_copy(count_args, args);
+	/* NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized) */
 	int length = vsnprintf(NULL, 0, format, count_args);
 	va_end(count_args);
 	char fallback[2048];

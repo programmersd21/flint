@@ -104,6 +104,19 @@ jobs:
         # Bump it when a new major lands, and check the index first.
         sudo apt-get install -y "clang-tidy-${LLVM_MAJOR}"
 
+    # clang-format runs first, on its own. clang-tidy loads .clang-format for
+    # every file it processes, and an unrecognised key there aborts the whole
+    # run before it checks anything -- silently, with exit 2, which reads
+    # exactly like a clean run. Splitting this into its own step means the
+    # failure is attributable.
+    #
+    # It is expected to fail on older toolchains, which is why it is
+    # continue-on-error. Its job here is to make a mismatch visible, not to
+    # gate the build.
+    - name: clang-format config check
+      run: make fmt-check
+      continue-on-error: true
+
     - name: clang-tidy
       run: make lint
       # Advisory by design: the target says so, and a lint policy change

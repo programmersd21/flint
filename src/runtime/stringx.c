@@ -508,11 +508,29 @@ static Value replace_native(VM *vm, int argc, Value *argv)
  * depend on the locale the way towlower does */
 static char to_lower_ascii(char c)
 {
-	return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+	/*
+	 * The operand is promoted to int, added, and cast back -- and that
+	 * round trip through int is what clang-tidy's bugprone-narrowing-
+	 * conversions objects to, twice: once at the cast and once at the return.
+	 *
+	 * The value is provably in ['a', 'z'], so the conversion is not merely
+	 * defined, it is a no-op. But "provably" is doing work in that sentence,
+	 * and a reader has to check it. Promoting the *constant* instead keeps
+	 * the arithmetic in char, where the result is defined by the language
+	 * rather than by a cast:
+	 *
+	 *     c + (char)32
+	 *
+	 * c promotes to int for the addition, then the int result is assigned
+	 * back to char on return -- which is the same narrowing, once, at a
+	 * point the return type already declares.
+	 */
+	return (c >= 'A' && c <= 'Z') ? (char)(c + (char)32) : c;
 }
 
 static char to_upper_ascii(char c)
 {
+	/* as to_lower_ascii: the subtraction happens in int and is in ['A', 'Z']. */
 	return (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
 }
 

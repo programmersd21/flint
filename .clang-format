@@ -110,19 +110,27 @@ ReflowComments: false
 # these out by hand, and a formatter that adds them back is a formatter you
 # start fighting.
 #
-# KeepEmptyLines is a nested block in clang 19 and later, and replaced the
-# older flat booleans. This file uses the new form because the project's own
-# clang-format is new; CI pins a current LLVM for the same reason, in
-# .github/workflows/ci.yml.
+# Blank-line policy, written in the form every clang-format from 14 to 24
+# accepts.
 #
-# It is worth knowing that this is a version-dependent key. On clang 18 and
-# earlier clang-tidy does not merely warn about it -- it errors out and checks
-# nothing at all, which looks exactly like a clean run. If the lint target
-# suddenly goes quiet, check the clang-format version before believing it.
-KeepEmptyLines:
-  AtEndOfFile:     false
-  AtStartOfBlock:  false
-  AtStartOfFile:   false
+# The nested `KeepEmptyLines:` block replaced the older flat booleans
+# (KeepEmptyLinesAtEOF and KeepEmptyLinesAtTheStartOfBlocks) in clang 19, and
+# an unrecognised key is a hard error rather than a warning. That matters more
+# than it looks: clang-tidy loads this file for every translation unit, so an
+# unrecognised key aborts the whole lint run with exit 2 and no findings, which
+# reads exactly like a clean build. The CI step that installs the pinned
+# toolchain exists mostly because of this.
+#
+# MaxEmptyLinesToKeep is the version-independent half and does most of the work:
+# one blank line between blocks, none stacked. The two booleans below stop
+# clang-format adding blank lines at the start of a file or block, which is the
+# part that is genuinely annoying to fight by hand.
+#
+# If a future clang deprecates these two names, the fix is to check what the
+# installed version supports before editing -- see the install step in
+# .github/workflows/ci.yml, which pins a known-good major for the same reason.
+KeepEmptyLinesAtEOF: false
+KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
 
 # The include order in this tree is deliberate: a file's own header first,
