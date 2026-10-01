@@ -1,0 +1,8 @@
+# calls that land in C. the generic-call overhead a builtin pays.
+let acc = 0
+let i = 0
+while i < 1000000 {
+    acc += len(str(i))
+    i += 1
+}
+print(acc)

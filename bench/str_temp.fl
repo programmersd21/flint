@@ -1,0 +1,11 @@
+# temporary strings: results used immediately and discarded. the workload
+# where interning every result is pure overhead, and where the string weak
+# table grows to hold garbage.
+let total = 0
+let i = 0
+while i < 200000 {
+    let tmp = "temp" + str(i)
+    total += len(tmp)
+    i += 1
+}
+print(total)

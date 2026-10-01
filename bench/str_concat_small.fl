@@ -1,0 +1,9 @@
+# concatenating many short strings into many results, rather than growing one
+# string. this is the "build a list of lines" workload.
+let parts = []
+let i = 0
+while i < 200000 {
+    push(parts, "item" + str(i))
+    i += 1
+}
+print(len(parts))

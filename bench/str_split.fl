@@ -1,0 +1,12 @@
+# split into many pieces. allocation per piece plus list growth.
+# built with join rather than repeated concat, so this measures split and not
+# the quadratic cost of growing one string twenty thousand times.
+let parts = []
+let i = 0
+while i < 20000 {
+    push(parts, "ab")
+    i += 1
+}
+let line = join(parts, ",")
+let out = split(line, ",")
+print(len(out))

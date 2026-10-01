@@ -1,0 +1,10 @@
+import json
+let rows = []
+let i = 0
+while i < 20000 {
+    push(rows, {id: i, name: "user" + str(i), score: i * 3, active: true})
+    i += 1
+}
+let doc = {rows: rows}
+let s = json.stringify(doc)
+print(len(s))

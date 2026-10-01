@@ -1,0 +1,17 @@
+# calling through a variable holding a closure. the callee is not known at
+# compile time, so this is the path an inline cache has to cover.
+fn make() {
+    let n = 0
+    fn bump() {
+        n += 1
+        return n
+    }
+    return bump
+}
+let f = make()
+let i = 0
+while i < 2000000 {
+    f()
+    i += 1
+}
+print(f())

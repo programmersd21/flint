@@ -1,0 +1,11 @@
+# replace over a large string. two passes: count the matches for the length,
+# then copy. built with join so the measurement is replace, not concat.
+let parts = []
+let i = 0
+while i < 20000 {
+    push(parts, "item ")
+    i += 1
+}
+let s = join(parts, "")
+let out = replace(s, "item", "ITEM")
+print(len(out))

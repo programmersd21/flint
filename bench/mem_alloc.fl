@@ -1,0 +1,11 @@
+# allocation churn with nothing retained. the collector's job: every object
+# here dies immediately, so this measures the sweep, not the mark.
+let i = 0
+let sink = 0
+while i < 500000 {
+    let t = {}
+    t.x = i
+    sink += t.x
+    i += 1
+}
+print(sink)

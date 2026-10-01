@@ -1,0 +1,10 @@
+import json
+let rows = []
+let i = 0
+while i < 4000 {
+    push(rows, "{\"id\":" + str(i) + ",\"name\":\"user" + str(i) + "\",\"score\":" + str(i * 3) + ",\"active\":true}")
+    i += 1
+}
+let doc = "{\"rows\":[" + join(rows, ",") + "]}"
+let parsed = json.parse(doc)
+print(len(parsed.rows))

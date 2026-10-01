@@ -1,0 +1,17 @@
+import json
+# arrays of similar objects, the shape a real json document has
+let rows = []
+let i = 0
+while i < 4000 {
+    push(rows, {id: i, name: "user" + str(i), score: i * 3})
+    i += 1
+}
+let text = json.stringify({rows: rows})
+let back = json.parse(text)
+let total = 0
+let j = 0
+while j < 4000 {
+    total += back.rows[j].score
+    j += 1
+}
+print(total)

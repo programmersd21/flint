@@ -1,0 +1,8 @@
+# multiplication alone
+let acc = 1
+let i = 1
+while i < 2000000 {
+    acc = acc * 1.000001
+    i += 1
+}
+print(acc)

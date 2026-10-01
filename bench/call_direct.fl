@@ -1,0 +1,9 @@
+# direct calls to a known function. the cost is the call path itself.
+fn add3(a, b, c) { return a + b + c }
+let acc = 0
+let i = 0
+while i < 2000000 {
+    acc = add3(acc, i, 1)
+    i += 1
+}
+print(acc)

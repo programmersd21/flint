@@ -1,0 +1,11 @@
+# equality on different-length strings. rejects on length, so it never
+# compares bytes.
+let a = "short"
+let b = "a much longer string that is not the same"
+let hits = 0
+let i = 0
+while i < 2000000 {
+    if a == b { hits += 1 }
+    i += 1
+}
+print(hits)

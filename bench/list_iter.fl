@@ -1,0 +1,13 @@
+# for-in over a list. the compiler emits an index and a len() call per
+# iteration, so this measures the iterator, not the body.
+let xs = []
+let i = 0
+while i < 300000 {
+    push(xs, i * 2)
+    i += 1
+}
+let acc = 0
+for x in xs {
+    acc += x
+}
+print(acc)

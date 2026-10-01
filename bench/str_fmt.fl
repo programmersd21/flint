@@ -1,0 +1,9 @@
+# number to string. the single most-called formatting path in any script that
+# prints numbers.
+let i = 0
+let total = 0
+while i < 300000 {
+    total += len(str(i * 7919))
+    i += 1
+}
+print(total)

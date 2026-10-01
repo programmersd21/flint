@@ -1,0 +1,18 @@
+# UTF-8 content handled as bytes. flint strings are bytes, so this measures
+# that the primitives do not corrupt multi-byte sequences, and how fast a
+# non-ASCII scan is. The literals carry real multi-byte UTF-8.
+let s = ""
+let i = 0
+while i < 5000 {
+    s = s + "naïve café ☃ "
+    i += 1
+}
+let total = 0
+let j = 0
+while j < 100 {
+    total += len(upper(s))
+    total += len(lower(s))
+    total += len(replace(s, "café", "tea"))
+    j += 1
+}
+print(total)

@@ -1,0 +1,15 @@
+# property access. tables are parallel arrays scanned linearly today, so this
+# is the measurement that says whether that costs anything at realistic sizes.
+let t = {}
+t.alpha = 1
+t.beta = 2
+t.gamma = 3
+t.delta = 4
+t.epsilon = 5
+let acc = 0
+let i = 0
+while i < 1000000 {
+    acc += t.alpha + t.beta + t.gamma + t.delta + t.epsilon
+    i += 1
+}
+print(acc)

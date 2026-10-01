@@ -1,0 +1,16 @@
+# find, with the needle present. the memchr-then-memcmp path.
+let s = ""
+let i = 0
+while i < 2000 {
+    s = s + "the quick brown fox "
+    i += 1
+}
+let hits = 0
+let j = 0
+while j < 300000 {
+    if contains(s, "brown") {
+        hits += 1
+    }
+    j += 1
+}
+print(hits)

@@ -1,0 +1,15 @@
+# indexed read over a list that is already the right size. no allocation in the
+# loop at all, so this is indexing and bounds checking only.
+let xs = []
+let i = 0
+while i < 500000 {
+    push(xs, i)
+    i += 1
+}
+let acc = 0
+let j = 0
+while j < 500000 {
+    acc += xs[j]
+    j += 1
+}
+print(acc)

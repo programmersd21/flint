@@ -1,0 +1,9 @@
+# the opposite of mem_alloc: everything retained, so nothing is swept and the
+# heap grows. a benchmark for the mark phase and for what a live set costs.
+let keep = []
+let i = 0
+while i < 300000 {
+    push(keep, {id: i, name: "n" + str(i)})
+    i += 1
+}
+print(len(keep))

@@ -1,0 +1,7 @@
+# for over a numeric range. no iterator object and no len() call, so this is
+# the shape a JIT should turn into a bare machine-code counter loop.
+let acc = 0
+for i in 0 .. 5000000 {
+    acc += i
+}
+print(acc)

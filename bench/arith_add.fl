@@ -1,0 +1,9 @@
+# addition alone. isolates the cost of one operator from the loop that
+# carries it, which a mixed arithmetic benchmark cannot do.
+let acc = 0
+let i = 0
+while i < 20000000 {
+    acc = acc + i
+    i += 1
+}
+print(acc)

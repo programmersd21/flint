@@ -1,0 +1,11 @@
+# equality on identical interned strings: one pointer compare. the fastest
+# string case there is, and the baseline everything else is read against.
+let a = "the quick brown fox"
+let b = "the quick brown fox"
+let hits = 0
+let i = 0
+while i < 2000000 {
+    if a == b { hits += 1 }
+    i += 1
+}
+print(hits)

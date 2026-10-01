@@ -1,0 +1,10 @@
+# building many tables. allocation plus field insertion.
+let i = 0
+while i < 200000 {
+    let t = {}
+    t.name = "x"
+    t.age = 3
+    t.city = "here"
+    i += 1
+}
+print(i)

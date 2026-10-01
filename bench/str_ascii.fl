@@ -1,0 +1,15 @@
+# ASCII case mapping over a long string, repeated.
+let s = ""
+let i = 0
+while i < 2000 {
+    s = s + "The Quick Brown Fox "
+    i += 1
+}
+let t = 0
+let j = 0
+while j < 200 {
+    t += len(upper(s))
+    t += len(lower(s))
+    j += 1
+}
+print(t)

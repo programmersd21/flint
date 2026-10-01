@@ -1,0 +1,10 @@
+# concatenation in a loop, building one growing string. quadratic in the number
+# of iterations: every step copies everything built so far. the shape a string
+# buffer exists to fix.
+let s = ""
+let i = 0
+while i < 20000 {
+    s = s + "x"
+    i += 1
+}
+print(len(s))

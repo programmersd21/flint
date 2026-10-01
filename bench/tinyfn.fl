@@ -1,0 +1,9 @@
+# one call. function entry, a frame, a return: the fixed cost of calling.
+fn f(x) { return x + 1 }
+let t = 0
+let i = 0
+while i < 1000 {
+    t = f(t)
+    i += 1
+}
+print(t)

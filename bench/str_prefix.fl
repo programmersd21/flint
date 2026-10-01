@@ -1,0 +1,9 @@
+# starts_with, in a loop. memcmp on a known-length prefix.
+let s = "the quick brown fox jumps over the lazy dog"
+let hits = 0
+let i = 0
+while i < 1000000 {
+    if starts_with(s, "the ") { hits += 1 }
+    i += 1
+}
+print(hits)

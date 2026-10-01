@@ -1,0 +1,12 @@
+# calls nested several deep per iteration. measures the frame stack, not
+# recursion depth.
+fn inner(x) { return x + 1 }
+fn middle(x) { return inner(x) + inner(x) }
+fn outer(x) { return middle(x) + middle(x) }
+let acc = 0
+let i = 0
+while i < 1000000 {
+    acc = outer(acc) % 1000000
+    i += 1
+}
+print(acc)

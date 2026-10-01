@@ -1,0 +1,8 @@
+# fmod is a library call on doubles, unlike the other three. worth knowing.
+let acc = 0
+let i = 1
+while i < 3000000 {
+    acc += i % 7
+    i += 1
+}
+print(acc)

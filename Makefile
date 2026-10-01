@@ -83,7 +83,7 @@ DBG_CFLAGS := -O0 -g3 -DFL_DEBUG_PRINT_CODE -DFL_DEBUG_TRACE_EXECUTION
 STR_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFL_GC_STRESS
 STR_LDFLAGS := -fsanitize=address,undefined
 
-.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help
+.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help flint-goto
 .SUFFIXES:
 
 # If a compile fails partway, do not leave a truncated object behind. Make
@@ -161,7 +161,7 @@ LIB_OBJS := $(filter-out $(REL_DIR)/src/main.o,$(REL_OBJS))
 #
 # The .bin targets are ordinary files and get rebuilt only when something
 # changed. The test targets are phony and always run what they built.
-.PHONY: test_value test_chunk
+.PHONY: test_value test_chunk test_verify
 
 test_value.bin: $(UNIT_DIR)/unit_value.o
 	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS)
@@ -169,11 +169,17 @@ test_value.bin: $(UNIT_DIR)/unit_value.o
 test_chunk.bin: $(UNIT_DIR)/test_chunk.o $(LIB_OBJS)
 	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS)
 
+test_verify.bin: $(UNIT_DIR)/test_verify.o $(LIB_OBJS)
+	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS)
+
 test_value: test_value.bin
 	@./test_value.bin
 
 test_chunk: test_chunk.bin
 	@./test_chunk.bin
+
+test_verify: test_verify.bin
+	@./test_verify.bin
 
 # Built in the release tree on purpose: these run under the same -Werror
 # baseline as the interpreter, so a header change that breaks them shows up
@@ -184,7 +190,42 @@ $(UNIT_DIR)/%.o: tests/unit/%.c
 
 # Each test reports through its exit status, so make stops at the first
 # failure and names it rather than running the rest onto a broken build.
-unit: test_value test_chunk
+unit: test_value test_chunk test_verify
+
+#
+# The computed-goto interpreter.
+#
+# A switch is portable C11. Computed goto is a GCC/Clang extension that drops
+# the bounds check and lets the processor predict the next opcode from the
+# previous one, and it is worth 7-21% on loop-heavy programs -- measured, see
+# bench/RESULTS.md.
+#
+# It is not the default because taking the address of a label is not standard
+# C, and this project builds with -Wpedantic -Werror and has never needed to
+# relax either for a feature. So the fast interpreter is a separate binary
+# produced by transforming the source, rather than a #ifdef in it:
+#
+#   * one copy of the interpreter, not two that have to be kept in step
+#   * the default build stays portable and warning-clean
+#   * the transformation is a script you can read, rather than a macro that
+#     hides sixty handlers behind one
+#
+# scripts/to_computed_goto.py rewrites the dispatch into labels. It is
+# idempotent and it refuses to run on an already-transformed file.
+GOTO_DIR := $(BUILD)/goto
+GOTO_VM := $(GOTO_DIR)/vm.c
+GOTO_OBJS := $(SRCS:%.c=$(REL_DIR)/%.o)
+GOTO_OBJS := $(filter-out $(REL_DIR)/src/runtime/vm.o,$(GOTO_OBJS)) $(GOTO_DIR)/vm.o
+
+flint-goto: $(GOTO_VM) $(GOTO_OBJS)
+	$(CC) $(ALL_CFLAGS) -std=gnu11 -Wno-pedantic $(REL_CFLAGS) $(GOTO_OBJS) -o $@ $(LIBS)
+
+$(GOTO_VM): src/runtime/vm.c scripts/to_computed_goto.py
+	@mkdir -p $(dir $@)
+	@python3 scripts/to_computed_goto.py --output $@ $<
+
+$(GOTO_DIR)/vm.o: $(GOTO_VM)
+	$(CC) $(ALL_CFLAGS) -std=gnu11 -Wno-pedantic $(REL_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # benchmarks. run_tests.sh exists; bench/run.sh does not yet, so this target
 # is a placeholder and will tell you so rather than failing with a confusing
@@ -279,8 +320,8 @@ fmt-check:
 	echo "all $(words $(FMT_FILES)) files formatted"
 
 clean:
-	rm -rf $(BUILD) flint flint-debug flint-stress \
-		test_value.bin test_chunk.bin
+	rm -rf $(BUILD) flint flint-debug flint-stress flint-goto \
+		test_value.bin test_chunk.bin test_verify.bin
 
 help:
 	@echo "make            release build          -> ./flint"
@@ -289,7 +330,8 @@ help:
 	@echo "make test       release build, runs the language suite"
 	@echo "make unit       value and chunk unit tests"
 	@echo "make check      clean + build + test + unit (gate quality)"
-	@echo "make bench      benchmarks (bench/run.sh)"
+	@echo "make flint-goto computed-goto interpreter, 7-21% faster"
+	@echo "make bench      benchmarks (bench/bench.py)"
 	@echo "make lint       clang-tidy, policy in .clang-tidy"
 	@echo "make clean      remove build/ and the binaries"
 	@echo ""

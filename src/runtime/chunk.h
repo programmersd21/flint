@@ -101,6 +101,23 @@ typedef enum {
 	OP_CLOSURE,
 	OP_CLOSE_UPVALUE,
 	OP_RETURN,
+	/*
+	 * len(list) without going through the builtin.
+	 *
+	 * The for-in loop the compiler emits asks for the list length on every
+	 * iteration, and it used to do that by loading the global `len`,
+	 * pushing the list, and making a real call into C. One call, one
+	 * global hash lookup and one frame's worth of arity checking per loop
+	 * iteration, to read an integer that is already in the object's
+	 * header.
+	 *
+	 * This is the reason the opcode exists. It is not a peephole: it
+	 * removes a call that only the compiler emits, and it is the single
+	 * largest interpreter win in list iteration.
+	 *
+	 * Operands: none. Stack: [list] -> [number].
+	 */
+	OP_LIST_LEN,
 	OP_BUILD_LIST,
 	OP_BUILD_TABLE,
 	/*
@@ -128,6 +145,34 @@ typedef enum {
 	OP_SET_FIELD_LONG,
 	OP_SET_FIELD_TOP_LONG,
 	OP_CLOSURE_LONG,
+	/*
+	 * Specialized numeric opcodes. These are the same as their generic
+	 * counterparts (OP_ADD, OP_SUBTRACT, etc.) but skip the type check:
+	 * the compiler emits them when both operands are provably numbers at
+	 * compile time (constant folding, or typed local inference). The
+	 * interpreter dispatches to a two-instruction sequence: no tag test,
+	 * no branch, just unbox-operate-rebox.
+	 *
+	 * The verifier checks that both operands exist on the stack; it
+	 * cannot check that they are numbers. A misprediction here produces
+	 * a wrong number, not a crash, because AS_NUMBER on a non-number
+	 * returns whatever bits are in the value. The compiler only emits
+	 * these when it is sure, so in practice the guarantee holds.
+	 *
+	 * All take no operands (1 byte).
+	 */
+	OP_ADD_NUM,
+	OP_SUB_NUM,
+	OP_MUL_NUM,
+	OP_DIV_NUM,
+	OP_MOD_NUM,
+	OP_LT_NUM,
+	OP_LE_NUM,
+	OP_GT_NUM,
+	OP_GE_NUM,
+	OP_EQ_NUM,
+	OP_NEQ_NUM,
+	OP_NEG_NUM,
 } OpCode;
 
 typedef struct {
@@ -156,6 +201,22 @@ typedef struct {
 	 */
 	uint32_t *spans;
 	ValueArray constants;
+
+	/*
+	 * How many local slots this function's frame has, slot 0 being the
+	 * callee.
+	 *
+	 * The compiler has always known this and used it to assign indices; it
+	 * just threw the number away, which left nobody able to check that an
+	 * OP_GET_LOCAL operand names a slot that exists. Both the verifier and
+	 * the JIT need it -- a JIT wants to size a frame once rather than
+	 * scanning for the highest slot -- and both were re-deriving it badly.
+	 *
+	 * Set by the compiler as locals are added. A chunk built by hand in a
+	 * test may leave it 0, in which case the verifier skips the local-range
+	 * check rather than failing it.
+	 */
+	int local_count;
 } Chunk;
 
 void chunk_init(Chunk *chunk);
@@ -173,5 +234,24 @@ void chunk_free(VM *vm, Chunk *chunk);
 
 /* returns the new index, or -1 if the pool is full. */
 int chunk_add_constant(VM *vm, Chunk *chunk, Value value);
+
+/*
+ * Operand width of one instruction, in bytes including the opcode.
+ *
+ * This is the single place that knows the instruction encoding. The compiler
+ * emits through emit_indexed() and friends, the disassembler switches on the
+ * same numbers, and the verifier below steps over instructions using this.
+ * Three independent copies of "how wide is OP_CALL" is three chances to
+ * disagree, and a disagreement between the emitter and the verifier is a
+ * buffer read out of bounds.
+ *
+ * Returns 0 for an opcode that is not in the enum, which is what a malformed
+ * chunk contains. Callers treat 0 as "this is not a valid instruction", which
+ * is precisely the verdict the verifier is reaching.
+ */
+int chunk_instruction_size(uint8_t opcode);
+
+/* true if `opcode` is a member of the enum. */
+bool chunk_opcode_valid(uint8_t opcode);
 
 #endif /* FL_CHUNK_H */

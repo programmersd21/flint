@@ -48,6 +48,7 @@ void chunk_init(Chunk *chunk)
 	chunk->code = NULL;
 	chunk->lines = NULL;
 	chunk->spans = NULL;
+	chunk->local_count = 0;
 	value_array_init(&chunk->constants);
 }
 
@@ -102,4 +103,112 @@ int chunk_add_constant(VM *vm, Chunk *chunk, Value value)
 	}
 	value_array_write(vm, &chunk->constants, value);
 	return chunk->constants.count - 1;
+}
+
+bool chunk_opcode_valid(uint8_t opcode)
+{
+	/* OP_NEG_NUM is the last member. Update this when adding opcodes. */
+	return opcode <= OP_NEG_NUM;
+}
+
+int chunk_instruction_size(uint8_t opcode)
+{
+	switch (opcode) {
+	/* one byte: no operand */
+	case OP_NIL:
+	case OP_TRUE:
+	case OP_FALSE:
+	case OP_POP:
+	case OP_EQUAL:
+	case OP_NOT_EQUAL:
+	case OP_GREATER:
+	case OP_GREATER_EQUAL:
+	case OP_LESS:
+	case OP_LESS_EQUAL:
+	case OP_ADD:
+	case OP_SUBTRACT:
+	case OP_MULTIPLY:
+	case OP_DIVIDE:
+	case OP_MODULO:
+	case OP_NOT:
+	case OP_NEGATE:
+	case OP_PRINT:
+	case OP_LIST_LEN:
+	/* indexing is a bare opcode: the operands are already on the stack */
+	case OP_GET_INDEX:
+	case OP_SET_INDEX:
+	case OP_CLOSE_UPVALUE:
+	case OP_RETURN:
+	case OP_BUILD_TABLE:
+	case OP_IMPORT:
+	case OP_EXPORT:
+		return 1;
+
+	/* two bytes: one u8 operand */
+	case OP_CONSTANT:
+	case OP_GET_LOCAL:
+	case OP_SET_LOCAL:
+	case OP_GET_UPVALUE:
+	case OP_SET_UPVALUE:
+	case OP_CALL:
+	case OP_CAST:
+	case OP_BUILD_LIST:
+	case OP_GET_GLOBAL:
+	case OP_DEFINE_GLOBAL:
+	case OP_DEFINE_GLOBAL_CONST:
+	case OP_SET_GLOBAL:
+	case OP_GET_FIELD:
+	case OP_SET_FIELD:
+	case OP_SET_FIELD_TOP:
+		return 2;
+
+	/* three bytes: a u16 jump offset */
+	case OP_JUMP:
+	case OP_JUMP_IF_FALSE:
+	case OP_LOOP:
+		return 3;
+
+	/*
+	 * Four bytes: a 24-bit constant index, or a u8 index for the short
+	 * forms that have one.
+	 */
+	case OP_CONSTANT_LONG:
+	case OP_GET_GLOBAL_LONG:
+	case OP_DEFINE_GLOBAL_LONG:
+	case OP_DEFINE_GLOBAL_CONST_LONG:
+	case OP_SET_GLOBAL_LONG:
+	case OP_GET_FIELD_LONG:
+	case OP_SET_FIELD_LONG:
+	case OP_SET_FIELD_TOP_LONG:
+	/*
+	 * Four is the minimum. The two extra bytes are one (is_local, index)
+	 * pair per upvalue the closure captures, so the real width depends on
+	 * the constant this names and cannot be known without the pool.
+	 *
+	 * Every caller in this codebase only needs "is this a fixed width, and
+	 * what is the minimum", and all of them handle OP_CLOSURE separately:
+	 * the verifier recurses into the named function, and the disassembler
+	 * walks the pairs itself. Returning 0 instead would make the minimum
+	 * unanswerable, and a 0 means "malformed" everywhere else here.
+	 */
+	case OP_CLOSURE:
+	case OP_CLOSURE_LONG:
+		return 4;
+
+	/* specialized numeric ops: one byte, no operand */
+	case OP_ADD_NUM:
+	case OP_SUB_NUM:
+	case OP_MUL_NUM:
+	case OP_DIV_NUM:
+	case OP_MOD_NUM:
+	case OP_LT_NUM:
+	case OP_LE_NUM:
+	case OP_GT_NUM:
+	case OP_GE_NUM:
+	case OP_EQ_NUM:
+	case OP_NEQ_NUM:
+	case OP_NEG_NUM:
+		return 1;
+	}
+	return 0;
 }

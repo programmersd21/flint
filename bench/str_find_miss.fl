@@ -1,0 +1,17 @@
+# find, with the needle absent. the worst case for substring search, and
+# the one that separates a real implementation from a lucky one.
+let s = ""
+let i = 0
+while i < 2000 {
+    s = s + "the quick brown fox "
+    i += 1
+}
+let hits = 0
+let j = 0
+while j < 300000 {
+    if contains(s, "zzqqxx") {
+        hits += 1
+    }
+    j += 1
+}
+print(hits)

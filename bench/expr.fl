@@ -1,0 +1,3 @@
+# one expression, compiled and discarded. the smallest thing that is not an
+# empty file, so it measures the compile-and-run path without a loop.
+1 + 2

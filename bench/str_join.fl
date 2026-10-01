@@ -1,0 +1,9 @@
+# join, which is the inverse and should be one allocation plus memcpys.
+let parts = []
+let i = 0
+while i < 50000 {
+    push(parts, "word")
+    i += 1
+}
+let s = join(parts, ",")
+print(len(s))

@@ -1,0 +1,9 @@
+# allocation: a million pushes. each one is an object plus a buffer growth, so
+# this is mostly a measurement of the allocator and the collector.
+let xs = []
+let i = 0
+while i < 1000000 {
+    push(xs, i)
+    i += 1
+}
+print(len(xs))

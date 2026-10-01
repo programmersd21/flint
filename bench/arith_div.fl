@@ -1,0 +1,9 @@
+# division alone. the slowest of the four integer-like operators, because the
+# divide unit is the one that a loop cannot hide.
+let acc = 0
+let i = 1
+while i < 5000000 {
+    acc = acc + 1000000 / i
+    i += 1
+}
+print(acc)

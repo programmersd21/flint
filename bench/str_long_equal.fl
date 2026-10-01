@@ -1,0 +1,24 @@
+# equality on two equal long strings that are NOT the same object. this is the
+# case that actually has to compare bytes, and it is the one interning is
+# supposed to make rare.
+let base = ""
+let i = 0
+while i < 400 {
+    base = base + "abcdefghij"
+    i += 1
+}
+let same = ""
+let j = 0
+while j < 400 {
+    same = same + "abcdefghij"
+    j += 1
+}
+let hits = 0
+let k = 0
+while k < 200000 {
+    if base == same {
+        hits += 1
+    }
+    k += 1
+}
+print(hits)

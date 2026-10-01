@@ -1,0 +1,4 @@
+import json
+let text = "{\"name\":\"flint\",\"version\":5,\"fast\":true,\"tags\":[\"a\",\"b\"]}"
+let v = json.parse(text)
+print(v.version)

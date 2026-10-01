@@ -1,0 +1,4 @@
+import json
+let o = {a: 1, b: "two", c: [1, 2, 3], d: true}
+let s = json.stringify(o)
+print(len(s))

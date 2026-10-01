@@ -1,0 +1,19 @@
+# identifier-heavy program: many distinct names, so the intern table is doing
+# real work and global lookup is not a cache hit.
+let alpha = 1
+let beta = 2
+let gamma = 3
+let delta = 4
+let epsilon = 5
+let zeta = 6
+let eta = 7
+let theta = 8
+let iota = 9
+let kappa = 10
+let acc = 0
+let j = 0
+while j < 200000 {
+    acc += alpha + beta + gamma + delta + epsilon + zeta + eta + theta + iota + kappa
+    j += 1
+}
+print(acc)
