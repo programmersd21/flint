@@ -227,15 +227,18 @@ $(GOTO_VM): src/runtime/vm.c scripts/to_computed_goto.py
 $(GOTO_DIR)/vm.o: $(GOTO_VM)
 	$(CC) $(ALL_CFLAGS) -std=gnu11 -Wno-pedantic $(REL_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-# benchmarks. run_tests.sh exists; bench/run.sh does not yet, so this target
-# is a placeholder and will tell you so rather than failing with a confusing
-# "no such file" from the shell.
+# Benchmarks.
+#
+# `make bench` measures the portable build, because that is the one everybody
+# has. `make bench-goto` builds the computed-goto interpreter and measures that
+# too, and writes the numbers into RESULTS.md's place -- see bench/compare.sh,
+# which does an old-binary-against-new-binary comparison rather than an absolute
+# timing, because that is the only comparison that survives a busy machine.
 bench: flint
-	@if [ -x bench/run.sh ] || [ -f bench/run.sh ]; then \
-		sh bench/run.sh; \
-	else \
-		echo "bench/run.sh does not exist. nothing to benchmark yet."; \
-	fi
+	@python3 bench/bench.py
+
+bench-goto: flint flint-goto
+	@sh bench/compare.sh ./flint ./flint-goto
 
 # Full gate: clean build then every test suite. The only target that proves the
 # tree is green from scratch. `make test` alone tests a possibly stale binary;

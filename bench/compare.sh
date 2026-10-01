@@ -1,26 +1,34 @@
 #!/usr/bin/env sh
 #
-# Compare two flint binaries on one benchmark case, best of N.
+# Compare two flint binaries on one benchmark case.
 #
-#     bench/compare.sh /path/to/old /path/to/new [case] [repeats]
+#     bench/compare.sh old new [case] [repeats]
 #
-# Exits 0 always; the numbers are the output. Intended to be read, not
-# asserted on, because a microbenchmark on a shared machine is a noisy
-# measurement and a CI job that fails on 3% is a CI job that gets disabled.
+# With no case, every case in bench/ runs.
+#
+# This exists because absolute timings on a shared machine are close to
+# meaningless -- a load average of 8 on 12 cores moves a 100ms case by 40% in
+# either direction. Comparing the two binaries back to back, alternating, is the
+# only comparison that survives that.
+#
+# Intended to be read rather than asserted on. A CI job that fails on a 3%
+# difference is a CI job that gets disabled.
 
 set -e
 
-OLD=${1:?old binary}
-NEW=${2:?new binary}
+OLD=${1:?usage: compare.sh old-binary new-binary [case] [repeats]}
+NEW=${2:?usage: compare.sh old-binary new-binary [case] [repeats]}
 CASE=${3:-all}
-REPEATS=${4:-9}
+REPEATS=${4:-7}
 
-BENCH_DIR=$(dirname "$0")
+BENCH_DIR=$(cd "$(dirname "$0")" && pwd)
 
+# Best of REPEATS wall-clock milliseconds.
+#
+# `date +%s%N` is nanoseconds on GNU and on the BSDs; on a platform without it
+# this reports garbage rather than failing, which is acceptable for a script
+# whose output is read by a person and never asserted on.
 time_one() {
-	# Best of REPEATS wall-clock milliseconds. Best-of rather than mean,
-	# because the scheduler is the noise source and the fastest honest run
-	# is the one that was interrupted least.
 	bin=$1
 	file=$2
 	best=999999999

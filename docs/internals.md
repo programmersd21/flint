@@ -26,6 +26,28 @@ The rooting rule that catches people: **put a new object somewhere the
 collector scans before the next allocation.** Allocation can collect. A C
 local is invisible to the collector, however convincing its name looks.
 
+### strings: interned and not
+
+Identifiers, literals, and anything used as a table key are interned, so two
+copies of the same bytes are the same object and `==` is a pointer compare.
+Strings produced at run time -- concatenation, a slice, `str()`, a parsed JSON
+value -- are **not** interned. They are equal by content: `fl_strings_equal()`
+compares the pointer, then the length, then the bytes.
+
+The reason is a measurement. Interning a runtime string paid for a hash, a
+probe and an insertion into a weak table that the collector then had to walk and
+clean, and the payoff was making a second identical string share an object. For
+a `split()` of a log file, a list of `str(i)` results, or a loop of `s = s + x`,
+that payoff essentially never arrives and the cost is paid every iteration.
+
+The cost moved from creation to comparison, and comparison happens far less
+often. `bench/RESULTS.md` has the numbers; string-heavy cases improved by 12% to
+92% depending on shape.
+
+One consequence worth knowing: table *keys* must be interned, because field
+lookup compares key pointers. That is why the JSON parser interns object keys
+while leaving values alone -- see the note in `jsonp.c`.
+
 The intern table is weak. `collect_garbage()` removes white strings from it
 before sweeping objects; reversing those steps makes the table inspect freed
 memory. `make stress` collects on every allocation and catches missing roots

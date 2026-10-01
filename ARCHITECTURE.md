@@ -119,11 +119,57 @@ own storage and repoints the upvalue at that storage. the VM emits
 `OP_CLOSE_UPVALUE` for any local leaving scope that was captured. a plain
 `OP_POP` would leave the upvalue pointing at a slot that the next call reuses.
 
+## bytecode verification
+
+every chunk is verified before it runs. the pass checks that each opcode is a
+member of the enum, that its operand width is known, that constant indices and
+local slots are in range, and that every jump lands inside the code *on an
+instruction boundary*. it recurses into closure constants.
+
+the boundary check is the one that earns the rest. a jump into the middle of a
+two-byte operand reads that operand byte as an opcode, and that bug can survive
+a very long time before it crashes.
+
+this exists because the bytecode is now trusted by something other than the
+interpreter -- the instruction-width table, the disassembler, and any future
+compiler pass all index off the same encoding. one table, in
+`chunk_instruction_size()`, consulted by all of them.
+
+it deliberately does **not** check stack depth. a linear walk cannot model a
+branch merge, because `OP_JUMP_IF_FALSE` leaves its condition on the stack for
+the branch to pop, so the two edges out of every `if` arrive at different
+depths. approximating that rejects valid bytecode, which is worse than not
+checking: it is a new source of false crashes on code that works. an
+earlier version of the verifier did exactly that and was wrong about ordinary
+programs for an afternoon.
+
+writing it found three compiler bugs, which is the argument for having it:
+`OP_EXPORT` was used as the top of the opcode range while sitting in the middle
+of the enum; the backward jump target was measured from the wrong end of the
+instruction; and the local-slot high-water mark was assigned rather than raised,
+so a shallower later scope lowered it and every slot an earlier scope had used
+then looked out of range.
+
 ## garbage collection
 
 non-moving, stop-the-world, mark and sweep. collection triggers when
 `bytes_allocated` passes `next_gc`, which is set to twice the heap size after
-each cycle.
+each cycle, with a floor so startup does not collect against a live set that
+does not exist yet.
+
+all the thresholds are in `src/core/config.h`. the reason they are not inline at
+their use sites is that a number spread over a dozen call sites is a number
+nobody can change coherently when the workload changes.
+
+one large-allocation exemption: a single allocation above 1 MiB does not count
+toward the threshold. one big buffer says nothing about how many small objects
+are alive, and counting it makes the next small allocation collect a heap that
+has nothing to do with it.
+
+`vm_free()` frees objects *before* the tables. the reverse order looks harmless
+and is not: freeing an object can trigger a collection, that collection reads
+`vm->globals`, and if the globals table has already been freed the mark phase
+walks freed memory. found by ASan on a new JSON benchmark.
 
 roots:
 

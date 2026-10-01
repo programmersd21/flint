@@ -1,5 +1,111 @@
 # releases
 
+## v0.5.0
+
+a runtime release. the language does not change at all -- not one keyword, not
+one builtin, not one diagnostic code. what changes is how fast things run, how
+much of the runtime is measured rather than guessed at, and how many ways a
+compiler bug can turn into a crash instead of a message.
+
+### what got faster, and why
+
+**strings stopped being interned at run time.** this is the big one, and it
+came from a measurement rather than an idea: strings were the documented weak
+point at 0.37x CPython.
+
+identifiers and literals are still interned, so `==` on those is a pointer
+compare. strings built while the program runs -- concatenation, a slice,
+`str()`, a parsed json value -- are not. they are equal by content, which costs
+a length compare and a `memcmp` and saves a hash, a probe, an insertion into a
+weak table, and the collector's later walk of that table.
+
+interning a string that is used once was paying a real cost for a payoff that
+essentially never arrives: two slices of a log file being byte-identical is
+rare, and `s = s + "x"` produces different bytes every time. the cost moved
+from creation to comparison, and comparison happens far less often.
+
+strings also got their own nan-box tag, so `IS_STRING` is a mask instead of a
+pointer chase to read a type byte -- and, more usefully, so equality stops
+assuming that equal means identical.
+
+| case                  | change   |
+|-----------------------|----------|
+| str_concat            | -92%     |
+| str_utf8              | -77%     |
+| str_ascii             | -76%     |
+| mem_retain            | -58%     |
+| call_native           | -55%     |
+| str_find              | -47%     |
+| strings               | -12%     |
+
+**`OP_LIST_LEN`.** the compiler's for-in-over-a-list loop was loading the `len`
+global, pushing the list and making a real call into C on *every iteration* --
+a hash lookup, an arity check and a native frame, to read an integer that was
+already in the object's header. one opcode now reads it.
+
+**a computed-goto interpreter**, as `make flint-goto`. 7-21% on loop-heavy
+programs. it is a separate binary rather than an `#ifdef` because the default
+build stays portable C11 and warning-clean, and because one copy of sixty-odd
+handlers beats two that have to be kept in step. `scripts/to_computed_goto.py`
+is the transformation.
+
+### what got safer
+
+**a bytecode verifier.** every chunk is checked before it runs: opcode validity,
+operand width, constant and local indices, and jump targets landing on
+instruction boundaries. it recurses into closures.
+
+the boundary check is the one that matters. a jump into the middle of a two-byte
+operand reads that operand byte as an opcode.
+
+it found three compiler bugs while being written:
+
+- `OP_EXPORT` was the upper bound of the valid opcode range, and it sits in the
+  *middle* of the enum. every opcode above it read as invalid.
+- the backward jump target was computed from the start of the instruction
+  rather than the end, so every loop looked malformed.
+- the local-slot high-water mark was assigned rather than raised, so a shallower
+  later scope lowered it and every slot an earlier scope had used then looked
+  out of range.
+
+**a use-after-free at exit.** `vm_free()` freed the globals, strings and modules
+tables before the objects. freeing an object can trigger a collection; that
+collection reads `vm->globals`; if the table was already freed, the mark phase
+walks freed memory. found by ASan on a new JSON benchmark, and it only showed up
+above a certain object count, which is why it survived v0.4.
+
+**the instruction-width table** now lives in `chunk_instruction_size()`, which
+the compiler, the disassembler and the verifier all consult. a unit test pins it
+against what the compiler actually emits -- that is how `OP_SET_FIELD_TOP`'s
+width was found to be wrong.
+
+### new tools
+
+```sh
+flint --profile program.fl        # counters: calls, allocs, GC, strings
+flint --check program.fl          # compile and verify, do not run
+flint --dump-bytecode program.fl  # human-readable disassembly
+```
+
+and `python3 bench/bench.py`, which reports medians and records the environment
+with them. 49 cases across startup, arithmetic, calls, collections, strings, json
+and memory.
+
+### what did not happen
+
+**there is no JIT.** this release was supposed to have a tier-1 baseline JIT and
+does not. an earlier draft of the x86-64 encoder and template compiler was
+written and then deleted rather than shipped half-finished, because a JIT whose
+deoptimization path has never been tested is not a performance feature, it is a
+way to corrupt a program silently.
+
+the pieces that make a JIT tractable are now in place -- a verifier that makes
+the bytecode trustworthy, type counters on every function, thresholds in
+`config.h`, and a disassembler -- but the compiler itself is future work.
+
+what is already measured and real: the strings work above, `OP_LIST_LEN`, the
+computed-goto dispatch, and a collector that no longer reads freed memory.
+
 ## v0.4.0
 
 a more useful flint. the language stays the same; the stdlib and runtime do not.

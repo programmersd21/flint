@@ -48,8 +48,11 @@ doing its best, and the build takes less than a second anyway.
   comes out the other end
 - mark-and-sweep gc with an explicit gray stack, so a deeply nested list is
   heap work rather than a segfault in the collector's third frame
-- interned strings, which is what makes `==` on two strings cost one pointer
-  compare instead of a memcmp on every loop iteration
+- strings that are equal by content rather than by identity. identifiers and
+  literals are interned, so `==` on those is a pointer compare; strings built
+  at run time are not, because interning a string that is used once cost a
+  hash, a probe and a table insertion in exchange for a comparison that would
+  have been a memcmp anyway. the trade is measured in bench/RESULTS.md
 - closures that capture by reference, lists, tables, modules, and a scripting
   language small enough that the whole thing reads in an afternoon. if there
   is a comment above a function, it is there because the reason is not in the
