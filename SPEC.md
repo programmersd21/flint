@@ -1,6 +1,6 @@
 # flint language spec
 
-version 0.3. this is the grammar and the semantics. the implementation is not
+version 0.5. this is the grammar and the semantics. the implementation is not
 always right; when they disagree, file a bug.
 
 [docs/language.md](docs/language.md) is a prose version of this for people who
@@ -114,8 +114,25 @@ all truthy.
 
 - `nil == nil` is true
 - numbers compare by IEEE 754 value, so `NaN == NaN` is false
-- strings compare by interned pointer identity
+- strings compare by **contents**. two strings with the same bytes are equal
+  whether or not they are the same object
 - lists and tables compare by identity
+
+the string rule is worth its own note, because it used to be the opposite.
+
+identifiers and string literals are interned, so comparing those is a pointer
+compare and stays one. strings produced while a program runs -- concatenation,
+a slice, `str()`, a parsed json value -- are **not** interned. interning them
+cost a hash, a probe and an insertion into a table the collector then had to
+walk, in exchange for making a second identical string share an object, and for
+almost any real program that second string never arrives.
+
+so those strings compare by length and then by bytes. the cost moved from
+creating a string to comparing one, and comparing happens far less often than
+creating. `bench/RESULTS.md` has the measurements.
+
+a program cannot observe the difference except through timing: two strings with
+equal bytes have always been equal and still are.
 
 ### variables
 
@@ -142,6 +159,11 @@ all truthy.
 
 `+` concatenates when both operands are strings, adds when both are numbers,
 and is an error otherwise. there is no implicit conversion.
+
+strings are immutable. a flint string is a byte sequence, not text: `len` counts
+bytes, indexing yields a one-byte string, and the case-mapping primitives
+(`upper`, `lower`) are ASCII-only and leave every other byte alone. utf-8
+therefore survives a round trip, and `len("☃")` is 3.
 
 ### indexing
 

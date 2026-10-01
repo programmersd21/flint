@@ -86,7 +86,9 @@ form and is what the rest of the documentation uses.
 
 - numbers compare by value. `1 == 1.0` is true
 - `nan == nan` is false, because `nan` is not equal to anything
-- strings compare by content, because they are interned
+- strings compare by content. identifiers and literals are interned so that
+  is a pointer compare; strings built while a program runs are not, so those
+  compare by length and then by bytes. a script cannot tell the difference
 - lists and tables compare by identity. two lists with the same contents are
   not equal
 - `nil == nil` is true
