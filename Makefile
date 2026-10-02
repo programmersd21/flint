@@ -349,6 +349,7 @@ fmt-check:
 	for f in $(FMT_FILES); do \
 		if ! $(CLANG_FORMAT) "$$f" 2>/dev/null | diff -q "$$f" - >/dev/null; then \
 			echo "needs formatting: $$f"; \
+			$(CLANG_FORMAT) "$$f" 2>/dev/null | diff -u "$$f" - | head -30; \
 			bad=1; \
 		fi; \
 	done; \

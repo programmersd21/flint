@@ -103,6 +103,10 @@ jobs:
         #
         # Bump it when a new major lands, and check the index first.
         sudo apt-get install -y "clang-tidy-${LLVM_MAJOR}"
+        # clang-format comes from the same major, so fmt-check and the
+        # developer's `make fmt` agree. An unpinned clang-format is how
+        # one version's output becomes another version's violation.
+        sudo apt-get install -y "clang-format-${LLVM_MAJOR}"
 
     # clang-format runs first, on its own. clang-tidy loads .clang-format for
     # every file it processes, and an unrecognised key there aborts the whole
@@ -114,7 +118,7 @@ jobs:
     # continue-on-error. Its job here is to make a mismatch visible, not to
     # gate the build.
     - name: clang-format config check
-      run: make fmt-check
+      run: make fmt-check CLANG_FORMAT=clang-format-$LLVM_MAJOR
       continue-on-error: true
 
     - name: clang-tidy
