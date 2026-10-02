@@ -127,6 +127,60 @@ print(shapes.taxed(10))   # 12, and the module ran once
 That also means module-level state is per-run, not per-import. A module that
 caches something in a private global keeps it.
 
+## unused imports
+
+An import whose name is never read is a compile error.
+
+```flint
+import math
+print("hello")
+```
+
+```
+[line 1] Error at 'math': imported 'math' but never used. remove the import,
+or use it.
+```
+
+An import always runs its file, so an unused one is dead code with a side
+effect -- the kind that surprises people when the module prints, defines, or
+fails. Either use the binding or delete the line.
+
+The one exception is importing a module for its failure: a test that imports
+a file it knows will throw, to check that the importer survives, cannot use
+the binding because there is nothing to use. Say so explicitly:
+
+```flint
+import "../modules/mod_closing.fl" as _
+```
+
+`_` opts out of the check. Anything else that is never read is an error, and
+the REPL is exempt -- each submission compiles separately, so `import math`
+on one line and `math.floor(2)` on the next is the normal way to work
+interactively.
+
+## using a module without importing it
+
+Reading a name that was never defined, where a module file with the matching
+shape exists, suggests the import rather than guessing at a typo:
+
+```flint
+print(math.floor(2))
+```
+
+```
+error[E0202]: undefined variable 'math'.
+ --> <command line>:1:7
+  |
+1 | print(math.floor(2))
+  |       ^~~~ undefined name
+  |
+  = help: did you forget to `import math`?
+```
+
+An exact hit on a real file beats a fuzzy match, so this replaces the "did
+you mean" suggestion rather than adding a second one. It covers the standard
+library and sibling files beside the importing one.
+
 ## circular imports
 
 Detected while the module is in flight, and reported with the path:

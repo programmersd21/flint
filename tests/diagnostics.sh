@@ -74,6 +74,40 @@ set -e
 grep -q 'error\[E0202\]' "$tmp/name"
 grep -q 'did you mean `clock`?' "$tmp/name"
 
+# A name matching a standard library module suggests the import, not a typo.
+# An exact hit on a real file beats a fuzzy match: showing both would be
+# noise, and the module check runs first for exactly that reason.
+set +e
+"$FLINT" --error-format=human --color=never -e 'print(math.floor(2))' \
+	>"$tmp/import-hint" 2>&1
+status=$?
+set -e
+[ "$status" -eq 70 ]
+grep -q 'error\[E0202\]' "$tmp/import-hint"
+grep -q 'did you forget to `import math`?' "$tmp/import-hint"
+if grep -q 'did you mean' "$tmp/import-hint"; then
+	echo "typo suggestion shown alongside the import hint"
+	cat "$tmp/import-hint"
+	exit 1
+fi
+
+# The same hint in JSON, where tooling reads the help array.
+set +e
+"$FLINT" --error-format=json -e 'print(json.stringify(1))' \
+	>"$tmp/import-json" 2>&1
+status=$?
+set -e
+[ "$status" -eq 70 ]
+python3 - "$tmp/import-json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    diagnostic = json.loads(stream.readline())
+assert diagnostic["code"] == "E0202"
+assert diagnostic["help"] == ["did you forget to `import json`?"]
+PY
+
 [ "$("$FLINT" -e 'print(2 + 2)')" = "4" ]
 "$FLINT" -e 'let x =' >"$tmp/legacy" 2>&1 || true
 grep -q '^\[line 1\] Error at end:' "$tmp/legacy"

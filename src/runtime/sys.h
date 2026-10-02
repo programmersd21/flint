@@ -61,4 +61,18 @@ void sys_set_source_dir_for_file(const char *file);
  */
 char *sys_resolve_module(const char *path);
 
+/*
+ * True when a module file exists for this bare name.
+ *
+ * Checks the standard library first (`<stdlib>/<name>.fl`), then the
+ * importing file's directory (`<source_dir>/<name>.fl`). Used to suggest an
+ * import when a script uses a name it never defined: if a file with the
+ * right shape exists, forgetting the import line is the likely story.
+ *
+ * Only bare names: anything with a slash or a `.fl` suffix is a path the
+ * user spelled themselves, and suggesting an import for it would be guessing
+ * at a file nobody asked about.
+ */
+bool sys_module_file_exists(const char *name);
+
 #endif /* FL_SYS_H */

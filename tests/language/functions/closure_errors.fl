@@ -124,7 +124,12 @@ print(both(5))
 
 # mod_closing.fl throws at top level. The import fails, this script keeps
 # going, and every closure below must still track its variable.
-import "../modules/mod_closing.fl"
+#
+# `as _` because the binding is deliberately unused: the module fails, so
+# there is nothing to use, and the import exists for its failure. Without
+# the explicit opt-out the unused-import check would -- correctly --
+# complain.
+import "../modules/mod_closing.fl" as _
 
 fn survivor() {
 	let hits = 0

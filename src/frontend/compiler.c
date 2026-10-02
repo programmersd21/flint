@@ -188,6 +188,43 @@ static size_t fix_count;
  */
 static bool exporting;
 
+/* declared here because named_variable marks imports used long before the
+ * definitions below. see import_mark_used for what it does. */
+static void import_mark_used(const char *name, int length);
+
+/*
+ * Imports bound by this compilation, for the unused-import check.
+ *
+ * An import that is never read is dead code with a side effect -- it still
+ * runs the module -- and dead code that runs things is the kind that
+ * surprises people. So an import whose name is never referenced is a compile
+ * error, not a warning: warnings are easy to ignore and this one is cheap to
+ * fix, either by using the import or by deleting it.
+ *
+ * File-static like `fixes` above, reset at the start of every compile. The
+ * names are malloc'd copies because the binding for a quoted import is
+ * derived into a stack buffer that dies with import_declaration; comparing
+ * raw bytes would read freed memory.
+ *
+ * `_` as an alias opts out explicitly, for the one legitimate case: importing
+ * a module for its failure. A test that imports a module it knows will throw,
+ * to check that the importer survives, cannot use the binding -- there is
+ * nothing to use -- so it says so.
+ */
+typedef struct {
+	char *name;
+	int length;
+	int line;
+	uint32_t offset;
+	bool used;
+} ImportEntry;
+
+#define FL_MAX_IMPORTS 64
+
+static ImportEntry imports[FL_MAX_IMPORTS];
+static size_t import_count;
+static bool imports_full;
+
 size_t compiler_fix_count(void) { return fix_count; }
 
 const FlDiagSuggestion *compiler_fix_at(size_t index)
@@ -1076,6 +1113,14 @@ static void named_variable(Token name, bool can_assign)
 		arg = identifier_constant(&name);
 		get_op = OP_GET_GLOBAL;
 		set_op = OP_SET_GLOBAL;
+		/*
+		 * A global read is a use of whatever binding it resolves to,
+		 * imports included. Locals and upvalues resolve first above,
+		 * so reaching here means the name really is global -- a local
+		 * shadowing an import does not mark it used, which is correct:
+		 * the import is still dead.
+		 */
+		import_mark_used(name.start, name.length);
 	}
 
 	if (can_assign && match(TOKEN_EQUAL)) {
@@ -2058,6 +2103,120 @@ static void synchronize(void)
  * have to be kept in agreement about what an import means. The package manager
  * will sit in front of import_file(), not beside it.
  */
+
+/*
+ * Record an import binding for the unused-import check.
+ *
+ * Called with the name about to be bound and the path token that names the
+ * file, so the eventual error can point at the import line rather than at the
+ * end of the file. A `_` alias is not recorded: it is the explicit opt-out
+ * for imports kept for their failure, and checking it would defeat the
+ * purpose of writing it.
+ */
+static void import_record(const char *name, int length, const Token *path)
+{
+	if (import_count >= FL_MAX_IMPORTS) {
+		imports_full = true;
+		return;
+	}
+	char *copy = malloc((size_t)length + 1);
+	if (copy == NULL)
+		return;
+	memcpy(copy, name, (size_t)length);
+	copy[length] = '\0';
+	imports[import_count].name = copy;
+	imports[import_count].length = length;
+	imports[import_count].line = path->line;
+	imports[import_count].offset = path->offset;
+	imports[import_count].used = false;
+	import_count++;
+}
+
+/*
+ * Mark every import binding with this name as used.
+ *
+ * All matching entries, not just the first: importing the same module twice
+ * under one name and then using it is the documented re-import idiom, and
+ * flagging the first of the two would punish a program for doing what the
+ * manual says to do.
+ */
+static void import_mark_used(const char *name, int length)
+{
+	for (size_t i = 0; i < import_count; i++) {
+		if (imports[i].length == length &&
+		        memcmp(imports[i].name, name, (size_t)length) == 0)
+			imports[i].used = true;
+	}
+}
+
+/*
+ * Report every import that was never referenced.
+ *
+ * Runs at the end of compilation, before the result is returned, so the
+ * errors carry the import's own line rather than pointing nowhere. Skipped
+ * when the file already failed: a broken program produces enough diagnostics
+ * without one more, and an unused import in code that does not compile is
+ * the least of its problems.
+ *
+ * Skipped in the REPL, where each submission compiles separately: `import
+ * math` on one line and `math.floor(2)` on the next is the normal way to
+ * work interactively, and flagging the first line would make the REPL
+ * unusable for exactly the exploration it exists for.
+ */
+static void import_check_unused(void)
+{
+	if (state.parser.had_error || state.echo_repl_value)
+		return;
+	if (imports_full)
+		return;
+	/*
+	 * Collapse by name first: if any import of a name is used, all of
+	 * them are. Re-importing the same module under one name is
+	 * idempotent -- every binding holds the same table -- so asking
+	 * whether each individual statement's result was read would flag
+	 * re-imports that the manual explicitly blesses. What matters is
+	 * whether the module was ever touched, not which import line the
+	 * reference happens to follow in source order.
+	 */
+	for (size_t i = 0; i < import_count; i++) {
+		if (!imports[i].used)
+			continue;
+		for (size_t j = 0; j < import_count; j++) {
+			if (imports[j].length == imports[i].length &&
+			        memcmp(imports[j].name,
+			                imports[i].name,
+			                (size_t)imports[i].length) == 0)
+				imports[j].used = true;
+		}
+	}
+	for (size_t i = 0; i < import_count; i++) {
+		if (imports[i].used)
+			continue;
+		Token at = {
+		        TOKEN_IDENTIFIER,
+		        imports[i].name,
+		        imports[i].length,
+		        imports[i].line,
+		        false,
+		        imports[i].offset,
+		};
+		char message[128];
+		snprintf(message,
+		        sizeof(message),
+		        "imported '%s' but never used. remove the import, or "
+		        "use it.",
+		        imports[i].name);
+		error_at(&at, message);
+		/*
+		 * Each unused import is an independent fact, not a cascade
+		 * from the previous one. synchronize() clears panic_mode
+		 * between declarations for the same reason; without this,
+		 * only the first of several dead imports would be reported.
+		 */
+		state.parser.panic_mode = false;
+	}
+}
+
 static void import_declaration(void)
 {
 	const char *src;
@@ -2210,6 +2369,16 @@ static void import_declaration(void)
 	emit_indexed(OP_DEFINE_GLOBAL,
 	        OP_DEFINE_GLOBAL_LONG,
 	        identifier_constant_from(bind_name, bind_len));
+
+	/*
+	 * Record the binding for the unused-import check, unless it is the
+	 * explicit opt-out. `import "x.fl" as _` means "run this for its
+	 * failure" -- a test importing a module it knows will throw -- and
+	 * there is nothing to use, so checking it would defeat the purpose
+	 * of writing it.
+	 */
+	if (!(bind_len == 1 && bind_name[0] == '_'))
+		import_record(bind_name, bind_len, &path_token);
 }
 
 /*
@@ -2319,6 +2488,17 @@ ObjFunction *compile_named(VM *vm, const char *source, const char *name)
 	state.loop = NULL;
 	state.current = NULL;
 
+	/*
+	 * Nor its import list. The entries hold malloc'd names freed at the
+	 * end of the compile that recorded them; without this, a second
+	 * compilation would report the first one's imports -- or read freed
+	 * memory, if the first compile's cleanup already ran.
+	 */
+	for (size_t i = 0; i < import_count; i++)
+		free(imports[i].name);
+	import_count = 0;
+	imports_full = false;
+
 	state.vm = vm;
 	scanner_init(source);
 	diag_text = source;
@@ -2331,6 +2511,17 @@ ObjFunction *compile_named(VM *vm, const char *source, const char *name)
 
 	while (!match(TOKEN_EOF))
 		declaration();
+
+	/*
+	 * Unused imports are reported here, after every declaration has had
+	 * its chance to reference them, and before the error summary below so
+	 * the count includes them. See import_check_unused for why the REPL
+	 * is exempt.
+	 */
+	import_check_unused();
+	for (size_t i = 0; i < import_count; i++)
+		free(imports[i].name);
+	import_count = 0;
 
 	/*
 	 * The summary. One line, and only when it is not obvious: if the

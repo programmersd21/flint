@@ -2,7 +2,35 @@
 
 ## v0.6.1
 
-`num()`, and the install story.
+`num()`, the install story, and imports that enforce themselves.
+
+### unused imports are an error
+
+An import whose bound name is never read fails compilation:
+
+```
+[line 1] Error at 'math': imported 'math' but never used. remove the import,
+or use it.
+```
+
+An import always runs its file, so an unused one is dead code with a side
+effect. Either use the binding or delete the line. `import "x.fl" as _` opts
+out explicitly, for the one legitimate case: importing a module for its
+failure, where there is nothing to use. The REPL is exempt, since each
+submission compiles separately.
+
+### missing imports suggest themselves
+
+Reading a name that was never defined, where a module file exists with the
+matching shape, names the import instead of guessing at a typo:
+
+```
+= help: did you forget to `import math`?
+```
+
+This replaces the "did you mean" suggestion when it fires -- an exact hit on
+a real file beats a fuzzy match. Covers the standard library and sibling
+files beside the importing one.
 
 ### num
 

@@ -1,0 +1,3 @@
+[line 7] Error at 'math': imported 'math' but never used. remove the import, or use it.
+
+error: could not compile due to 1 error

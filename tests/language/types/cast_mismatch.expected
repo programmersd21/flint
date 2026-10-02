@@ -1,2 +1,2 @@
-expected type 'string' but got 'number'.
+expected type 'string' but got 'number'. use str() to convert a number to a string.
 [line 7] in script

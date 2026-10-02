@@ -299,6 +299,56 @@ char *sys_resolve_module(const char *path)
 	return out;
 }
 
+bool sys_module_file_exists(const char *name)
+{
+	size_t namelen = strlen(name);
+	if (namelen == 0 || !is_library_name(name))
+		return false;
+
+	/* <stdlib>/<name>.fl. the same search order the loader uses, so the
+	 * suggestion and the import agree about where the file is. */
+	const char *dir = stdlib_dir();
+	if (dir[0] != '\0') {
+		size_t dirlen = strlen(dir);
+		if (dirlen <= (size_t)-1 - namelen - 5) {
+			size_t need = dirlen + 1 + namelen + 3 + 1;
+			char *candidate = malloc(need);
+			if (candidate != NULL) {
+				snprintf(
+				        candidate, need, "%s/%s.fl", dir, name);
+				bool found = access(candidate, R_OK) == 0;
+				free(candidate);
+				if (found)
+					return true;
+			}
+		}
+	}
+
+	/* <source_dir>/<name>.fl, for a sibling file the script forgot to
+	 * import. only when there is a source directory: with -e or stdin
+	 * there is none, and a bare name then means the working directory,
+	 * which is where the user is standing rather than where the file is. */
+	if (source_dir != NULL && source_dir[0] != '\0') {
+		size_t dirlen = strlen(source_dir);
+		if (dirlen <= (size_t)-1 - namelen - 5) {
+			size_t need = dirlen + 1 + namelen + 3 + 1;
+			char *candidate = malloc(need);
+			if (candidate != NULL) {
+				snprintf(candidate,
+				        need,
+				        "%s/%s.fl",
+				        source_dir,
+				        name);
+				bool found = access(candidate, R_OK) == 0;
+				free(candidate);
+				if (found)
+					return true;
+			}
+		}
+	}
+	return false;
+}
+
 /*
  * args() -> list of strings
  *

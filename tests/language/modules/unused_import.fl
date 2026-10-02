@@ -1,0 +1,8 @@
+# An import that is never read is a compile error.
+#
+# The module still runs -- an import always executes its file -- but a binding
+# nobody references is dead code with a side effect, and dead code that runs
+# things is the kind that surprises people. Either use the import or delete
+# it.
+import math
+print("this never runs")

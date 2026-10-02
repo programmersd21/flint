@@ -14,6 +14,7 @@
 #include "config.h"
 #include "diagnostic.h"
 #include "profile.h"
+#include "sys.h"
 /* the disassembler is called from run(), and only under
  * FL_DEBUG_TRACE_EXECUTION. Same reasoning as the compiler: an include that
  * nothing references in a release build is noise the analyser has to be told
@@ -193,6 +194,27 @@ static const char *const language_names[] = {
  * vm->globals. Both outlive the call: the static one trivially, the globals
  * one because the table outlives the diagnostic.
  */
+/*
+ * The name of a module file that exists for this undefined name, or NULL.
+ *
+ * When a script reads a name it never defined, and a module file with the
+ * matching shape exists, forgetting the import line is the likely story --
+ * likelier than a typo, which is why the caller checks this before the fuzzy
+ * match. Returns the name itself (borrowed from the caller) rather than a
+ * copy, because the caller only needs it for one snprintf.
+ */
+static const char *unimported_module(const char *name, size_t length)
+{
+	if (length == 0 || length > 255)
+		return NULL;
+	char candidate[256];
+	memcpy(candidate, name, length);
+	candidate[length] = '\0';
+	if (sys_module_file_exists(candidate))
+		return name;
+	return NULL;
+}
+
 static const char *similar_language_name(VM *vm, ObjString *needle)
 {
 	const char *best = NULL;
@@ -427,17 +449,47 @@ void vm_runtime_error(VM *vm, const char *format, ...)
 							        (uint32_t)(at +
 							                   name_len);
 						}
-						const char *similar =
-						        similar_language_name(
-						                vm, missing);
-						if (similar != NULL) {
+						/*
+						 * A missing name that matches a
+						 * standard library module is almost
+						 * certainly a forgotten import, not a
+						 * typo. Check this before the fuzzy
+						 * match below: an exact hit on a real
+						 * file beats a guess, and showing both
+						 * ("did you mean X? did you forget
+						 * to import Y?") is noise.
+						 */
+						const char *unimported =
+						        unimported_module(
+						                missing->chars,
+						                name_len);
+						if (unimported != NULL) {
 							snprintf(help_text,
 							        sizeof(help_text),
-							        "did you mean "
-							        "`%s`?",
-							        similar);
+							        "did you "
+							        "forget to "
+							        "`import %s`?",
+							        unimported);
 							help[0] = help_text;
 							help_count = 1;
+						} else {
+							const char *similar =
+							        similar_language_name(
+							                vm,
+							                missing);
+							if (similar != NULL) {
+								snprintf(
+								        help_text,
+								        sizeof(help_text),
+								        "did "
+								        "you "
+								        "mean "
+								        "`%s`?",
+								        similar);
+								help[0] =
+								        help_text;
+								help_count = 1;
+							}
 						}
 					}
 				}
@@ -1327,10 +1379,40 @@ static InterpretResult run(VM *vm, int base_frame)
 			Value value = peek(vm, 0);
 
 			if (!value_has_type(value, want)) {
-				vm_runtime_error(vm,
-				        "expected type '%s' but got '%s'.",
-				        flint_type_name_of(want),
-				        flint_type_name(value));
+				/*
+				 * Suggest the conversion when one exists.
+				 *
+				 * This confusion is common enough to have a
+				 * shape: `as` asserts a type and never converts,
+				 * so a number asserted as a string (or the reverse)
+				 * fails here. Both directions have a function --
+				 * str() and num() -- and naming it turns "your
+				 * program is wrong" into "here is the line that
+				 * makes it right". Pairs with no conversion stay
+				 * silent instead of guessing.
+				 */
+				const char *hint = NULL;
+				if (want == FL_TYPE_STRING && IS_NUMBER(value))
+					hint = "use str() to convert a number "
+					       "to a string.";
+				else if (want == FL_TYPE_NUMBER &&
+				         IS_STRING(value))
+					hint = "use num() to convert a string "
+					       "to a number.";
+				if (hint != NULL) {
+					vm_runtime_error(vm,
+					        "expected type '%s' but got "
+					        "'%s'. %s",
+					        flint_type_name_of(want),
+					        flint_type_name(value),
+					        hint);
+				} else {
+					vm_runtime_error(vm,
+					        "expected type '%s' but got "
+					        "'%s'.",
+					        flint_type_name_of(want),
+					        flint_type_name(value));
+				}
 				return INTERPRET_RUNTIME_ERROR;
 			}
 			break;
