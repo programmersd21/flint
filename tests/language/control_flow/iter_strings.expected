@@ -1,0 +1,6 @@
+argument to len() must be a string or list.
+[line 27] in script
+3
+a
+c
+30

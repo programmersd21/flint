@@ -1537,22 +1537,32 @@ static InterpretResult run(VM *vm, int base_frame)
 		}
 		case OP_LIST_LEN: {
 			/*
-			 * The list's own count, in place like a cast.
+			 * The length, in place like a cast.
 			 *
-			 * The error is the one len() reports, and it is checked
-			 * rather than assumed: a script can shadow `len` with its
-			 * own function, so for-in-over-a-table is legal-looking
-			 * and has to fail the way it always did.
+			 * This replaces a call to the `len` builtin, and it has
+			 * to accept exactly what `len` accepted. It initially
+			 * accepted only lists, which broke `for c in s` over a
+			 * string -- documented, and it worked, because `len`
+			 * takes both. Accepting a list only would have been a
+			 * silent language change made by a performance
+			 * shortcut, which is the one kind of change that is never
+			 * acceptable.
+			 *
+			 * The error is `len`'s error for the same reason.
 			 */
 			Value target = peek(vm, 0);
-			if (!IS_LIST(target)) {
+			int length;
+			if (IS_LIST(target)) {
+				length = AS_LIST(target)->count;
+			} else if (IS_STRING(target)) {
+				length = AS_STRING(target)->length;
+			} else {
 				vm_runtime_error(vm,
 				        "argument to len() must be a string or "
 				        "list.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
-			vm->stack_top[-1] =
-			        NUMBER_VAL((double)AS_LIST(target)->count);
+			vm->stack_top[-1] = NUMBER_VAL((double)length);
 			break;
 		}
 		case OP_BUILD_LIST: {

@@ -1,95 +1,195 @@
 # modules
 
-A module is a file run in the current VM. Its globals go in the same table as
-the importer's. `export` marks intent; it does not hide names.
+A module is a file with its own namespace. Importing one binds **one name**
+to its exports, and nothing else is visible.
 
 ```flint
-# math.fl
-export fn square(x) { return x * x }
+# geometry.fl
+export fn area(w, h) { return w * h }
 ```
 
 ```flint
 # main.fl
-import "math.fl"
-print(square(6))
+import "geometry.fl"
+print(geometry.area(3, 4))     # 12
 ```
 
-## imports
+This is the change from v0.5.0, and it is a breaking one. Before, every file
+shared one global table and an import dumped the module's names into the
+importer. `import math` meant `math.floor` by accident of the loader poking a
+name in, and `import "geometry.fl"` meant a bare `area` as well.
 
-An import runs when execution reaches it. The resolved path is cached, so a
-successful import runs once per VM. Importing the file again does nothing.
-Imports inside a function wait until that function runs.
+## why it changed
 
-Relative paths are resolved against the importing file's directory. A script
-run as `project/main.fl` can import `lib/math.fl` from any working directory.
-With `-e` or stdin there is no source file, so relative imports use the current
-working directory. Absolute paths are accepted as written. There is no search
-path and no canonicalization of symlinks; two spellings of one file can load
-it twice.
-
-An import cycle is detected by the resolved path while the module is loading.
-The VM reports the cycle instead of spending 256 frames proving it exists.
-
-## names and failures
-
-Every file shares one global table. A module can read and overwrite names from
-any other file. `export` is not access control, and duplicate global names are
-resolved by execution order.
-
-If a module fails, its error is reported and the importing script continues.
-Globals written before the failure remain. The failed path is removed from the
-module cache, so a later import can try again. That retry starts with the
-partial globals still in place.
-
-`const` belongs to the global binding. Once a module defines a constant, every
-file sees the same read-only name.
-
-## bare names and the standard library
-
-a bare name (no quotes, no path separator) imports a standard library module:
+Two modules could not both have a private helper of the same name. This
+worked:
 
 ```flint
-import math
-import json
-import fs
+# geometry.fl
+let scale = 2
+export fn area(r) { return 3 * r * r * scale }
+
+# display.fl
+let scale = 10
+export fn show(v) { return v * scale }
 ```
 
-the interpreter searches in this order:
+```flint
+import "geometry.fl"
+import "display.fl"
+print(geometry.area(2))
+```
 
-1. `FLINT_STDLIB` environment variable -- if set, look for `<name>.fl` there
+It printed **120**, not 24. Both modules wrote `scale` into one table,
+`display.fl` loaded second, and `geometry.area` silently used 10. No error, no
+warning -- just a wrong number, which is the worst kind of bug a language can
+have.
+
+Now `scale` is private to each module and the answer is 24.
+
+## exports
+
+A top-level `let`, `const` or `fn` is **private** to its module unless it is
+marked `export`.
+
+```flint
+# shapes.fl
+let tax = 0.2                 # private
+export fn taxed(amount) {     # public
+    return amount * (1 + tax)
+}
+```
+
+```flint
+import "shapes"
+print(shapes.taxed(10))      # 12
+print(shapes.tax)            # runtime error: no such field
+```
+
+`export` is applied at compile time now. In v0.5.0 it was a comment, and the
+module's "exports" were discovered by diffing the global table before and
+after it ran -- which cannot tell a helper from a public function, because
+both are just a name that appeared.
+
+A module cannot see its importer's names either, and an importer cannot see
+its modules' private names. That is what makes "private" mean private.
+
+## naming
+
+The name an import binds:
+
+| written | binds | you write |
+|---|---|---|
+| `import math` | `math` | `math.floor(2)` |
+| `import json` | `json` | `json.parse(text)` |
+| `import "lib/geometry.fl"` | `geometry` | `geometry.area(2)` |
+| `import "util.fl" as u` | `u` | `u.helper()` |
+| `import "a/b/c.fl"` | `c` | `c.name` |
+
+The default is the last path component with the extension removed, which is
+what a quoted import already spelled in practice. `as` is for when that is
+wrong:
+
+```flint
+import "lib/geometry/circle.fl" as geometry
+import "../shared/util.fl" as util
+```
+
+## resolution
+
+A bare name with no quotes and no `/` is a standard library module. The
+search order is:
+
+1. `$FLINT_STDLIB` -- if set, look for `<name>.fl` there
 2. `<exe-dir>/lib` -- the `lib/` directory next to the flint binary
 3. `~/.flint/stdlib` -- a per-user fallback
 
-the first match wins. if none match, the import fails with a message naming
-the paths tried.
+A quoted path is a file. Relative paths resolve against the **importing
+file's** directory, not the process working directory, so a script run from
+anywhere works. With `-e` or stdin there is no source file, so a relative
+path uses the working directory.
 
-shipping the standard library is as simple as copying `lib/` next to the
-binary. the interpreter finds it without configuration.
+There is no search path for quoted imports and no symlink canonicalisation.
+Two spellings of one file load it twice, which is also why a module that has
+already loaded is cheap to import again: the cache is keyed by resolved path.
 
-```sh
-cp -r lib/ /usr/local/lib/flint
-cp flint /usr/local/bin/
+## repeated imports
+
+A module runs once. Importing it again is a lookup, not a second run, and
+both callers get the same table.
+
+```flint
+import "shapes"
+import "shapes"
+print(shapes.taxed(10))   # 12, and the module ran once
 ```
 
-or point the environment variable:
+That also means module-level state is per-run, not per-import. A module that
+caches something in a private global keeps it.
 
-```sh
-export FLINT_STDLIB=/opt/flint/lib
+## circular imports
+
+Detected while the module is in flight, and reported with the path:
+
+```
+import cycle: 'a.fl' is already being loaded.
 ```
 
-a bare import does not inhibit relative imports. both forms work in the same
-file.
+Nothing partial runs. `a.fl` importing `b.fl` importing `a.fl` fails at the
+second `a.fl`, and `b.fl` never finishes.
 
-## the standard library modules
+## failed imports
 
-| module | provides |
-|---|---|
-| `math` | sin, cos, tan, exp, log, sqrt, floor, ceil, ... and PI, E, TAU |
-| `random` | rand, rand_int, rand_float, shuffle, choice, seed |
-| `time` | now, clock_ms, sleep, format, measure |
-| `fs` | read, write, append, exists, remove, mkdir, isdir |
-| `path` | join, dir, base, ext, abs, strip_ext, sep |
-| `collections` | reverse, contains, min, max, sum, flatten, zip, uniq |
-| `json` | parse, stringify, pretty |
+Transactional. A module that fails for any reason -- missing file, read
+error, compile error, runtime error at its top level -- binds **nothing**:
 
-see [library.md](library.md) for the full reference.
+```flint
+# broken.fl
+let good = 1
+let bad = 1 / 0        # fails here
+```
+
+```flint
+import "broken.fl"
+print(good)            # runtime error: undefined variable 'good'
+```
+
+In v0.5.0 `good` survived, and a second import would retry against those
+partial bindings.
+
+The module's own environment is kept rather than freed, though it is
+unreachable. It may have handed out a closure that the importer still holds,
+and freeing it would turn every later call into a use-after-free. The
+collector decides when it actually goes.
+
+A failed module is remembered as failed. A later import of the same path
+reports that rather than retrying a failure nothing has changed.
+
+## module state and the collector
+
+A module's environment is kept alive as long as anything can reach it, which
+is as long as the VM lives. Two modules is two tables, and a program importing
+N modules pays for N tables. That is the honest cost of N modules existing.
+
+## migration from v0.5.0
+
+The whole change is: qualify module names.
+
+```flint
+# before                          # after
+import "helper.fl"                import "helper.fl"
+print(square(6))                  print(helper.square(6))
+print(LIMIT)                      print(helper.LIMIT)
+
+import math                       import math
+print(floor(1.7))                 print(math.floor(1.7))
+print(PI)                         print(math.PI)
+```
+
+A bare name that used to come from a module is now either private to that
+module -- in which case it is not reachable and the program is wrong -- or it
+needs qualifying.
+
+`import math` and the standard library are unaffected in shape: they already
+meant `math.floor`, so only the ones that were relying on the old flat
+behaviour change.

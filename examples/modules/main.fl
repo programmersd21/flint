@@ -68,8 +68,12 @@ export fn total_area(shapes) {
 
 # ------------------------------------------------------------------- main.fl
 
-# two modules, and a name from each, in the same file with no ceremony.
-import "shapes.fl"
+# two modules, each reached through its own name.
+#
+# before v0.6.0 these imports dumped describe, total_area and largest into
+# this file's globals, and any private helper the two modules had in common
+# would silently overwrite the other. now each name is its own.
+import "shapes.fl" as shapes_mod
 import "stats.fl"
 
 let shapes = [
@@ -77,30 +81,30 @@ let shapes = [
     {kind: "circle", r: 1}
 ]
 
-# describe() comes from shapes.fl, total_area() from stats.fl, and neither
-# file knows which file the other one pulled in.
-print(describe(shapes[0]))
-print(describe(shapes[1]))
-print("total: " + str(total_area(shapes)))
+print(shapes_mod.describe(shapes[0]))
+print(shapes_mod.describe(shapes[1]))
+print("total: " + str(stats.total_area(shapes)))
 
 # `largest` is also from stats.fl. it uses `a > best_area` internally rather
 # than `if a`, because 0 is truthy and testing the number would take the
 # branch on the first iteration regardless of the areas.
-let biggest = largest(shapes)
+let biggest = stats.largest(shapes)
 print("largest is a " + biggest.kind)
 
-# the collision hazard, stated plainly: all files share one global table. if
-# two modules both define `helper`, the second one to run wins, and the order
-# depends on import order. this is why a large project needs a naming
-# convention for module-level globals. there is no private and no namespace to
-# fall back on.
-print("shapes[0] also normalises: " + str(normalise(shapes[0])))
+# shapes.fl also has a private `normalise`. it is not in shapes_mod, and
+# `shapes_mod.normalise(shape)` is a runtime error rather than nil.
+#
+# that is the whole of module privacy: two modules can each have a `scale` or
+# a `round` and neither can see or overwrite the other's. before v0.6.0 they
+# shared one global table, and whichever loaded second silently won.
+# print(shapes_mod.normalise(shapes[0]))   # runtime error: no such field
 
 # const works across the boundary. a const is a property of the binding in the
-# shared table, so an exported const is read-only for every file that imports
-# it, and the check happens when the assignment runs -- not when this file was
-# compiled, because the import had not happened yet at that point.
-import "limits.fl"
-print("limit is " + str(LIMIT))
-print("clamp(500) is " + str(clamp(500)))
-# LIMIT = 99    # error: cannot assign to constant 'LIMIT'
+# a module's exports are reached through its name, and the importer cannot
+# write to them at all -- they are not the importer's bindings to write.
+import "limits.fl" as limits
+print("limit is " + str(limits.LIMIT))
+print("clamp(500) is " + str(limits.clamp(500)))
+# limits.LIMIT = 99   # error: cannot assign to constant 'LIMIT'
+#                     # (a table field, so: only tables have fields --
+#                     #  the const is protected inside limits.fl itself)

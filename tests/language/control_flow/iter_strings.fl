@@ -1,0 +1,29 @@
+# for-in over a string iterates its bytes.
+#
+# This regressed once. Replacing the `len()` call in the compiled for-in loop
+# with an opcode that only understood lists was a performance shortcut that
+# silently changed the language: `len` takes a string or a list, so
+# `for c in s` worked, and then it stopped working. A shortcut that changes
+# what a program means is not a shortcut.
+let s = "abc"
+let out = []
+for c in s {
+    push(out, c)
+}
+print(len(out))
+print(out[0])
+print(out[2])
+
+# the same loop over a list, so the opcode is exercised both ways
+let xs = [10, 20]
+let total = 0
+for x in xs {
+    total += x
+}
+print(total)
+
+# and the case that has always been an error: neither container
+let t = {a: 1}
+for k in t {
+    print(k)
+}
