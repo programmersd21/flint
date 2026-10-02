@@ -92,12 +92,12 @@ let biggest = stats.largest(shapes)
 print("largest is a " + biggest.kind)
 
 # shapes.fl also has a private `normalise`. it is not in shapes_mod, and
-# `shapes_mod.normalise(shape)` is a runtime error rather than nil.
+# reading a name a table does not have gives nil rather than an error.
 #
 # that is the whole of module privacy: two modules can each have a `scale` or
 # a `round` and neither can see or overwrite the other's. before v0.6.0 they
 # shared one global table, and whichever loaded second silently won.
-# print(shapes_mod.normalise(shapes[0]))   # runtime error: no such field
+# print(shapes_mod.normalise(shapes[0]))   # nil: not exported
 
 # const works across the boundary. a const is a property of the binding in the
 # a module's exports are reached through its name, and the importer cannot

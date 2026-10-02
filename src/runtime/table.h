@@ -76,10 +76,8 @@ bool table_get(Table *table, ObjString *key, Value *value);
  * `value` may be NULL when the caller only wants to know whether the name
  * resolves at all.
  */
-bool table_get_with_fallback(Table *table,
-                             Table *fallback,
-                             ObjString *key,
-                             Value *value);
+bool table_get_with_fallback(
+        Table *table, Table *fallback, ObjString *key, Value *value);
 
 /*
  * Insert or overwrite. Never touches the const flag, so overwriting a const
@@ -105,11 +103,8 @@ bool table_define_const(VM *vm, Table *table, ObjString *key, Value value);
  * silently replacing a public binding is exactly the class of bug 0.6.0's
  * module work exists to remove.
  */
-bool table_define_exported(VM *vm,
-                           Table *table,
-                           ObjString *key,
-                           Value value,
-                           bool is_const);
+bool table_define_exported(
+        VM *vm, Table *table, ObjString *key, Value value, bool is_const);
 
 /* Mark an existing binding exported without changing its value. */
 void table_mark_exported(VM *vm, Table *table, ObjString *key);

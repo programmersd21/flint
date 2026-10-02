@@ -63,7 +63,7 @@ export fn taxed(amount) {     # public
 ```flint
 import "shapes"
 print(shapes.taxed(10))      # 12
-print(shapes.tax)            # runtime error: no such field
+print(shapes.tax)            # nil -- the private name is not in the table
 ```
 
 `export` is applied at compile time now. In v0.5.0 it was a comment, and the

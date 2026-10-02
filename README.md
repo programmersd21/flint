@@ -75,21 +75,27 @@ print(c())
 2
 ```
 
-modules are just files:
+modules are just files, and each one has its own namespace:
 
 ```flint
-# math.fl
-export fn square(x) {
-    return x * x
+# shapes.fl
+let tax = 0.2                     # private to this file
+
+export fn taxed(amount) {         # public
+    return amount * (1 + tax)
 }
 ```
 
 ```flint
 # main.fl
-import "math.fl"
+import "shapes.fl"
 
-print(square(6))
+print(shapes.taxed(10))          # 12
+print(shapes.tax)                 # nil -- a private name is not there
 ```
+
+two modules can both have a private `tax` and neither can see or overwrite
+the other's, which was not true before 0.6.0.
 
 ## standard library
 

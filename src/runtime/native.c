@@ -561,11 +561,8 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		if (bag->count == bag->capacity) {
 			int old = bag->capacity;
 			bag->capacity = old > 0 ? old * 2 : 8;
-			bag->keys = GROW_ARRAY(vm,
-			        ObjString *,
-			        bag->keys,
-			        old,
-			        bag->capacity);
+			bag->keys = GROW_ARRAY(
+			        vm, ObjString *, bag->keys, old, bag->capacity);
 			bag->values = GROW_ARRAY(
 			        vm, Value, bag->values, old, bag->capacity);
 		}

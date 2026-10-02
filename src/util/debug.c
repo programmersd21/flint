@@ -277,7 +277,8 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return constant_long_instruction(
 		        "OP_DEFINE_GLOBAL_LONG", chunk, offset);
 	case OP_DEFINE_GLOBAL_EXPORT:
-		return constant_instruction("OP_DEFINE_GLOBAL_EXPORT", chunk, offset);
+		return constant_instruction(
+		        "OP_DEFINE_GLOBAL_EXPORT", chunk, offset);
 	case OP_DEFINE_GLOBAL_EXPORT_LONG:
 		return constant_long_instruction(
 		        "OP_DEFINE_GLOBAL_EXPORT_LONG", chunk, offset);

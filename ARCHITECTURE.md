@@ -119,6 +119,31 @@ own storage and repoints the upvalue at that storage. the VM emits
 `OP_CLOSE_UPVALUE` for any local leaving scope that was captured. a plain
 `OP_POP` would leave the upvalue pointing at a slot that the next call reuses.
 
+## modules
+
+every module gets its own `Table` of globals. `vm->globals` is a pointer into
+a heap array of them, and the bytecode is unchanged: `OP_DEFINE_GLOBAL` means
+"whatever table is running". that is why adding isolation needed no new opcode
+in the hot path.
+
+an `ObjClosure` records the environment it was created in. without that, a
+function called after its module's import returned would resolve its names
+against whatever module happened to be running -- so `area` would read
+`display`'s `scale` instead of its own.
+
+environments are allocated and never reused. two imports at the same nesting
+depth taking the same slot is how two unrelated modules ended up reporting
+"cannot redefine constant" against each other's names.
+
+a module's environment is kept even after the module fails. it may have handed
+out a closure the importer still holds, and freeing it is a use-after-free on
+every later call. the collector decides instead.
+
+`export` is a flag on the table entry, set by `OP_DEFINE_GLOBAL_EXPORT` at
+compile time. The loader copies only flagged bindings into the table the
+importer receives. Finding exports by diffing the global table -- what v0.5.0
+did -- cannot tell a helper from a public function.
+
 ## bytecode verification
 
 every chunk is verified before it runs. the pass checks that each opcode is a
@@ -176,7 +201,9 @@ roots:
 - the value stack, from `vm->stack` to `vm->stack_top`
 - the closure in every live `CallFrame`
 - the open upvalue list
-- the globals table
+- every module environment, not just the running one. a module's bindings stay
+  reachable for as long as the VM lives -- a closure may hold a pointer into one
+  -- so marking only `vm->globals` would sweep a module still in use
 - every `Compiler` on the chain the compiler hands over. the four parser
   globals (`parser`, `current`, `vm`, `loop`) live in one `CompilerState`
   struct, and `compile()` saves it on entry and restores it on exit, so a

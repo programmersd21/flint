@@ -304,11 +304,11 @@ static int compile_and_maybe_run(
 				printf("\n; %s\n",
 				        nested->name != NULL
 				                ? nested->name->chars
-				                : "<anonymous>");
+						: "<anonymous>");
 				chunk_disassemble(&nested->chunk,
 				        nested->name != NULL
 				                ? nested->name->chars
-				                : "<anonymous>");
+						: "<anonymous>");
 			}
 		}
 	}

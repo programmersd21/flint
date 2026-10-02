@@ -123,10 +123,8 @@ bool table_get(Table *table, ObjString *key, Value *value)
 	return true;
 }
 
-bool table_get_with_fallback(Table *table,
-                             Table *fallback,
-                             ObjString *key,
-                             Value *value)
+bool table_get_with_fallback(
+        Table *table, Table *fallback, ObjString *key, Value *value)
 {
 	if (table_get(table, key, value))
 		return true;
@@ -214,11 +212,8 @@ bool table_set(VM *vm, Table *table, ObjString *key, Value value)
  * stays exported -- `export let x` then `x = 2` is still exported -- and that
  * is table_mark_exported().
  */
-bool table_define_exported(VM *vm,
-                           Table *table,
-                           ObjString *key,
-                           Value value,
-                           bool is_const)
+bool table_define_exported(
+        VM *vm, Table *table, ObjString *key, Value value, bool is_const)
 {
 	if (table_get(table, key, NULL))
 		return false;

@@ -287,12 +287,57 @@ and a file whose size is an exact power of two is read without a one-byte
 overflow. `write_file` treats a failed `fclose` as a failure, because a close
 that fails after a successful write means the data may not have landed.
 
-## modules, v0.3
+## modules
+
+every module has its own namespace. `import` binds one name to the module's
+exports, and nothing else about the module is reachable.
+
+### binding
+
+| written | binds | accessed as |
+|---|---|---|
+| `import math` | `math` | `math.floor(1.7)` |
+| `import "lib/geometry.fl"` | `geometry` | `geometry.area(2)` |
+| `import "a/b/c.fl"` | `c` | `c.name` |
+| `import "util.fl" as u` | `u` | `u.helper()` |
+
+the default binding is the last path component with the extension removed.
+`as` overrides it.
+
+a bare name with no quotes and no `/` is a standard library module. the search
+order is `$FLINT_STDLIB`, then `<exe-dir>/lib`, then `~/.flint/stdlib`.
+
+### exports
+
+a top-level `let`, `const` or `fn` is private to its module unless marked
+`export`. a module cannot read its importer's names, and an importer cannot
+read a module's private names.
+
+```flint
+# shapes.fl
+let tax = 0.2
+export fn taxed(amount) { return amount * (1 + tax) }
+```
+
+```flint
+import "shapes"
+print(shapes.taxed(10))   # 12
+print(shapes.tax)         # nil
+```
+
+reading a name a table does not have gives `nil`, as it does for any table.
+that is how a private name is indistinguishable from a typo, which is the
+intended behaviour: it is not there.
+
+`export` applies to `fn`, `let` and `const`. anything else after it is a
+syntax error.
+
+### resolution
 
 `import` resolves a relative path against the directory of the *importing
-file*, not the process working directory. a module path is part of the
-source, so it means the same thing no matter where the user is standing. an
-absolute path is used as given.
+file*, not the process working directory. a module path is part of the source,
+so it means the same thing no matter where the user is standing. an absolute
+path is used as given.
 
 ```
 project/
@@ -306,20 +351,43 @@ any directory. a module in `lib/` importing `"helpers.fl"` finds
 `project/lib/helpers.fl`. this is the difference between a script that works
 and a script that works only from one place.
 
-a module runs once per VM. importing it again is a no-op, so a library's
-top-level side effects happen once however many files pull it in, and a
-repeated import of a module that exports a `const` is not a redeclaration of
-it. the cache is keyed by resolved path, interned.
+with `-e` or stdin there is no source file, so a relative path resolves
+against the working directory.
 
-a file that imports itself, or two files that import each other, is an
-error naming the file already in flight:
+there is no search path for quoted imports and no symlink canonicalisation.
+two spellings of one file load it twice.
+
+### repeated imports
+
+a module runs once per VM. importing it again is a lookup, not a second run,
+and both callers receive the same table. a library's top-level side effects
+happen once however many files pull it in, and a repeated import of a module
+that exports a `const` is not a redeclaration of it. the cache is keyed by
+resolved path, interned.
+
+### cycles
+
+a file that imports itself, or two files that import each other, is an error
+naming the file already in flight:
 
 ```
 error[E0501]: Import cycle: 'cyc.fl' is already being loaded.
 ```
 
-a failed import is not cached. a missing file or a module that throws can be
-retried, and the retry is a real attempt rather than a cycle report.
+nothing partial runs. the module in flight never finishes.
+
+### failure
+
+a failed import binds nothing anywhere. a module that throws at its top level
+has not defined anything the importer can see, so a later `print(good)` is an
+undefined variable rather than a partially-initialised module.
+
+a failed module is remembered as failed. a later import of the same path
+reports that rather than retrying a failure nothing has changed:
+
+```
+error[E0501]: Module 'broken.fl' failed to load earlier in this run.
+```
 
 ## diagnostics, v0.3
 

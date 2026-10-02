@@ -137,7 +137,7 @@ static ObjString *allocate_string(
 	string->hash = intern ? hash_string(chars, length) : 0;
 	string->flags =
 	        (uint8_t)(fl_bytes_are_ascii(chars, length) ? FL_STRING_ASCII
-	                                                    : 0);
+		                                            : 0);
 	memcpy(string->chars, chars, length);
 	string->chars[length] = '\0';
 

@@ -1121,7 +1121,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			                     ? frame->closure->module
 			                     : vm->globals;
 			if (!table_get_with_fallback(
-			        env, vm->globals_envs[0], name, &value)) {
+			            env, vm->globals_envs[0], name, &value)) {
 				vm_runtime_error(vm,
 				        "undefined variable '%s'.",
 				        name->chars);
@@ -1215,11 +1215,10 @@ static InterpretResult run(VM *vm, int base_frame)
 		case OP_DEFINE_GLOBAL_EXPORT_LONG: {
 			ObjString *name =
 			        READ_STRING_AS(OP_DEFINE_GLOBAL_EXPORT_LONG);
-			table_define_exported(
-			        vm,
+			table_define_exported(vm,
 			        frame->closure->module != NULL
 			                ? frame->closure->module
-			                : vm->globals,
+					: vm->globals,
 			        name,
 			        peek(vm, 0),
 			        false);

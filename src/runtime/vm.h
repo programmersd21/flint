@@ -128,8 +128,8 @@ struct VM {
 	 * modules existing.
 	 */
 	Table **globals_envs;
-	int globals_count;  /* import nesting depth */
-	int globals_used;   /* slots ever taken; only ever grows */
+	int globals_count; /* import nesting depth */
+	int globals_used; /* slots ever taken; only ever grows */
 	int globals_capacity;
 
 	Table strings; /* weak. the intern table. */

@@ -596,7 +596,7 @@ static ObjFunction *end_compiler(void)
 	if (!state.parser.had_error) {
 		chunk_disassemble(current_chunk(),
 		        function->name != NULL ? function->name->chars
-		                               : "<script>");
+			                       : "<script>");
 	}
 #endif
 
@@ -2207,7 +2207,8 @@ static void import_declaration(void)
 	 * make it the value being defined, and `math` would be the string
 	 * "math".
 	 */
-	emit_indexed(OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_LONG,
+	emit_indexed(OP_DEFINE_GLOBAL,
+	        OP_DEFINE_GLOBAL_LONG,
 	        identifier_constant_from(bind_name, bind_len));
 }
 

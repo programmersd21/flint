@@ -1,5 +1,93 @@
 # releases
 
+## v0.6.0
+
+a module-system release. `import` binds one name to a module's exports,
+`export` decides what those are, and the REPL takes a block.
+
+### the bug this fixes
+
+Two modules could not both have a private helper of the same name. Both wrote
+into one shared global table, so:
+
+```flint
+# geometry.fl          # display.fl
+let scale = 2          let scale = 10
+export fn area(r) {    export fn show(v) {
+  return 3*r*r*scale     return v * scale
+}                     }
+```
+
+```flint
+import "geometry.fl"
+import "display.fl"
+print(geometry.area(2))
+```
+
+printed **120**. `scale` resolved to 10, because `display.fl` loaded second.
+No error and no warning -- a wrong number, which is the worst failure a
+language can have. It is now 24, because each module has its own environment.
+
+### what changed
+
+**every module has its own globals.** `vm->globals` became a pointer into a
+heap array of per-module tables, and the bytecode did not change at all --
+`OP_DEFINE_GLOBAL` means "whatever table this module is running in". A closure
+remembers the environment it was created in, so a function called long after
+its module loaded still sees that module's private names.
+
+**`export` means something.** Four opcodes flag a binding exported at compile
+time. Previously `export` was a comment and the exports were found by diffing
+the global table across the module's run, which cannot distinguish a helper
+from a public function -- both are a name that appeared.
+
+**failed imports are transactional.** A module that fails binds nothing
+anywhere. Its partial globals used to survive, and a second import retried
+against them. Its environment is deliberately not freed, though: it may have
+handed out a closure the importer holds, and freeing it turns every later call
+into a use-after-free.
+
+**`import "x.fl" as name`.** The default binding is the last path component
+without the extension, which is what existing scripts already spelled.
+
+**the REPL takes a block.** Delimiter depth with strings and comments skipped,
+because a brace inside a string literal is not an open block.
+
+**a bug found and fixed.** `OP_LIST_LEN`, added in 0.5.0 to remove a native
+call from every for-in iteration, only understood lists. `len` takes strings
+too, so `for c in s` over a string stopped working. Nothing in the test suite
+noticed, because every for-in loop in the tree iterates a list. It surfaced
+when every example was run as part of this release. There is a regression test
+now.
+
+### breaking change
+
+an import no longer dumps names into the importer.
+
+```flint
+# before                      # after
+import "helper.fl"            import "helper.fl"
+print(square(6))              print(helper.square(6))
+print(LIMIT)                  print(helper.LIMIT)
+```
+
+`docs/modules.md` has the full model and a migration section.
+
+### not in this release
+
+**no native extension ABI.** Sections 15-23 of the 0.6.0 plan were left out.
+A versioned public header, dlopen/dylib loading, and ownership rules are a
+real piece of work, and a half-specified one is worse than none: an extension
+with a subtly wrong ownership rule corrupts memory rather than failing. It
+should be its own release with its own differential tests.
+
+**no JIT**, per the plan.
+
+**no table `has`/`delete`/`keys` or list `insert`/`remove`.** The collections
+work and are tested; the additions were not reached. The spec says defer rather
+than compromise, and these are additive rather than correctness fixes, so
+deferring them costs nothing today.
+
 ## v0.5.0
 
 a runtime release. the language does not change at all -- not one keyword, not
