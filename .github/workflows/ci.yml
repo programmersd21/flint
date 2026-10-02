@@ -136,6 +136,12 @@ jobs:
             bad=1
           fi
         done
+        if [ "$bad" -ne 0 ]; then
+          echo
+          echo "gcc accepts these; clang rejects them under -Werror."
+          echo "the usual cause is a whole-file rewrite that did not append"
+          echo "a trailing newline: printf '\n' >> the file fixes it."
+        fi
         exit $bad
 
     - name: ccache stats
