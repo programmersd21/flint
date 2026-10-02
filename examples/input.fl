@@ -53,6 +53,12 @@ let big = input()
 print("long line was " + str(len(big)) + " bytes")
 print(big)
 
+# input() returns a string, always. to do arithmetic on what the user typed,
+# convert it: `as number` asserts a type and will not convert one, so a string
+# that looks like a number still needs num().
+let answer = num(input("a number, please: "))
+print("twice that is " + str(answer * 2))
+
 # input() with the wrong shape is an ordinary runtime error, like everything
 # else that is wrong-shaped in this language
 # print(input("one", "two"))   # error: expected 0 or 1 arguments

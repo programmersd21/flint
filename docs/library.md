@@ -183,6 +183,47 @@ numbers are formatted as flint formats them at the `print` statement: integral
 values have no decimal point, and everything else uses the shortest form that
 reads back as the same double. see [values.md](values.md).
 
+## num
+
+the number form of a string, and the inverse direction of `str()`. a number
+passes through, so `num` is safe to call on something that might already be
+one.
+
+```flint
+print(num("42"))       # 42
+print(num("3.14"))     # 3.14
+print(num("-0.5"))     # -0.5
+print(num("  7  "))    # 7. leading and trailing whitespace is fine.
+print(num(7))          # 7
+```
+
+the string has to parse whole. `num("12abc")` fails rather than returning 12,
+because returning a prefix would be guessing at what was meant. an empty
+string fails too, and so does anything that is neither a number nor a string.
+
+```flint
+print(num("abc"))      # error: cannot convert "abc" to a number.
+print(num(""))         # error: cannot convert an empty string to a number.
+print(num(nil))        # error: must be a number or a string, got a nil.
+```
+
+this is deliberately an error and not `nil`. a conversion that cannot be done
+is a fact about this line, and reporting it here -- naming the value -- beats
+returning nil and letting it surface three calls later as an operand error in
+code that had nothing to do with it.
+
+note that `as number` is not this. `as` is a type assertion: `"9" as number`
+fails, correctly, because a string is not a number. `num("9")` is 9.
+
+the common shape is reading from the user, since `input()` returns a string:
+
+```flint
+import math
+
+const a = num(input("a: "))
+print(math.sqrt(a))
+```
+
 ## type
 
 the name of a value's type, as a string.

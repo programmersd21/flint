@@ -1,0 +1,18 @@
+# num(): string to number, and the inverse direction of str().
+#
+# This exists because input() returns a string and there was previously no
+# way to get a number out of one. `as number` is a type assertion, not a
+# conversion, so "9" as number correctly fails -- and then the user has a
+# string that looks like a number and no function that agrees. That gap is
+# what this closes.
+print(num("42"))
+print(num("3.14"))
+print(num("-0.5"))
+print(num("  7  "))
+print(num(7))
+print(num("1e3"))
+
+# a number that went through str() comes back. this round trip is the property
+# the pair of functions exists to provide.
+print(num(str(42)))
+print(num(str(3.14)))

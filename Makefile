@@ -83,7 +83,7 @@ DBG_CFLAGS := -O0 -g3 -DFL_DEBUG_PRINT_CODE -DFL_DEBUG_TRACE_EXECUTION
 STR_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFL_GC_STRESS
 STR_LDFLAGS := -fsanitize=address,undefined
 
-.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help flint-goto
+.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto
 .SUFFIXES:
 
 # If a compile fails partway, do not leave a truncated object behind. Make
@@ -227,6 +227,42 @@ $(GOTO_VM): src/runtime/vm.c scripts/to_computed_goto.py
 $(GOTO_DIR)/vm.o: $(GOTO_VM)
 	$(CC) $(ALL_CFLAGS) -std=gnu11 -Wno-pedantic $(REL_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
+#
+# Install.
+#
+# Two directories, because the runtime needs to find lib/ and there are two
+# honest places for it. The binary goes on PATH; the standard library goes to
+# ~/.flint/stdlib, which is the third entry in the lookup order the runtime
+# already documents:
+#
+#   1. $FLINT_STDLIB
+#   2. <exe-dir>/lib
+#   3. ~/.flint/stdlib
+#
+# (3) is chosen over (2) because a package-installed binary on PATH has no
+# lib/ beside it -- /usr/local/bin is full of other things -- and because a
+# user-level install should not need root. Point FLINT_STDLIB somewhere else
+# and it wins over both.
+#
+# PREFIX/DESTDIR are honoured for packaging.
+#
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
+LIBDIR ?= $(HOME)/.flint/stdlib
+
+install: flint
+	@mkdir -p $(DESTDIR)$(BINDIR) $(DESTDIR)$(LIBDIR)
+	install -m 755 flint $(DESTDIR)$(BINDIR)/flint
+	install -m 644 lib/*.fl $(DESTDIR)$(LIBDIR)/
+	@echo "installed $(DESTDIR)$(BINDIR)/flint"
+	@echo "          $(DESTDIR)$(LIBDIR)/*.fl"
+	@command -v flint >/dev/null 2>&1 || \
+		echo "note: $(BINDIR) is not on PATH."
+
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/flint
+	@echo "left $(DESTDIR)$(LIBDIR) alone; it is yours to delete"
+
 # Benchmarks.
 #
 # `make bench` measures the portable build, because that is the one everybody
@@ -334,6 +370,7 @@ help:
 	@echo "make unit       value and chunk unit tests"
 	@echo "make check      clean + build + test + unit (gate quality)"
 	@echo "make flint-goto computed-goto interpreter, 7-21% faster"
+	@echo "make install    flint + lib to ~/.local/bin and ~/.flint/stdlib"
 	@echo "make bench      benchmarks (bench/bench.py)"
 	@echo "make lint       clang-tidy, policy in .clang-tidy"
 	@echo "make clean      remove build/ and the binaries"

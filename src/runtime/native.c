@@ -20,6 +20,7 @@
 #include "value.h"
 #include "vm.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -230,6 +231,111 @@ static Value str_native(VM *vm, int argc, Value *argv)
 		return STR_VAL(new_string(vm, "nil", 3));
 	/* no structure is rendered, so everything else is one opaque token */
 	return STR_VAL(new_string(vm, "<object>", 8));
+}
+
+/*
+ * `num(x)` -- string to number, and the inverse direction of `str()`.
+ *
+ * This exists because `input()` returns a string and there was previously
+ * no way to get a number out of one. `as number` is a type assertion, not a
+ * conversion, so `"9" as number` correctly fails -- and then the user has a
+ * string that looks like a number and no function that agrees. That gap is
+ * what this closes.
+ *
+ * Numbers pass through. Strings must parse whole: leading and trailing
+ * whitespace is tolerated because `input()` hands back whatever the user
+ * typed, and a trailing newline or space should not be the difference between
+ * working and failing. Anything else that strtod does not consume is an
+ * error, not a prefix: `num("12abc")` fails rather than returning 12, because
+ * returning a prefix would be guessing at what the user meant.
+ *
+ * Everything else is an error rather than nil. A failed conversion that
+ * silently becomes nil would surface three calls later as an operand error in
+ * code that had nothing to do with it; failing here, naming the value, is
+ * the useful behaviour.
+ */
+static Value num_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	Value val = argv[0];
+	if (IS_NUMBER(val))
+		return val;
+	if (!IS_STRING(val)) {
+		vm_runtime_error(vm,
+		        "argument to num() must be a number or a string, but "
+		        "got a %s.",
+		        flint_type_name(val));
+		return NIL_VAL;
+	}
+
+	const char *text = AS_CSTRING(val);
+	int length = AS_STRING(val)->length;
+
+	/* skip leading whitespace, which strtod would skip anyway. doing it
+	 * here means the empty-string check below sees what is really there. */
+	while (length > 0 && (*text == ' ' || *text == '\t' || *text == '\n' ||
+	                             *text == '\r')) {
+		text++;
+		length--;
+	}
+	while (length > 0 &&
+	        (text[length - 1] == ' ' || text[length - 1] == '\t' ||
+	                text[length - 1] == '\n' || text[length - 1] == '\r'))
+		length--;
+
+	if (length == 0) {
+		vm_runtime_error(
+		        vm, "cannot convert an empty string to a number.");
+		return NIL_VAL;
+	}
+
+	/*
+	 * NUL-terminate a copy, because strtod needs one and the string's own
+	 * NUL sits past `length` bytes that may include more text. The copy is
+	 * malloc'd rather than on the C stack: a hostile input can be long,
+	 * and a variable-length stack array sized by user input is exactly the
+	 * shape that overflows one.
+	 */
+	char *copy = malloc((size_t)length + 1);
+	if (copy == NULL) {
+		vm_runtime_error(vm, "out of memory in num().");
+		return NIL_VAL;
+	}
+	memcpy(copy, text, (size_t)length);
+	/*
+	 * In bounds: the allocation above is `length + 1`. The analyzer flags
+	 * a negative index because nothing in this function proves length is
+	 * non-negative -- but allocate_string() asserts it for every string
+	 * that exists, so a negative length here would mean the heap object
+	 * itself is corrupt, not this index. Same reasoning as the
+	 * buffer[bytes] annotation in import_file_native below.
+	 */
+	/* NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) */
+	copy[length] = '\0';
+
+	errno = 0;
+	char *end = NULL;
+	double result = strtod(copy, &end);
+	/* strtod sets end to the first character it did not use. anything
+	 * left over means the string was not a number, just something that
+	 * started like one. */
+	bool ok = end != NULL && *end == '\0' && end != copy;
+	bool overflow = ok && errno == ERANGE;
+	free(copy);
+
+	if (!ok) {
+		vm_runtime_error(vm,
+		        "cannot convert \"%s\" to a number.",
+		        AS_CSTRING(val));
+		return NIL_VAL;
+	}
+	if (overflow) {
+		vm_runtime_error(vm,
+		        "cannot convert \"%s\" to a number: out of range.",
+		        AS_CSTRING(val));
+		return NIL_VAL;
+	}
+	return NUMBER_VAL(result);
 }
 
 /* the type name, as a string. type() is the only way to introspect. */
@@ -640,6 +746,7 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "push", push_native, 2);
 	vm_define_native(vm, "pop", pop_native, 1);
 	vm_define_native(vm, "str", str_native, 1);
+	vm_define_native(vm, "num", num_native, 1);
 	vm_define_native(vm, "type", type_native, 1);
 	vm_define_native(vm, "__slice", slice_native, 3);
 	/* args, env, exit, read_file, write_file, exec. a different kind of

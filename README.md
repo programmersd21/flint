@@ -34,6 +34,8 @@ that's intentional. large codebases have enough fans already.
 
 ## install
 
+to build in place:
+
 ```sh
 git clone https://github.com/programmersd21/flint
 cd flint
@@ -42,13 +44,35 @@ make release
 
 the binary is `./flint`.
 
-flint searches for its standard library in:
+to install, so `flint` is on your PATH:
+
+```sh
+make install
+```
+
+which puts the binary in `~/.local/bin` and the standard library in
+`~/.flint/stdlib`. `PREFIX`, `BINDIR`, `LIBDIR` and `DESTDIR` all override
+that, for packaging:
+
+```sh
+make install PREFIX=/usr/local LIBDIR=/usr/local/share/flint/lib
+```
+
+there is nothing to uninstall beyond `make uninstall` -- no runtime, no shared
+libraries, no configuration, no build directory left behind. the whole thing is
+one binary and seven `.fl` files.
+
+flint searches for its standard library in this order:
 
 ```text
-$FLINT_STDLIB
-<executable>/lib
-~/.flint/stdlib
+$FLINT_STDLIB                  an explicit override, wins over everything
+<executable>/lib               beside the binary
+~/.flint/stdlib                where `make install` puts it
 ```
+
+the third entry is what `make install` relies on, because a binary on PATH
+has no `lib/` beside it. if you move the binary somewhere without `lib/` next
+to it, either keep `~/.flint/stdlib` or set `FLINT_STDLIB`.
 
 ## example
 

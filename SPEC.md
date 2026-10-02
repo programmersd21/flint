@@ -100,6 +100,9 @@ other name is a compile error.
 `as` asserts; it does not convert. the value is unchanged on success. on
 failure the program stops with a runtime error naming both types.
 
+`"9" as number` fails, correctly: a string is not a number. converting one is
+`num("9")`, which is 9. see `num` in the standard library.
+
 the assertion runs at run time, not at compile time, because the value may come
 from a module that has not been read yet or from a function parameter.
 

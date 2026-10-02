@@ -1,5 +1,40 @@
 # releases
 
+## v0.6.1
+
+`num()`, and the install story.
+
+### num
+
+`input()` returns a string and there was no way to get a number out of one.
+`as number` is a type assertion, not a conversion, so `"9" as number`
+correctly fails -- and then the user has a string that looks like a number
+and no function that agrees.
+
+```flint
+import math
+
+const a = num(input("a: "))
+print(math.sqrt(a))
+```
+
+`num("42")` is 42. `num("  7  ")` is 7, because what `input()` hands back
+includes whatever whitespace the user typed. `num("12abc")` fails rather
+than returning 12; returning a prefix would be guessing. Numbers pass
+through, so it is safe to call on something that might already be one.
+
+A failed conversion is an error naming the value, not nil. Nil would surface
+three calls later as an operand error in code that had nothing to do with it.
+
+### make install
+
+`make install` puts the binary in `~/.local/bin` and the library in
+`~/.flint/stdlib`, which is the third entry in the lookup order the runtime
+already documents. `PREFIX`, `BINDIR`, `LIBDIR` and `DESTDIR` override all of
+that for packaging. `README.md` installation instructions match what the
+Makefile does, which they previously did not -- they described building in
+place and stopped there.
+
 ## v0.6.0
 
 a module-system release. `import` binds one name to a module's exports,
