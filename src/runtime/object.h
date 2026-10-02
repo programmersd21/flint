@@ -15,6 +15,8 @@
 typedef struct VM VM;
 typedef struct Obj Obj;
 typedef struct ObjString ObjString;
+/* the internal hash table, for ObjClosure.module. see table.h. */
+typedef struct Table Table;
 
 typedef enum {
 	OBJ_STRING,
@@ -136,6 +138,27 @@ typedef struct {
 	ObjFunction *function;
 	ObjUpvalue **upvalues;
 	int upvalue_count;
+
+	/*
+	 * The module this closure was created in.
+	 *
+	 * NULL for the top-level script, and for any function defined outside
+	 * a module, meaning "look in whatever environment is running".
+	 *
+	 * This exists because a closure has to remember where its names live.
+	 * `area` reads the module's private `scale` when it is *called*, which
+	 * may be long after that module's import returned and the VM moved on
+	 * to a different module. Without this field it would resolve `scale`
+	 * against whoever is running at the time, and a module would quietly
+	 * stop being able to see its own private names the moment another
+	 * module loaded -- which is exactly the class of bug per-module
+	 * environments were introduced to remove.
+	 *
+	 * It is a borrowed pointer to a Table owned by the VM, and the
+	 * collector marks it because it marks every environment in
+	 * globals_envs regardless.
+	 */
+	Table *module;
 } ObjClosure;
 
 typedef struct {

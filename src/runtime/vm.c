@@ -216,8 +216,8 @@ static const char *similar_language_name(VM *vm, ObjString *needle)
 		}
 	}
 
-	for (int i = 0; i < vm->globals.capacity; i++) {
-		ObjString *key = vm->globals.entries[i].key;
+	for (int i = 0; i < vm->globals->capacity; i++) {
+		ObjString *key = vm->globals->entries[i].key;
 		if (key == NULL)
 			continue;
 		if (best != NULL && strcmp(best, key->chars) == 0)
@@ -572,7 +572,7 @@ void vm_define_native(VM *vm, const char *name, NativeFn function, int arity)
 {
 	vm_push(vm, STR_VAL(copy_string(vm, name, (int)strlen(name))));
 	vm_push(vm, OBJ_VAL(new_native(vm, function, arity)));
-	table_set(vm, &vm->globals, AS_STRING(vm->stack[0]), vm->stack[1]);
+	table_set(vm, vm->globals, AS_STRING(vm->stack[0]), vm->stack[1]);
 	vm_pop(vm);
 	vm_pop(vm);
 }
@@ -625,7 +625,26 @@ void vm_init(VM *vm)
 	vm->gray_capacity = 0;
 	vm->gray_stack = NULL;
 
-	table_init(&vm->globals);
+	/*
+	 * globals points at the first module's table. The array is the
+	 * storage; the pointer is the cursor into it, and a module push is a
+	 * pointer increment. That is why the VM needs no other change to give
+	 * every module its own environment: the bytecode says "global", and
+	 * "global" means "whatever table this module is running in".
+	 */
+	vm->globals_count = 1;
+	vm->globals_used = 1;
+	vm->globals_capacity = 8;
+	vm->globals_envs = ALLOCATE(vm, Table *, (size_t)vm->globals_capacity);
+	/* NULL the whole array first. vm_free and the collector both walk to
+	 * capacity and skip NULL slots, and an uninitialised slot is neither
+	 * NULL nor a Table, so vm_free handed a pointer to table_free and ASan
+	 * caught it the first time a program imported more than two modules. */
+	for (int i = 0; i < vm->globals_capacity; i++)
+		vm->globals_envs[i] = NULL;
+	vm->globals_envs[0] = ALLOCATE(vm, Table, 1);
+	table_init(vm->globals_envs[0]);
+	vm->globals = vm->globals_envs[0];
 	table_init(&vm->strings);
 	table_init(&vm->modules);
 	compiler_set_diagnostics(NULL, vm->diag_format, vm->diag_color);
@@ -669,7 +688,30 @@ void vm_free(VM *vm)
 	 * pointing the other way.
 	 */
 	free_objects(vm);
-	table_free(vm, &vm->globals);
+	/*
+	 * Every module table, not just the current one. A finished module's
+	 * bindings are still reachable through whatever imported it, and the
+	 * collector needs to see all of them.
+	 */
+	/*
+	 * Over capacity, not count.
+	 *
+	 * `globals_count` is the *nesting depth*: it goes up as an import
+	 * starts and down as it finishes, so after the last import it is back
+	 * to 1 no matter how many modules were loaded. The environments
+	 * themselves are never released -- a closure may still point at one --
+	 * so every slot ever used has to be freed, which means the whole
+	 * allocated array. Walking only up to `count` freed the last one and
+	 * leaked every other, which LeakSanitizer reported as a 48-byte leak
+	 * for a three-module test.
+	 */
+	for (int i = 0; i < vm->globals_capacity; i++) {
+		if (vm->globals_envs[i] == NULL)
+			continue;
+		table_free(vm, vm->globals_envs[i]);
+		FREE(vm, Table, vm->globals_envs[i]);
+	}
+	FREE_ARRAY(vm, Table *, vm->globals_envs, (size_t)vm->globals_capacity);
 	table_free(vm, &vm->strings);
 	table_free(vm, &vm->modules);
 }
@@ -1049,7 +1091,37 @@ static InterpretResult run(VM *vm, int base_frame)
 		case OP_GET_GLOBAL_LONG: {
 			ObjString *name = READ_STRING_AS(OP_GET_GLOBAL_LONG);
 			Value value;
-			if (!table_get(&vm->globals, name, &value)) {
+			/*
+			 * The module's own table first, then the builtins.
+			 *
+			 * A module does not contain `print` or `len` -- it is
+			 * not the module that owns them -- so a plain lookup
+			 * would make every module unable to call anything. The
+			 * fallback keeps them reachable without copying them
+			 * into every module, which would let a module shadow a
+			 * builtin for every other module too.
+			 */
+			/*
+			 * Resolve against the frame's module, not whichever
+			 * module is currently running.
+			 *
+			 * A closure carries the environment its body was written
+			 * in, so calling it later -- after its module's import
+			 * returned and another module has loaded -- still sees
+			 * its own private names. Without this a module could
+			 * not see its own `scale` the moment anything else
+			 * loaded, which is the bug per-module environments exist
+			 * to remove.
+			 *
+			 * The closure's module is NULL for the top-level script
+			 * and for anything defined outside a module, and then
+			 * this is the running environment, as before.
+			 */
+			Table *env = frame->closure->module != NULL
+			                     ? frame->closure->module
+			                     : vm->globals;
+			if (!table_get_with_fallback(
+			        env, vm->globals_envs[0], name, &value)) {
 				vm_runtime_error(vm,
 				        "undefined variable '%s'.",
 				        name->chars);
@@ -1075,7 +1147,10 @@ static InterpretResult run(VM *vm, int base_frame)
 			 * been made const by a module this file imported, and
 			 * imports run at runtime, so the compiler cannot know.
 			 */
-			if (table_is_const(&vm->globals, name)) {
+			Table *env = frame->closure->module != NULL
+			                     ? frame->closure->module
+			                     : vm->globals;
+			if (table_is_const(env, name)) {
 				vm_pop(vm);
 				vm_runtime_error(vm,
 				        "cannot redefine constant '%s'.",
@@ -1083,7 +1158,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				return INTERPRET_RUNTIME_ERROR;
 			}
 
-			table_set(vm, &vm->globals, name, peek(vm, 0));
+			table_set(vm, env, name, peek(vm, 0));
 			vm_pop(vm);
 			break;
 		}
@@ -1110,9 +1185,9 @@ static InterpretResult run(VM *vm, int base_frame)
 			 */
 			ObjString *name =
 			        READ_STRING_AS(OP_DEFINE_GLOBAL_CONST_LONG);
-			if (table_is_const(&vm->globals, name)) {
+			if (table_is_const(vm->globals, name)) {
 				Value existing;
-				table_get(&vm->globals, name, &existing);
+				table_get(vm->globals, name, &existing);
 				if (values_equal(existing, peek(vm, 0))) {
 					vm_pop(vm);
 					break;
@@ -1123,7 +1198,57 @@ static InterpretResult run(VM *vm, int base_frame)
 				        name->chars);
 				return INTERPRET_RUNTIME_ERROR;
 			}
-			table_define_const(vm, &vm->globals, name, peek(vm, 0));
+			table_define_const(vm, vm->globals, name, peek(vm, 0));
+			vm_pop(vm);
+			break;
+		}
+		/*
+		 * The `export` definitions. Identical to the plain forms except
+		 * that the binding is flagged, which the module loader reads when
+		 * it builds the table the importer gets.
+		 *
+		 * A `let` that is not marked is the module's own business and
+		 * never leaves it -- that is the difference from v0.5.0, where
+		 * every top-level name in every file was visible everywhere.
+		 */
+		case OP_DEFINE_GLOBAL_EXPORT:
+		case OP_DEFINE_GLOBAL_EXPORT_LONG: {
+			ObjString *name =
+			        READ_STRING_AS(OP_DEFINE_GLOBAL_EXPORT_LONG);
+			table_define_exported(
+			        vm,
+			        frame->closure->module != NULL
+			                ? frame->closure->module
+			                : vm->globals,
+			        name,
+			        peek(vm, 0),
+			        false);
+			vm_pop(vm);
+			break;
+		}
+		case OP_DEFINE_GLOBAL_CONST_EXPORT:
+		case OP_DEFINE_GLOBAL_CONST_EXPORT_LONG: {
+			ObjString *name = READ_STRING_AS(
+			        OP_DEFINE_GLOBAL_CONST_EXPORT_LONG);
+			if (table_is_const(vm->globals, name)) {
+				/* the same rule as an unexported const: re-running
+				 * the same declaration is fine, a different value
+				 * is not. importing a module re-executes its top
+				 * level, so the first case has to be allowed. */
+				Value existing;
+				table_get(vm->globals, name, &existing);
+				if (values_equal(existing, peek(vm, 0))) {
+					vm_pop(vm);
+					break;
+				}
+				vm_pop(vm);
+				vm_runtime_error(vm,
+				        "cannot redefine constant '%s'.",
+				        name->chars);
+				return INTERPRET_RUNTIME_ERROR;
+			}
+			table_define_exported(
+			        vm, vm->globals, name, peek(vm, 0), true);
 			vm_pop(vm);
 			break;
 		}
@@ -1143,17 +1268,17 @@ static InterpretResult run(VM *vm, int base_frame)
 			 * unknown name would create it and the error below
 			 * would report "undefined" for a name that exists.
 			 */
-			if (table_is_const(&vm->globals, name)) {
+			if (table_is_const(vm->globals, name)) {
 				vm_runtime_error(vm,
 				        "cannot assign to constant '%s'.",
 				        name->chars);
 				return INTERPRET_RUNTIME_ERROR;
 			}
 
-			if (table_set(vm, &vm->globals, name, peek(vm, 0))) {
+			if (table_set(vm, vm->globals, name, peek(vm, 0))) {
 				/* assigning to something that was not declared
 				 * just created it. undo that and complain. */
-				table_delete(&vm->globals, name);
+				table_delete(vm->globals, name);
 				vm_runtime_error(vm,
 				        "undefined variable '%s'.",
 				        name->chars);

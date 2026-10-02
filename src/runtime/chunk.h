@@ -173,6 +173,22 @@ typedef enum {
 	OP_EQ_NUM,
 	OP_NEQ_NUM,
 	OP_NEG_NUM,
+	/*
+	 * The `export` forms of the two global definitions.
+	 *
+	 * Identical to their unmarked counterparts except that the binding is
+	 * flagged exported, which the module loader reads when it builds the
+	 * table the importer receives.
+	 *
+	 * Separate opcodes rather than a flag in an operand byte because the
+	 * operand is a constant index and stealing its high bit would mean
+	 * every global access in every program carries a flag it does not use.
+	 * The ordinary `let` stays two bytes.
+	 */
+	OP_DEFINE_GLOBAL_EXPORT,
+	OP_DEFINE_GLOBAL_EXPORT_LONG,
+	OP_DEFINE_GLOBAL_CONST_EXPORT,
+	OP_DEFINE_GLOBAL_CONST_EXPORT_LONG,
 } OpCode;
 
 typedef struct {

@@ -91,6 +91,10 @@ static bool operand_is_constant_index(uint8_t opcode)
 	case OP_GET_FIELD_LONG:
 	case OP_SET_FIELD_LONG:
 	case OP_SET_FIELD_TOP_LONG:
+	case OP_DEFINE_GLOBAL_EXPORT:
+	case OP_DEFINE_GLOBAL_EXPORT_LONG:
+	case OP_DEFINE_GLOBAL_CONST_EXPORT:
+	case OP_DEFINE_GLOBAL_CONST_EXPORT_LONG:
 		return true;
 	default:
 		return false;
@@ -110,6 +114,8 @@ static bool opcode_is_long_form(uint8_t opcode)
 	case OP_GET_FIELD_LONG:
 	case OP_SET_FIELD_LONG:
 	case OP_SET_FIELD_TOP_LONG:
+	case OP_DEFINE_GLOBAL_EXPORT_LONG:
+	case OP_DEFINE_GLOBAL_CONST_EXPORT_LONG:
 		return true;
 	default:
 		return false;

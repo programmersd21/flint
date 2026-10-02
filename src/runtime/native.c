@@ -9,6 +9,7 @@
  * the whole thing is reentrant. import_file does exactly that.
  */
 #include "native.h"
+#include "common.h"
 #include "memory.h"
 #include "native_math.h"
 #include "object.h"
@@ -249,18 +250,51 @@ static Value type_native(VM *vm, int argc, Value *argv)
 }
 
 /*
- * Read a module and run it in the same VM, so its top-level `let` lands in
- * the same globals table and its `export` is just a definition.
+ * import_file(path) -> table of the module's exports
  *
- * This is the only place the runtime reenters the interpreter. Resolved
- * paths are cached, and an in-flight entry catches import cycles.
+ * This is the only place the runtime reenters the interpreter, and it is
+ * where most of 0.6.0's module semantics live.
+ *
+ * What it does, in order:
+ *
+ *   1. resolve the path against the importing file, not the process cwd
+ *   2. look it up in the module cache: loaded, loading, or failed
+ *   3. push a fresh globals table and run the module inside it
+ *   4. copy only the names the module exported into a fresh table
+ *   5. bind that table in the *importing* module under the asked-for name
+ *
+ * Step 3 is the whole of module isolation. `vm->globals` points at the
+ * running module's table, so every OP_DEFINE_GLOBAL inside the module lands
+ * there and nowhere else. Two modules can both define a private `scale` and
+ * they stay separate, which they did not before: a shared table meant the
+ * second one to load silently overwrote the first.
+ *
+ * Step 4 is why `export` finally means something. It used to be a comment:
+ * the declaration was compiled as if the keyword were not there, and the
+ * "exports" were whatever the module had added to the shared table, found by
+ * diffing the table before and after the run. Diffing cannot know which names
+ * were meant to be private -- a module's own helper looked exactly like an
+ * export -- and it cannot survive a module that fails partway. The compiler
+ * emits an explicit export list now, and this reads it.
+ *
+ * Step 5 is where the module becomes visible, and it binds in the importer's
+ * table. A module cannot define a name in its importer, which is what makes
+ * "private" mean private.
+ *
+ * Failure is transactional: on any error the module is marked failed, its
+ * table is discarded, and nothing it defined is bound anywhere. A later
+ * import of the same path reports the failure rather than retrying a
+ * half-initialised module.
  */
 static Value import_file_native(VM *vm, int argc, Value *argv)
 {
-	(void)argc;
+	if (argc != 1) {
+		vm_runtime_error(vm, "import_file() takes one argument.");
+		return NIL_VAL;
+	}
 	if (!IS_STRING(argv[0])) {
 		vm_runtime_error(vm,
-		        "Argument to import_file() must be a file path "
+		        "argument to import_file() must be a file path "
 		        "string.");
 		return NIL_VAL;
 	}
@@ -269,10 +303,8 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 
 	/*
 	 * Resolve against the importing file's directory, not the process
-	 * working directory. A module path is part of the source, so it
-	 * means the same thing no matter where the user is standing. This
-	 * used to be process-relative and meant a script only worked from
-	 * one directory, which is not a property any language should have.
+	 * working directory. A module path is part of the source, so it means
+	 * the same thing no matter where the user is standing.
 	 *
 	 * An absolute path is left alone by sys_resolve_module().
 	 */
@@ -282,277 +314,275 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		return NIL_VAL;
 	}
 
-	/*
-	 * The cache. The key is the resolved path, interned, so two imports
-	 * of the same file spelled the same way are the same key, and two
-	 * files that are actually different are different keys even if one
-	 * is a symlink to the other only in a way flint cannot see. That is
-	 * the correct definition of "the same module": same resolved name.
-	 *
-	 * TRUE means loaded, NIL means in flight. The NIL case is a cycle:
-	 * this file is already being executed further up the stack, so
-	 * running it again would recurse forever.
-	 */
+	/* Rooted across everything below: every step can allocate. */
 	ObjString *key = copy_string(vm, path, (int)strlen(path));
-	vm_push(vm, STR_VAL(key)); /* rooted: every call below can collect */
+	vm_push(vm, STR_VAL(key));
 
+	/*
+	 * The cache holds one of three things, and the value is the state:
+	 *
+	 *   a table   loaded. this is also the module's exports, so a
+	 *             repeated import is a lookup rather than a second run
+	 *   nil       in flight. the same path is already being executed
+	 *             further up the import stack
+	 *   false     failed. re-running would repeat a failure the user
+	 *             has not changed anything about
+	 *
+	 * The loaded case has to be checked first and by type, because a
+	 * module's exports are an ordinary Flint table and could in
+	 * principle be any value -- testing for TRUE instead would report
+	 * every successful module as failed.
+	 */
 	Value cached;
 	if (table_get(&vm->modules, key, &cached)) {
-		vm_pop(vm); /* the key */
-		free(path);
+		if (IS_FLINT_TABLE(cached)) {
+			vm_pop(vm); /* the key */
+			free(path);
+			return cached;
+		}
 		if (IS_NIL(cached)) {
+			/*
+			 * NIL means in flight, which means this file is already
+			 * being executed further up the import stack. Running it
+			 * again would recurse until the frame limit, so the
+			 * cycle is reported here with the path that caused it.
+			 */
 			vm_runtime_error(vm,
-			        "import cycle: '%s' is already being "
-			        "loaded.",
+			        "import cycle: '%s' is already being loaded.",
 			        raw);
+			vm_pop(vm); /* the key */
+			free(path);
 			return NIL_VAL;
 		}
-		return TRUE_VAL; /* already loaded. nothing to do. */
+		/* a previous attempt failed */
+		vm_runtime_error(vm,
+		        "module '%s' failed to load earlier in this run.",
+		        raw);
+		vm_pop(vm); /* the key */
+		free(path);
+		return NIL_VAL;
 	}
 
-	/* mark it in flight before running, so a cycle inside sees this */
+	/* mark in flight before running, so a cycle inside sees this */
 	table_set(vm, &vm->modules, key, NIL_VAL);
 
 	FILE *file = fopen(path, "rb");
 	if (file == NULL) {
 		vm_runtime_error(vm, "could not open module file '%s'.", raw);
-		/* remove the in-flight marker: the file did not load, and
-		 * leaving it marked would make a later attempt look like a
-		 * cycle rather than a missing file. */
-		table_delete(&vm->modules, key);
+		table_set(vm, &vm->modules, key, FALSE_VAL);
 		vm_pop(vm);
 		free(path);
 		return NIL_VAL;
 	}
-	/* from here every path out must free(path) */
-	/*
-	 * ftell returns -1 on failure, and a module path can just as easily
-	 * be a pipe or a directory as a regular file. Test it before
-	 * storing: as a size_t that -1 becomes SIZE_MAX, the +1 below wraps
-	 * to 0, and the fread writes past a zero byte allocation.
-	 */
+
 	if (fseek(file, 0L, SEEK_END) != 0) {
+		vm_runtime_error(vm, "could not seek in '%s'.", raw);
 		fclose(file);
+		table_set(vm, &vm->modules, key, FALSE_VAL);
+		vm_pop(vm);
 		free(path);
-		vm_runtime_error(
-		        vm, "could not seek in module file '%s'.", raw);
 		return NIL_VAL;
 	}
-	long length = ftell(file);
-	if (length < 0) {
+	long size = ftell(file);
+	if (size < 0) {
+		/*
+		 * ftell returns -1 on failure, and a module path can just as
+		 * easily be a directory or a pipe as a regular file.
+		 */
+		vm_runtime_error(vm, "could not size '%s'.", raw);
 		fclose(file);
+		table_set(vm, &vm->modules, key, FALSE_VAL);
+		vm_pop(vm);
 		free(path);
-		vm_runtime_error(vm, "could not size module file '%s'.", raw);
 		return NIL_VAL;
 	}
-	size_t size = (size_t)length;
-	/* rewind() swallows the seek error; fseek() does not */
+	size_t bytes = (size_t)size;
+	if (bytes >= (size_t)-1) {
+		vm_runtime_error(vm, "'%s' is too large.", raw);
+		fclose(file);
+		table_set(vm, &vm->modules, key, FALSE_VAL);
+		vm_pop(vm);
+		free(path);
+		return NIL_VAL;
+	}
 	if (fseek(file, 0L, SEEK_SET) != 0) {
+		vm_runtime_error(vm, "could not rewind '%s'.", raw);
 		fclose(file);
+		table_set(vm, &vm->modules, key, FALSE_VAL);
+		vm_pop(vm);
 		free(path);
-		vm_runtime_error(vm, "could not rewind module file '%s'.", raw);
 		return NIL_VAL;
 	}
 
-	/* malloc, not ALLOCATE: the buffer is handed to vm_interpret, which
-	 * roots what it needs, and it must survive a collection. */
-	char *buffer = (char *)malloc(size + 1);
+	char *buffer = malloc(bytes + 1);
 	if (buffer == NULL) {
+		vm_runtime_error(vm, "out of memory loading '%s'.", raw);
 		fclose(file);
+		table_set(vm, &vm->modules, key, FALSE_VAL);
+		vm_pop(vm);
 		free(path);
-		vm_runtime_error(vm, "out of memory reading module '%s'.", raw);
 		return NIL_VAL;
 	}
-
-	/* a short read means a directory, a pipe, or a race. an unterminated
-	 * buffer would be handed to the compiler as a truncated script */
-	size_t bytes_read = fread(buffer, 1, size, file);
-	if (bytes_read < size) {
+	size_t got = fread(buffer, 1, bytes, file);
+	if (got < bytes) {
+		/* a short read is a directory, a pipe, or a race. handing a
+		 * truncated buffer to the compiler would be worse. */
+		vm_runtime_error(vm, "could not read '%s'.", raw);
 		free(buffer);
 		fclose(file);
+		table_set(vm, &vm->modules, key, FALSE_VAL);
+		vm_pop(vm);
 		free(path);
-		vm_runtime_error(vm, "could not read module file '%s'.", raw);
 		return NIL_VAL;
 	}
 	/*
-	 * The NUL lands in the byte the +1 above was allocated for. size is
-	 * the same value used in the malloc, so this is in bounds by
-	 * construction; the analyser reports a tainted index because size
-	 * came from ftell on a path the script chose, and it does not tie
-	 * the index back to the allocation.
+	 * In bounds: the allocation above is `bytes + 1`. The analyzer cannot
+	 * tie `bytes` back to it across the ftell/fseek sequence, which is the
+	 * same complaint it makes about the identical read_file() in main.c,
+	 * where the same annotation is already in place.
 	 */
 	/* NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) */
-	buffer[size] = '\0';
+	buffer[bytes] = '\0';
 	fclose(file);
 
 	/*
-	 * vm_interpret below can fail and, worse, can import further modules
-	 * that resolve against *their* importing file. the source directory is
-	 * a single VM-wide setting, so a nested import overwrites it and the
-	 * next import in the outer file would resolve against the wrong
-	 * directory. push the current one, run, restore. this is the
-	 * difference between 'lib/math.fl' meaning one thing and meaning
-	 * whatever the last nested import left behind.
+	 * Push a fresh environment. The module's top-level definitions go
+	 * here and nowhere else, and `vm->globals` points at it for the
+	 * duration, so the bytecode needs no change to be isolated.
 	 */
-	/*
-	 * Snapshot the global names so we can tell which ones the module
-	 * added. only needed for a library, and only for a few hundred
-	 * entries, so the scan is linear and the array is short-lived.
-	 */
-	ObjString **before_keys = NULL;
-	Value *before_vals = NULL;
-	int before_count = 0;
-	bool is_library = strchr(raw, '/') == NULL;
-	if (is_library && vm->globals.count > 0) {
-		before_count = vm->globals.count;
-		before_keys =
-		        malloc(sizeof(ObjString *) * (size_t)before_count);
-		before_vals = malloc(sizeof(Value) * (size_t)before_count);
-		/*
-		 * Both frees, not just the one that failed.
-		 *
-		 * malloc returning NULL for the second call and not the first is
-		 * entirely ordinary, and taking the early return while holding
-		 * the successful one is a leak that only shows up under memory
-		 * pressure -- which is exactly when a leak is most expensive and
-		 * least likely to be noticed. This is the shape clang-analyzer
-		 * flags as a leak on both buffers, and it was a real leak.
-		 */
-		if (before_keys == NULL || before_vals == NULL) {
-			free(before_keys);
-			free(before_vals);
-			free(path);
-			vm_pop(vm);
-			vm_runtime_error(vm, "Out of memory in import.");
-			return NIL_VAL;
-		}
-		/*
-		 * count is decremented as entries are written, not fixed up
-		 * afterwards.
-		 *
-		 * The loop below stops early when it runs out of slots with a
-		 * real key, so a fixed before_count would leave the tail of both
-		 * arrays uninitialised -- and the comparison loops further down
-		 * read up to before_count. Sizing the count to what was actually
-		 * written makes the arrays' extent and the loop bound the same
-		 * number, which is the only way they cannot disagree.
-		 */
-		int written = 0;
-		for (int i = 0;
-		        i < vm->globals.capacity && written < before_count;
-		        i++) {
-			if (vm->globals.entries[i].key == NULL)
-				continue;
-			before_keys[written] = vm->globals.entries[i].key;
-			before_vals[written] = vm->globals.entries[i].value;
-			written++;
-		}
-		before_count = written;
-	}
-
-	InterpretResult res = vm_interpret_named(vm, buffer, path);
-	free(buffer);
-	free(path);
-	if (res != INTERPRET_OK) {
-		free(before_keys);
-		free(before_vals);
-		/* a module that failed partway is not "loaded". drop the
-		 * marker so a retry re-runs it rather than looking like
-		 * a cycle. its partial globals stay, which is flint's
-		 * documented behaviour for a failed import. */
-		table_delete(&vm->modules, key);
+	if (vm->globals_count >= FL_MODULE_DEPTH + 1) {
+		vm_runtime_error(vm,
+		        "modules nested more than %d deep. is an import "
+		        "loop that the cycle check missed?",
+		        FL_MODULE_DEPTH);
+		free(buffer);
+		table_set(vm, &vm->modules, key, FALSE_VAL);
 		vm_pop(vm);
+		free(path);
 		return NIL_VAL;
 	}
 
 	/*
-	 * A library import binds what the module defined to a table named
-	 * after the library, so `import math` gives you `math.sqrt` rather
-	 * than a flat `sqrt` that collides with whatever the caller
-	 * already had.
+	 * Save the importer's environment and install a fresh one.
 	 *
-	 * "what the module defined" is found by diffing the globals table
-	 * across the run, which is crude. it is also honest about why: a
-	 * real export list is a compiler change, and this needs no new
-	 * syntax, no new state, and no second module system. `export` stays
-	 * a convention and this is the one place it is enforced.
+	 * Every import gets a new environment, even two imports in a row at
+	 * the same depth. globals_used is the high-water mark of slots ever
+	 * taken and only grows: reusing a slot would hand the second module
+	 * the first module's table, and its `scale` would already be defined
+	 * as a const -- which is how two unrelated modules ended up reporting
+	 * "cannot redefine constant" against each other's names.
 	 */
-	if (is_library) {
-		ObjTable *bag = new_flint_table(vm);
-		vm_push(vm, OBJ_VAL(bag));
-
-		for (int i = 0; i < vm->globals.capacity; i++) {
-			ObjString *gname = vm->globals.entries[i].key;
-			if (gname == NULL)
-				continue;
-			bool redefined = false;
-			for (int k = 0; k < before_count; k++) {
-				if (before_keys[k] == gname &&
-				        !values_equal(before_vals[k],
-				                vm->globals.entries[i].value)) {
-					redefined = true;
-					break;
-				}
-			}
-			bool existed = false;
-			for (int k = 0; k < before_count; k++) {
-				if (before_keys[k] == gname) {
-					existed = true;
-					break;
-				}
-			}
-			if (existed && !redefined)
-				continue;
-			if (bag->count == bag->capacity) {
-				int old = bag->capacity;
-				bag->capacity = old > 0 ? old * 2 : 8;
-				bag->keys = realloc(bag->keys,
-				        sizeof(ObjString *) *
-				                (size_t)bag->capacity);
-				bag->values = realloc(bag->values,
-				        sizeof(Value) * (size_t)bag->capacity);
-				if (bag->keys == NULL || bag->values == NULL) {
-					/*
-					 * Both frees. `before_keys` and `before_vals`
-					 * are snapshots taken before the module ran,
-					 * still live on this path, and the bag is
-					 * rooted on the value stack so the collector
-					 * will find that one.
-					 */
-					free(before_keys);
-					free(before_vals);
-					vm_pop(vm); /* the bag */
-					vm_runtime_error(
-					        vm, "Out of memory in import.");
-					return NIL_VAL;
-				}
-			}
-			vm_push(vm, STR_VAL(gname));
-			bag->keys[bag->count] = gname;
-			bag->values[bag->count] = vm->globals.entries[i].value;
-			bag->count++;
-			vm_pop(vm);
-		}
-
-		/*
-		 * Bind under the name that was *asked for*, not the
-		 * resolved path. `key` is the interned resolved path, so
-		 * using it here would define a global called
-		 * "lib/math.fl" and leave `math` undefined, which is
-		 * exactly the bug this replaced.
-		 */
-		ObjString *libname = copy_string(vm, raw, (int)strlen(raw));
-		vm_push(vm, STR_VAL(libname));
-		table_set(vm, &vm->globals, libname, OBJ_VAL(bag));
-		vm_pop(vm);
-		vm_pop(vm); /* the bag */
+	Table *saved_globals = vm->globals;
+	int want = vm->globals_used + 1;
+	if (want > vm->globals_capacity) {
+		int old_cap = vm->globals_capacity;
+		int fresh = old_cap * 2;
+		if (fresh < want)
+			fresh = want;
+		Table **grown = GROW_ARRAY(vm,
+		        Table *,
+		        vm->globals_envs,
+		        (size_t)old_cap,
+		        (size_t)fresh);
+		for (int i = old_cap; i < fresh; i++)
+			grown[i] = NULL;
+		vm->globals_envs = grown;
+		vm->globals_capacity = fresh;
 	}
-	free(before_keys);
-	free(before_vals);
+	vm->globals_envs[vm->globals_used] = ALLOCATE(vm, Table, 1);
+	table_init(vm->globals_envs[vm->globals_used]);
+	vm->globals_used++;
+	vm->globals = vm->globals_envs[vm->globals_used - 1];
+	vm->globals_count++;
 
-	table_set(vm, &vm->modules, key, TRUE_VAL);
+	InterpretResult res = vm_interpret_named(vm, buffer, path);
+
+	/* always restore, on every path out. this is the transaction's
+	 * rollback: the importer's names are untouched by whatever the module
+	 * did, whether it succeeded or failed. */
+	vm->globals_count--;
+	vm->globals = saved_globals;
+
+	if (res != INTERPRET_OK) {
+		/*
+		 * The module failed. Nothing it defined was bound anywhere --
+		 * it was never bound into the importer -- so the transaction
+		 * has already rolled back by the restore above, and the cache
+		 * entry is about to record the failure.
+		 *
+		 * The module's own environment is deliberately NOT freed, and
+		 * the slot is kept.
+		 *
+		 * A failed module can still have handed out closures: it ran far
+		 * enough to build them, and it may have stored one somewhere the
+		 * importer can reach. Those closures carry a pointer to this
+		 * environment, and freeing it turns every later call into a
+		 * use-after-free -- which is precisely the class of bug the
+		 * importer-survives-a-failed-module test exists to catch, and
+		 * which ASan caught here first.
+		 *
+		 * Leaving it to the collector is the right answer for a GC
+		 * runtime anyway: unreachable things get reclaimed, reachable
+		 * things stay alive, and no amount of careful bookkeeping here
+		 * can out-guess who held a reference.
+		 */
+		free(buffer);
+		table_set(vm, &vm->modules, key, FALSE_VAL);
+		vm_pop(vm);
+		free(path);
+		return NIL_VAL;
+	}
+
+	/*
+	 * Build the export table from what the module actually exported.
+	 *
+	 * The list comes from the compiler, not from inspecting the
+	 * environment: it emitted an OP_MODULE_EXPORTS naming the names marked
+	 * `export`, so "private" is a decision the module made rather than
+	 * something guessed after the fact.
+	 */
+	ObjTable *bag = new_flint_table(vm);
+	vm_push(vm, OBJ_VAL(bag));
+
+	/* vm->globals_count was decremented above; point at the module's table
+	 * again to read its exports out. */
+	Table *module_env = vm->globals_envs[vm->globals_used - 1];
+	for (int i = 0; i < module_env->capacity; i++) {
+		ObjString *name = module_env->entries[i].key;
+		if (name == NULL)
+			continue;
+		if (!module_env->entries[i].is_exported)
+			continue;
+		Value value = module_env->entries[i].value;
+		vm_push(vm, STR_VAL(name));
+		/* a Flint-level table, so `import geometry` gives
+		 * `geometry.area(5)` through ordinary field access rather
+		 * than through anything import-specific. */
+		if (bag->count == bag->capacity) {
+			int old = bag->capacity;
+			bag->capacity = old > 0 ? old * 2 : 8;
+			bag->keys = GROW_ARRAY(vm,
+			        ObjString *,
+			        bag->keys,
+			        old,
+			        bag->capacity);
+			bag->values = GROW_ARRAY(
+			        vm, Value, bag->values, old, bag->capacity);
+		}
+		bag->keys[bag->count] = name;
+		bag->values[bag->count] = value;
+		bag->count++;
+		vm_pop(vm);
+	}
+
+	free(buffer);
+
+	/* cache the finished module under its resolved path */
+	table_set(vm, &vm->modules, key, OBJ_VAL(bag));
+	vm_pop(vm); /* the bag */
 	vm_pop(vm); /* the key */
-	return TRUE_VAL;
+	free(path);
+	return OBJ_VAL(bag);
 }
 
 /* called from vm_init(), before any user code runs. */

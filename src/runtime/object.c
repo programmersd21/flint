@@ -278,6 +278,9 @@ ObjClosure *new_closure(VM *vm, ObjFunction *function)
 	closure->function = function;
 	closure->upvalues = upvalues;
 	closure->upvalue_count = function->upvalue_count;
+	/* the module being compiled, which is the one whose globals the
+	 * body will resolve names against */
+	closure->module = vm != NULL ? vm->globals : NULL;
 	return closure;
 }
 

@@ -1,0 +1,14 @@
+# sibling.fl -- imported alongside geometry.fl by import.fl.
+#
+# The point of this file is that geometry.fl and this module both have a name
+# called `area` and both have a private scale factor, and neither can see the
+# other's. Under v0.5.0's shared global table, importing both meant the second
+# one loaded overwrote the first and geometry.area quietly used this file's
+# scale factor -- a wrong answer rather than an error.
+let SCALE = 100
+
+export const scale = SCALE
+
+export fn area(w, h) {
+    return w * h * SCALE
+}

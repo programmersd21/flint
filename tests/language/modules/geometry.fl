@@ -8,6 +8,10 @@ export const PI = 3
 
 export let shape = "rectangle"
 
+let SCALE = 1
+
+export const scale = SCALE
+
 export fn describe() {
     return shape
 }

@@ -1,11 +1,18 @@
 # Writing to a global const from a module, and from a const defined in one.
 #
-# Modules share the globals table, so a const exported by one file is
-# read-only for every file that imports it. This cannot be checked by the
-# compiler at all: the import runs at runtime, and it runs before the line
-# below is ever executed.
-import "const_source.fl"
-print(LIMIT)
-print(doubled())
-LIMIT = 99
+# Since 0.6.0 a module has its own namespace, so a const exported by one file
+# is read-only inside that module and is reached as `c.LIMIT` from the
+# importer. The importer cannot assign to it at all: it is not its binding, and
+# assigning through the namespace table would be a second way for one module
+# to reach into another's names.
+import "const_source.fl" as c
+
+print(c.LIMIT)
+print(c.doubled())
+
+# the importer's own copy is an ordinary binding and is writable, which is
+# the other half of the change: an import no longer leaks names into the
+# importer, so there is nothing of the module's here to overwrite.
+let LIMIT = 99
+LIMIT = 100
 print(LIMIT)

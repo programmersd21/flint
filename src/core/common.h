@@ -33,4 +33,18 @@ _Static_assert(sizeof(void *) == 8, "flint requires a 64-bit platform");
 /* constant pool ceiling, which is what a 24-bit index can address. */
 #define MAX_CONSTANTS 16777216
 
+/*
+ * How many modules may be on the import stack at once.
+ *
+ * This is the depth of nested imports -- main importing a, which imports b,
+ * which imports c -- not a limit on how many modules exist. Every module that
+ * has finished loading is popped off and lives in its own heap table, so this
+ * only bounds recursion.
+ *
+ * 64 is generous for hand-written and library code, and the failure is a
+ * diagnostic rather than a crash, which is the property that matters: a
+ * runaway import reports "too deep" instead of exhausting the C stack.
+ */
+#define FL_MODULE_DEPTH 64
+
 #endif /* FL_COMMON_H */

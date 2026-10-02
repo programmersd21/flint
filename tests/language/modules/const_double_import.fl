@@ -1,15 +1,15 @@
 # A module that exports a const, imported twice.
 #
-# the second import re-executes the module, so `export const LIMIT = 10` runs
-# a second time with the same value. That is idempotent and must not be an
-# error, otherwise no module exporting a constant could be imported more than
-# once.
-import "const_source.fl"
-import "const_source.fl"
+# The second import is a cache hit and does not re-run the module, so the
+# const is defined once. That was also true in v0.5.0, where re-running was
+# harmless because re-declaring a const with the same value is idempotent; now
+# it is a lookup rather than a second run, which is stronger and is what makes
+# a module's private state actually private.
+import "const_source.fl" as c
+import "const_source.fl" as c
 
-print(LIMIT)
-print(doubled())
+print(c.LIMIT)
+print(c.doubled())
 
-# and the constant is still read-only in this file, whichever import defined
-# it
-LIMIT = 99
+# and the module is still reachable through its namespace afterwards
+print(c.LIMIT)

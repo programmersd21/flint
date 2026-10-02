@@ -107,8 +107,11 @@ int chunk_add_constant(VM *vm, Chunk *chunk, Value value)
 
 bool chunk_opcode_valid(uint8_t opcode)
 {
-	/* OP_NEG_NUM is the last member. Update this when adding opcodes. */
-	return opcode <= OP_NEG_NUM;
+	/* OP_DEFINE_GLOBAL_CONST_EXPORT_LONG is the last member.
+	 * Update this when adding opcodes -- and note that getting it wrong
+	 * makes every opcode above the true end read as invalid, which is
+	 * what happened once already. */
+	return opcode <= OP_DEFINE_GLOBAL_CONST_EXPORT_LONG;
 }
 
 int chunk_instruction_size(uint8_t opcode)
@@ -207,6 +210,12 @@ int chunk_instruction_size(uint8_t opcode)
 	case OP_GE_NUM:
 	case OP_EQ_NUM:
 	case OP_NEQ_NUM:
+	case OP_DEFINE_GLOBAL_EXPORT:
+	case OP_DEFINE_GLOBAL_CONST_EXPORT:
+		return 2;
+	case OP_DEFINE_GLOBAL_EXPORT_LONG:
+	case OP_DEFINE_GLOBAL_CONST_EXPORT_LONG:
+		return 4;
 	case OP_NEG_NUM:
 		return 1;
 	}

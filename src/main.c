@@ -59,6 +59,50 @@ static void print_banner(VM *vm)
 	printf(":help for what works here, ctrl-d to leave.\n\n");
 }
 
+/*
+ * Is this input a complete program, or the first half of one?
+ *
+ * Depth over the three bracket kinds, tracked through the text with strings
+ * and comments skipped. Double-quoted strings can contain escaped quotes, so
+ * `\"` does not end one. A `#` starts a comment that runs to the newline.
+ * Single quotes are not strings in Flint -- see the scanner -- so they do
+ * not open or close anything here either.
+ *
+ * Returns true when every opener is closed and no string is unterminated.
+ * An unterminated string is incomplete rather than wrong: the user may just
+ * be typing the second half of it on the next line.
+ */
+static bool repl_complete(const char *text)
+{
+	int depth = 0;
+	bool in_string = false;
+	for (const char *p = text; *p != '\0'; p++) {
+		if (in_string) {
+			if (*p == '\\' && p[1] != '\0')
+				p++;
+			else if (*p == '"')
+				in_string = false;
+			continue;
+		}
+		if (*p == '"') {
+			in_string = true;
+		} else if (*p == '#') {
+			while (*p != '\0' && *p != '\n')
+				p++;
+		} else if (*p == '{' || *p == '(' || *p == '[') {
+			depth++;
+		} else if (*p == '}' || *p == ')' || *p == ']') {
+			depth--;
+			/* more closers than openers is a syntax error, not an
+			 * incomplete program. report it now rather than waiting
+			 * for more input that will not fix it. */
+			if (depth < 0)
+				return true;
+		}
+	}
+	return depth == 0 && !in_string;
+}
+
 /* the repl's own commands, kept short because they are not the language */
 static void repl_help(void)
 {
@@ -92,17 +136,72 @@ static int repl(VM *vm)
 	char line[1024];
 	print_banner(vm);
 	for (;;) {
-		if (!vm->quiet)
-			printf("> ");
-		fflush(stdout);
-
-		/* fgets returns NULL on EOF and on error alike. either way
-		 * we are done. */
-		if (!fgets(line, sizeof(line), stdin)) {
+		/*
+		 * Accumulate until the input is complete.
+		 *
+		 * A single physical line is often half a statement -- an open
+		 * brace, an unclosed paren, a function with no body yet. The
+		 * check walks the text tracking depth over { } ( ) [ ], and
+		 * skips over string literals and comments, because a brace
+		 * inside "{" is not an open block and a brace after # is not
+		 * one either. Counting braces blindly would wait for input the
+		 * user already finished, on any string containing one.
+		 *
+		 * Incomplete input prompts with `... ` and keeps reading.
+		 * Complete input executes. An actual syntax error stays an
+		 * error on the first line -- it is not incomplete, it is wrong.
+		 */
+		char buf[8192];
+		size_t used = 0;
+		bool done = false;
+		bool first = true;
+		bool eof = false;
+		while (!done) {
 			if (!vm->quiet)
-				printf("\n");
-			break;
+				printf(first ? "> " : "... ");
+			fflush(stdout);
+			if (used + sizeof(line) > sizeof(buf)) {
+				printf("input too long.\n");
+				break;
+			}
+			if (!fgets(line, sizeof(line), stdin)) {
+				if (!vm->quiet)
+					printf("\n");
+				if (used == 0) {
+					/* EOF with nothing accumulated: the session
+					 * is over. The flag is checked below,
+					 * because `break` here only leaves
+					 * this inner loop. */
+					eof = true;
+					break;
+				}
+				/* EOF mid-block: run what there is, which will
+				 * report the unclosed construct properly. The
+				 * break alone leaves the inner loop with
+				 * `used > 0`, which is what runs it; setting
+				 * `done` here would never be read. */
+				break;
+			}
+			size_t n = strlen(line);
+			memcpy(buf + used, line, n);
+			used += n;
+			buf[used] = '\0';
+			if (repl_complete(buf))
+				done = true;
+			first = false;
 		}
+		/*
+		 * Leave the session, rather than looping back to a prompt that
+		 * can never be answered. Without this the loop reads EOF, finds
+		 * nothing accumulated, breaks out of the *inner* accumulation
+		 * loop, and comes straight back for more input that does not
+		 * exist.
+		 */
+		if (eof)
+			break;
+		if (used == 0)
+			continue;
+		memmove(line, buf, used + 1);
 
 		/* a leading colon is a repl command, not flint, so it
 		 * cannot collide with a variable or a keyword */

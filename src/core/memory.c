@@ -259,7 +259,20 @@ static void mark_roots(VM *vm)
 	}
 
 	/* top-level variables */
-	mark_table(vm, &vm->globals);
+	/*
+	 * Every module environment, not just the one running.
+	 *
+	 * A finished module's bindings stay reachable through whatever
+	 * imported it, and that whatever is usually a table object rather
+	 * than a global name -- so marking only vm->globals would leave every
+	 * closed-over module to be swept while still in use. The imported
+	 * table is marked from that object; these are the module's own
+	 * bindings, which nothing else points at.
+	 */
+	for (int i = 0; i < vm->globals_capacity; i++) {
+		if (vm->globals_envs[i] != NULL)
+			mark_table(vm, vm->globals_envs[i]);
+	}
 
 	/*
 	 * functions being compiled right now. They are not on the stack and

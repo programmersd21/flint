@@ -28,9 +28,23 @@ typedef struct {
 	ObjString *key;
 	Value value;
 	bool is_const; /* set by const, never cleared by assignment */
+	/*
+	 * Marked by `export` in a module.
+	 *
+	 * The flag is on the binding rather than in a side table because it
+	 * is a property of the binding, exactly as is_const is: a module can
+	 * re-bind a name and the question "is this one exported" has to have
+	 * the same answer every time it is asked.
+	 *
+	 * An entry that is exported keeps the flag through a re-bind, so
+	 * `export let x = 1` followed by `x = 2` is still exported. A later
+	 * `let x` in the same module is not an export, because `export` was
+	 * not said -- which is the point of saying it.
+	 */
+	bool is_exported;
 } Entry;
 
-typedef struct {
+typedef struct Table {
 	int count;
 	int capacity; /* always a power of two, so index wraps with & */
 	Entry *entries;
@@ -40,6 +54,32 @@ void table_init(Table *table);
 void table_free(VM *vm, Table *table);
 
 bool table_get(Table *table, ObjString *key, Value *value);
+
+/*
+ * Lookup with a fallback table.
+ *
+ * This exists for one caller and one reason: a module's own globals must not
+ * have to contain `print`, `len` and the rest just to be able to call them.
+ *
+ * When every module got its own table -- which is what module isolation
+ * requires -- a fresh one had no builtins in it, so `import math` produced a
+ * module that could not call anything. Copying the builtins into each module
+ * would work and would be wrong: every module would then be able to assign to
+ * `len`, and a shadow in one file would be invisible in another.
+ *
+ * So a module table is consulted first and the builtins second. A name the
+ * module defines wins, which is correct shadowing, and a name it does not
+ * define resolves to the builtin, which is correct lookup. Assignment still
+ * goes only to the module's own table, so a module can shadow a builtin for
+ * itself without affecting anything else.
+ *
+ * `value` may be NULL when the caller only wants to know whether the name
+ * resolves at all.
+ */
+bool table_get_with_fallback(Table *table,
+                             Table *fallback,
+                             ObjString *key,
+                             Value *value);
 
 /*
  * Insert or overwrite. Never touches the const flag, so overwriting a const
@@ -57,6 +97,22 @@ bool table_set(VM *vm, Table *table, ObjString *key, Value value);
  * const quietly degrades back into a let.
  */
 bool table_define_const(VM *vm, Table *table, ObjString *key, Value value);
+
+/*
+ * Define a binding the module marked `export`.
+ *
+ * Refuses to overwrite an existing name: re-exporting is a mistake, and
+ * silently replacing a public binding is exactly the class of bug 0.6.0's
+ * module work exists to remove.
+ */
+bool table_define_exported(VM *vm,
+                           Table *table,
+                           ObjString *key,
+                           Value value,
+                           bool is_const);
+
+/* Mark an existing binding exported without changing its value. */
+void table_mark_exported(VM *vm, Table *table, ObjString *key);
 
 /*
  * Is this name bound with const? Used by the VM to refuse an assignment, and

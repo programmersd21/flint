@@ -180,6 +180,14 @@ static const char *diag_name;
 static FlDiagSuggestion fixes[64];
 static size_t fix_count;
 
+/*
+ * True while compiling the declaration after an `export` keyword.
+ *
+ * File-scope like the parser state, for the same reason: it describes the
+ * declaration being parsed, and there is exactly one declaration in flight.
+ */
+static bool exporting;
+
 size_t compiler_fix_count(void) { return fix_count; }
 
 const FlDiagSuggestion *compiler_fix_at(size_t index)
@@ -630,6 +638,20 @@ static int identifier_constant(Token *name)
 	        STR_VAL(copy_string(state.vm, name->start, name->length)));
 }
 
+/*
+ * The same, for a name the parser has no token for.
+ *
+ * An import's binding name is sometimes computed rather than read -- the last
+ * path component of "lib/geometry.fl" is "geometry", and there is no token for
+ * it. This exists so that computed name can go through the same interning as
+ * every other identifier, which is what makes field access on it a pointer
+ * compare like any other.
+ */
+static int identifier_constant_from(const char *text, int length)
+{
+	return make_constant(STR_VAL(copy_string(state.vm, text, length)));
+}
+
 static bool identifiers_equal(Token *a, Token *b)
 {
 	return a->length == b->length &&
@@ -852,6 +874,25 @@ static void define_variable(int global, bool is_const)
 {
 	if (state.current->scope_depth > 0) {
 		mark_initialized();
+		return;
+	}
+
+	/*
+	 * `export let x` at the top level. The flag rides along in the opcode's
+	 * spare operand byte rather than in a second opcode, because the
+	 * ordinary case -- an unexported global -- must not grow to serve a
+	 * case most modules do not use.
+	 */
+	if (exporting) {
+		if (is_const) {
+			emit_indexed(OP_DEFINE_GLOBAL_CONST_EXPORT,
+			        OP_DEFINE_GLOBAL_CONST_EXPORT_LONG,
+			        global);
+		} else {
+			emit_indexed(OP_DEFINE_GLOBAL_EXPORT,
+			        OP_DEFINE_GLOBAL_EXPORT_LONG,
+			        global);
+		}
 		return;
 	}
 
@@ -2022,19 +2063,52 @@ static void import_declaration(void)
 	const char *src;
 	int len;
 	Token path_token;
+	bool quoted;
 
 	if (match(TOKEN_STRING)) {
 		path_token = state.parser.previous;
+		quoted = true;
 		/* the quotes are at both ends; the path is what is between */
 		src = path_token.start + 1;
 		len = path_token.length - 2;
 	} else if (match(TOKEN_IDENTIFIER)) {
 		path_token = state.parser.previous;
+		quoted = false;
 		src = path_token.start;
 		len = path_token.length;
 	} else {
 		error("expect a module path or a library name after 'import'.");
 		return;
+	}
+
+	/*
+	 * `import "x.fl" as name` binds the module's exports to `name`.
+	 *
+	 * Without it, the name is the last path component with the .fl
+	 * dropped, or the bare library name. That default is what every
+	 * existing script already spells, so it keeps working; `as` exists for
+	 * the cases where the derived name is wrong or unreadable --
+	 *
+	 *     import "lib/geometry/circle.fl" as geometry
+	 *     import "../shared/util.fl" as util
+	 *
+	 * or simply to say what a file is for when its filename is not that.
+	 */
+	Token alias;
+	bool has_alias = false;
+	if (match(TOKEN_AS)) {
+		alias = state.parser.previous;
+		if (match(TOKEN_IDENTIFIER)) {
+			Token name = state.parser.previous;
+			/* copy the token out; the scanner's buffer moves on */
+			alias.start = name.start;
+			alias.length = name.length;
+			alias.line = name.line;
+			alias.offset = name.offset;
+			has_alias = true;
+		} else {
+			error("expect a name after 'as'.");
+		}
 	}
 	consume_terminator();
 
@@ -2045,30 +2119,131 @@ static void import_declaration(void)
 	        false,
 	        path_token.offset};
 	int fn_const = identifier_constant(&import_fn);
-	emit_indexed(OP_GET_GLOBAL, OP_GET_GLOBAL_LONG, fn_const);
 
+	/*
+	 * Call it: [import_file][path], then OP_CALL 1.
+	 *
+	 * OP_CALL reads the callee at peek(arg_count) -- one slot *below* the
+	 * arguments -- so the callee goes under its argument, not over it.
+	 * Getting this backwards compiles cleanly and calls the path string,
+	 * which fails with "can only call functions" several frames from the
+	 * mistake.
+	 */
+	emit_indexed(OP_GET_GLOBAL, OP_GET_GLOBAL_LONG, fn_const);
 	ObjString *str = copy_string(state.vm, src, len);
 	emit_constant(STR_VAL(str));
-
 	emit_bytes(OP_CALL, 1);
-	emit_byte(OP_POP);
+
+	/*
+	 * Bind the returned table.
+	 *
+	 * This is the line that did not exist before. In v0.5.0 the result was
+	 * popped and discarded, and a library import worked because the loader
+	 * had separately poked a name into the *importer's* table -- which is
+	 * why a module could define things in its importer, and why two
+	 * modules could clobber each other's globals.
+	 *
+	 * Now the module's exports arrive as a table and are bound here, in
+	 * this module, under one name. `import geometry` then means
+	 * `geometry.area(5)` through ordinary field access.
+	 */
+	const char *bind_name;
+	int bind_len;
+	char derived[64];
+
+	if (has_alias) {
+		bind_name = alias.start;
+		bind_len = alias.length;
+	} else if (quoted) {
+		/*
+		 * "lib/geometry.fl" binds as `geometry`: the last component,
+		 * without the extension. Trailing slashes are ignored so
+		 * "lib/geometry/" is not a syntax error for a path nobody
+		 * would write on purpose.
+		 */
+		const char *start = src;
+		const char *end = src + len;
+		while (end > start && end[-1] == '/')
+			end--;
+		const char *slash = end;
+		while (slash > start && slash[-1] != '/')
+			slash--;
+		/*
+		 * Drop the extension. `stop` walks back from the end of the
+		 * component to its last '.', but only when that leaves a name
+		 * behind -- ".fl" must not reduce to nothing, and "a.b.fl" is
+		 * `a.b` rather than `a`.
+		 */
+		const char *stop = end;
+		while (stop > slash + 1 && stop[-1] != '.')
+			stop--;
+		/* back off the dot itself. the loop above stops with `stop`
+		 * one past the '.', because the test reads stop[-1] before
+		 * the decrement, so leaving it there yields "geometry." */
+		if (stop < end && stop[-1] == '.')
+			stop--;
+		size_t n = (size_t)(stop - slash);
+		if (n >= sizeof(derived))
+			n = sizeof(derived) - 1;
+		memcpy(derived, slash, n);
+		derived[n] = '\0';
+		if (n == 0) {
+			error("cannot derive a name from this import path. "
+			      "use 'as'.");
+			emit_byte(OP_POP);
+			return;
+		}
+		bind_name = derived;
+		bind_len = (int)n;
+	} else {
+		bind_name = src;
+		bind_len = len;
+	}
+
+	/*
+	 * OP_DEFINE_GLOBAL takes the name as an operand and defines whatever
+	 * is on top of the stack, which right now is the import's result
+	 * table. Nothing else needs pushing: pushing the name as well would
+	 * make it the value being defined, and `math` would be the string
+	 * "math".
+	 */
+	emit_indexed(OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_LONG,
+	        identifier_constant_from(bind_name, bind_len));
 }
 
 /*
  * export fn / let / const
  *
- * There is no module namespace. The declaration is compiled exactly as if
- * the export keyword were not there and lands in the shared globals table,
- * which is why `export` can simply parse the declaration and step aside.
+ * `export` is a flag, not a namespace. The declaration is compiled exactly as
+ * if the keyword were not there -- it lands in this module's own globals, like
+ * any other top-level name -- and the name is additionally marked so the
+ * loader will put it in the table the importer receives.
+ *
+ * That is the smallest thing that makes `export` mean something. The previous
+ * implementation parsed the declaration and stepped aside, and the "exports"
+ * were whatever the module had added to the shared global table, discovered by
+ * diffing that table across the run. Diffing cannot tell a helper from an
+ * export: both are just a name that appeared. So `export` marked intent and
+ * nothing else, and a module's private function was as visible as its public
+ * one.
+ *
+ * Marking the binding at compile time makes the distinction the module
+ * actually wrote down.
  */
 static void export_declaration(void)
 {
 	if (match(TOKEN_FN)) {
+		exporting = true;
 		fn_declaration();
+		exporting = false;
 	} else if (match(TOKEN_LET)) {
+		exporting = true;
 		let_declaration();
+		exporting = false;
 	} else if (match(TOKEN_CONST)) {
+		exporting = true;
 		const_declaration();
+		exporting = false;
 	} else {
 		error("expect 'fn', 'let', or 'const' after 'export'.");
 	}

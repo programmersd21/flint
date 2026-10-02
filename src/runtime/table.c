@@ -77,6 +77,7 @@ static void adjust_capacity(VM *vm, Table *table, int capacity)
 		entries[i].key = NULL;
 		entries[i].value = NIL_VAL;
 		entries[i].is_const = false;
+		entries[i].is_exported = false;
 	}
 
 	/*
@@ -93,8 +94,13 @@ static void adjust_capacity(VM *vm, Table *table, int capacity)
 		dest->key = entry->key;
 		dest->value = entry->value;
 		/* const has to survive a rehash, or a table that grows
-		 * after a const was defined would silently make it writable */
+		 * after a const was defined would silently make it writable.
+		 * The same is true of the export flag: a module that defines
+		 * thirty exports and then grows its table would otherwise lose
+		 * whichever ones happened to move, and the importer would see a
+		 * module missing exports it plainly has. */
 		dest->is_const = entry->is_const;
+		dest->is_exported = entry->is_exported;
 		table->count++;
 	}
 
@@ -112,14 +118,30 @@ bool table_get(Table *table, ObjString *key, Value *value)
 	if (entry->key == NULL)
 		return false;
 
-	*value = entry->value;
+	if (value != NULL)
+		*value = entry->value;
 	return true;
+}
+
+bool table_get_with_fallback(Table *table,
+                             Table *fallback,
+                             ObjString *key,
+                             Value *value)
+{
+	if (table_get(table, key, value))
+		return true;
+	if (fallback == NULL)
+		return false;
+	return table_get(fallback, key, value);
 }
 
 /*
  * Find the entry for a write, growing first if the table is at its load
  * factor. Reports whether the key was absent, which is what tells `let` from
  * assignment.
+ *
+ * `is_new` may be NULL when the caller does not care -- the export path, for
+ * one, has already checked whether the name exists and only wants the slot.
  *
  * The growth and the count bookkeeping live here rather than in table_set()
  * because there are two ways to write and both have to do them identically.
@@ -135,8 +157,10 @@ static Entry *entry_for_write(
 	Entry *entry = find_entry(table->entries, table->capacity, key);
 
 	/* reusing a tombstone does not increase the count */
-	*is_new = entry->key == NULL;
-	if (*is_new && IS_NIL(entry->value))
+	bool fresh = entry->key == NULL;
+	if (is_new != NULL)
+		*is_new = fresh;
+	if (fresh && IS_NIL(entry->value))
 		table->count++;
 
 	return entry;
@@ -177,6 +201,52 @@ bool table_set(VM *vm, Table *table, ObjString *key, Value value)
  * rather than contradicting it, and refusing that would be a rule with no
  * principle behind it.
  */
+/*
+ * Define a global that the module marked `export`.
+ *
+ * Separate from table_set() rather than a flag parameter, for the same reason
+ * table_define_const() is: the two have opposite opinions about what happens
+ * to an existing binding, and folding that into a mode flag is how a const
+ * quietly degrades back into a let. This one refuses to overwrite an existing
+ * name, because re-exporting is a mistake rather than an intention.
+ *
+ * Marking is separate again, because a re-bind of an already-exported name
+ * stays exported -- `export let x` then `x = 2` is still exported -- and that
+ * is table_mark_exported().
+ */
+bool table_define_exported(VM *vm,
+                           Table *table,
+                           ObjString *key,
+                           Value value,
+                           bool is_const)
+{
+	if (table_get(table, key, NULL))
+		return false;
+	Entry *entry = entry_for_write(vm, table, key, NULL);
+	entry->key = key;
+	entry->value = value;
+	entry->is_const = is_const;
+	entry->is_exported = true;
+	return true;
+}
+
+/*
+ * Mark an existing binding exported without changing its value.
+ *
+ * This is the path for `export fn`, where the function's closure is already
+ * on the stack and the binding may already exist from an earlier declaration.
+ */
+void table_mark_exported(VM *vm, Table *table, ObjString *key)
+{
+	(void)vm;
+	for (int i = 0; i < table->capacity; i++) {
+		if (table->entries[i].key == key) {
+			table->entries[i].is_exported = true;
+			return;
+		}
+	}
+}
+
 bool table_define_const(VM *vm, Table *table, ObjString *key, Value value)
 {
 	if (table_is_const(table, key))

@@ -1,38 +1,53 @@
 # modules.
 #
-# import paths are resolved against the process working directory, not against
-# the importing file, so these are repo-root-relative. That is a known
-# limitation; see import_declaration() in src/frontend/compiler.c.
+# Every module has its own namespace, so an import binds one name to the
+# module's exports and nothing else. `import "helper.fl"` means
+# `helper.square`, not a bare `square`.
+#
+# This is the change from v0.5.0, where every file shared one global table
+# and an import dumped the module's names into the importer. Two modules with
+# a private helper of the same name silently overwrote each other; now they
+# cannot.
 
-# the basic case: a name from another file is just a global afterwards
 import "helper.fl"
-print(square(6))
 
-# an exported constant and an exported variable
-print(LIMIT)
-print(counter)
+# the module's exports, under the module's name
+print(helper.square(6))
+print(helper.LIMIT)
+print(helper.counter)
 
-# a function from the module calling another function from the same module.
-# this is the one that used to segfault: the module's OP_RETURN unwound the
-# frame of the script that was still running, so the dispatch loop kept
-# going and ran the rest of this file a second time.
-print(hypotenuse_sq(3, 4))
+# a name the module did not export is not visible, which is the point
+print(helper.secret)
 
-# two modules in one script, with work after each import
+# an exported function calling another exported one, after the module's own
+# frame has long since gone
+print(helper.hypotenuse_sq(3, 4))
+
+# two modules in one script, each with a private name of its own
 import "geometry.fl"
-print(describe())
-print(square(9))
+import "sibling.fl"
+print(geometry.area(3, 4))
+print(geometry.describe())
+print(sibling.area(3, 4))
+# the same exported name in both modules, with different values. under a shared
+# global table these could not both exist.
+print(geometry.scale)
+print(sibling.scale)
+
+# a repeated import is a lookup, not a second run
+import "helper.fl"
+print(helper.counter)
 
 # import inside a function. the import reenters the interpreter with a frame
 # already on the stack, which is the case run() has to unwind correctly.
 fn load_and_use() {
 	import "helper.fl"
-	return square(5)
+	return helper.square(5)
 }
 print(load_and_use())
 
 # and the module's functions still work afterwards
-print(square(7))
+print(helper.square(7))
 
 # local variables before and after an import must survive it
 let before = 1
@@ -41,3 +56,7 @@ import "helper.fl"
 let after = 2
 print(after)
 print(before + after)
+
+# an explicit alias, for a path whose last component is not the name you want
+import "geometry.fl" as shapes
+print(shapes.area(2, 5))
