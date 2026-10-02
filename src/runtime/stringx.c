@@ -362,7 +362,7 @@ static Value starts_with_native(VM *vm, int argc, Value *argv)
 		return FALSE_VAL;
 	return memcmp(s->chars, pre->chars, (size_t)pre->length) == 0
 	               ? TRUE_VAL
-	               : FALSE_VAL;
+		       : FALSE_VAL;
 }
 
 /* ends_with(s, suffix) -> bool */
@@ -380,7 +380,7 @@ static Value ends_with_native(VM *vm, int argc, Value *argv)
 	               suf->chars,
 	               (size_t)suf->length) == 0
 	               ? TRUE_VAL
-	               : FALSE_VAL;
+		       : FALSE_VAL;
 }
 
 /*

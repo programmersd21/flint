@@ -130,6 +130,6 @@ void fl_profile_report(void *out_handle, const FlCounters *c)
 		        c->gc_cycles > 0
 		                ? ((double)c->bytes / (double)c->gc_cycles) /
 		                          1024.0
-		                : (double)c->bytes / 1024.0);
+				: (double)c->bytes / 1024.0);
 	}
 }

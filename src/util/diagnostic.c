@@ -282,7 +282,7 @@ static void emit_human(
 {
 	const char *paint =
 	        color ? (d->severity == FL_DIAG_ERROR ? "\033[31m" : "\033[33m")
-	              : "";
+		      : "";
 	const char *reset = color ? "\033[0m" : "";
 	/* secondary spans get a dim cyan rather than the severity colour:
 	 * the severity belongs to the thing being complained about, and a
