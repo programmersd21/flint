@@ -11,7 +11,12 @@ on:
 jobs:
   build:
     name: build and test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    # Pinned rather than floating. ubuntu-latest migrates without warning --
+    # it is scheduled to become 26.04 -- and a new runner image means new
+    # preinstalled compilers, which is how a green build goes red with no
+    # code changing. Bump deliberately, after watching a full run go green
+    # on the new image.
     strategy:
       matrix:
         compiler: [gcc, clang]
@@ -23,7 +28,9 @@ jobs:
       LLVM_MAJOR: '24'
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
+      # v4 targets Node 20, which the runners now shim with a deprecation
+      # notice on every job. v5 targets the current runtime.
 
     - name: set compiler
       run: |
