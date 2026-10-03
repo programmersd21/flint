@@ -1,44 +1,12 @@
 # releases
 
-## unreleased
-
-### `flint sync`
-
-updating the standard library no longer requires a rebuild. `flint sync`
-downloads the library from the project's github and installs it into
-`~/.flint/stdlib`. every file is compiled in the binary before it is
-renamed over the old one, so a truncated transfer or a 404 leaves the old
-files alone; identical files are left alone. `--dry-run` shows the change
-set without writing, and `--ref=v0.7.0` pins to a release tag. a module
-whose imports fail verification is skipped with a suggestion to pin the
-reference and bump flint itself.
-
-### `http`
-
-`import http` is a new client for requests. `http.get`, `http.post`,
-`http.put`, `http.delete`, `http.request`, and `http.get_json` cover the
-orthodox cases. `http://` is handled by a small built-in client -- the
-one new piece of libc facing code this release adds -- and `https://`
-delegates to `curl(1)`, because https is TLS and TLS is not something to
-reimplement in a dependency-free language. results are tables: `ok`,
-`status`, `headers`, `body`, `url`, `redirects`, `error`.
-
-### module exports fix
-
-a module that imported a sibling module could be exported under the
-*sibling's* name set. `import_file` built a module's export table from
-`globals_envs[globals_used - 1]`, but a nested import pushes the nested
-module's env on top, shifting the index. `http.fl`, the first
-shipped module to import a sibling (`json`), surfaced the bug at
-imported-by-two-degrees depth. The module's env is now held by pointer.
-covered by a regression test that checks the export keys of a module
-with a sibling import.
-
 ## v0.7.0
 
 a daily-use release. the language learns to talk to the operating system,
-tables learn to be iterated, and two small syntax additions cover the config
-patterns every script rewrites by hand.
+tables learn to be iterated, two small syntax additions cover the config
+patterns every script rewrites by hand, and the library stops needing a
+rebuild: `flint sync` updates it in place, and `import http` means a script
+can talk to the network.
 
 ### os and process
 
@@ -88,6 +56,38 @@ right-associative, looser than `or`, tighter than `=`.
 `let {host, port} = config` binds each name from the table's fields. flat
 names only; missing keys read nil; `const` works the same way.
 
+### `flint sync`
+
+updating the standard library no longer requires a rebuild. `flint sync`
+downloads the library from the project's github and installs it into
+`~/.flint/stdlib`. every file is compiled in the binary before it is
+renamed over the old one, so a truncated transfer or a 404 leaves the old
+files alone; identical files are left alone. `--dry-run` shows the change
+set without writing, and `--ref=v0.7.0` pins to a release tag. a module
+whose imports fail verification is skipped with a suggestion to pin the
+reference and bump flint itself.
+
+### `http`
+
+`import http` is a new client for requests. `http.get`, `http.post`,
+`http.put`, `http.delete`, `http.request`, and `http.get_json` cover the
+orthodox cases. `http://` is handled by a small built-in client -- the
+one new piece of libc facing code this release adds -- and `https://`
+delegates to `curl(1)`, because https is TLS and TLS is not something to
+reimplement in a dependency-free language. results are tables: `ok`,
+`status`, `headers`, `body`, `url`, `redirects`, `error`.
+
+### module exports fix
+
+a module that imported a sibling module could be exported under the
+*sibling's* name set. `import_file` built a module's export table from
+`globals_envs[globals_used - 1]`, but a nested import pushes the nested
+module's env on top, shifting the index. `http.fl`, the first
+shipped module to import a sibling (`json`), surfaced the bug at
+imported-by-two-degrees depth. The module's env is now held by pointer.
+covered by a regression test that checks the export keys of a module
+with a sibling import.
+
 ### deliberately not shipped
 
 `defer` was evaluated and deferred. its motivating example needs file
@@ -102,10 +102,11 @@ no native loader, no JIT, per the plan.
 
 ### gate
 
-49 tests on release under gcc and clang, on the computed-goto build, and
+63 tests on release under gcc and clang, on the computed-goto build, and
 under ASan + UBSan + GC-on-every-allocation -- plus new tests for every
 feature above. diagnostics, unit tests, clang-tidy, clang-format,
-trailing-newline check clean. every example runs.
+trailing-newline check clean. every example runs. `flint sync` is
+exercised against the live repository and a local mirror.
 
 ## v0.6.1
 
