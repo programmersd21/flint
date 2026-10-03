@@ -974,6 +974,8 @@ static void expression(void);
 static void statement(void);
 static void declaration(void);
 static void let_destructure(bool is_const);
+static void fn_declaration(void);
+static void anonymous_function(bool can_assign);
 static void block(void);
 static ParseRule *get_rule(TokenType type);
 static void parse_precedence(Precedence precedence);
@@ -1550,7 +1552,7 @@ static ParseRule rules[] = {
         [TOKEN_ELSE] = {NULL, NULL, PREC_NONE},
         [TOKEN_EXPORT] = {NULL, NULL, PREC_NONE},
         [TOKEN_FALSE] = {literal, NULL, PREC_NONE},
-        [TOKEN_FN] = {NULL, NULL, PREC_NONE},
+        [TOKEN_FN] = {anonymous_function, NULL, PREC_NONE},
         [TOKEN_FOR] = {NULL, NULL, PREC_NONE},
         [TOKEN_IF] = {NULL, NULL, PREC_NONE},
         [TOKEN_IMPORT] = {NULL, NULL, PREC_NONE},
@@ -2247,13 +2249,19 @@ static void statement(void)
  * captured variable: 1 for a local slot in this frame, 0 for an upvalue of
  * this closure. That is exactly what resolve_upvalue() recorded.
  */
-static void fn_declaration(void)
+/*
+ * The parameter list and body of a function, for both spellings:
+ * `fn name(a, b) { ... }` and the anonymous expression `fn(a, b) { ... }`.
+ *
+ * The compiler is on the stack when this returns, and the caller's
+ * `end_compiler()` pops it. `compiler` is where the upvalue descriptors
+ * land, and the caller emits them right after OP_CLOSURE.
+ */
+static void fn_signature(Compiler *compiler, Token name)
 {
-	int global = parse_variable("expect function name.", false);
-	mark_initialized();
-
-	Compiler compiler;
-	init_compiler(&compiler, TYPE_FUNCTION);
+	init_compiler(compiler, TYPE_FUNCTION);
+	compiler->function->name =
+	        copy_string(state.vm, name.start, name.length);
 	begin_scope();
 
 	consume(TOKEN_LEFT_PAREN, "expect '(' after function name.");
@@ -2272,6 +2280,17 @@ static void fn_declaration(void)
 	consume(TOKEN_RIGHT_PAREN, "expect ')' after parameters.");
 	consume(TOKEN_LEFT_BRACE, "expect '{' before function body.");
 	block();
+}
+
+static void fn_declaration(void)
+{
+	int global = parse_variable("expect function name.", false);
+	mark_initialized();
+
+	Compiler compiler;
+	/* the name token the function was declared with, for the trace */
+	Token name = state.parser.previous;
+	fn_signature(&compiler, name);
 
 	ObjFunction *function = end_compiler();
 	int constant = make_constant(OBJ_VAL(function));
@@ -2284,6 +2303,32 @@ static void fn_declaration(void)
 	}
 
 	define_variable(global, false);
+}
+
+/*
+ * fn(a, b) { ... } as an expression, so a function can be a value:
+ * passed to another function, returned from one, or stored in a list.
+ *
+ * The value is the closure itself, on the stack, exactly where an
+ * expression is expected. `<anonymous>` is the name a stack trace shows:
+ * there is no name in the source to show, and an empty one would print
+ * as a bare `()`, which reads like a mistake.
+ */
+static void anonymous_function(bool can_assign)
+{
+	(void)can_assign;
+	Token anon = token_string("<anonymous>");
+
+	Compiler compiler;
+	fn_signature(&compiler, anon);
+
+	ObjFunction *function = end_compiler();
+	int constant = make_constant(OBJ_VAL(function));
+	emit_indexed(OP_CLOSURE, OP_CLOSURE_LONG, constant);
+	for (int i = 0; i < function->upvalue_count; i++) {
+		emit_byte(compiler.upvalues[i].is_local ? 1 : 0);
+		emit_byte(compiler.upvalues[i].index);
+	}
 }
 
 /* let, with or without an initializer. no initializer means nil. */

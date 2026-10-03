@@ -25,6 +25,31 @@ fn double(n) { return n * 2 }
 print(twice(double, 5))    # 20
 ```
 
+a function literal is also an expression, so a function can exist without ever
+being named:
+
+```flint
+let square = fn(x) { return x * x }
+print(square(5))           # 25
+
+fn apply(f, v) { return f(v) }
+print(apply(fn(x) { return x + 1 }, 41))    # 42
+```
+
+the anonymous form captures whatever the named one does, so a closure returned
+from a function works the same either way:
+
+```flint
+fn adder(base) {
+    return fn(x) { return base + x }
+}
+print(adder(10)(5))    # 15
+```
+
+use the named form when the function is called from more than one place, since
+a name is what a stack trace shows. the anonymous form names itself
+`<anonymous>` in traces.
+
 ## arity
 
 the number of parameters is checked when the call happens, not when the file is
@@ -135,8 +160,10 @@ print(adders[2](1))    # 21
 
 ## naming
 
-the value of a `fn` when printed is `<fn name>`, or `<script>` for an anonymous
-one, so a stack trace tells you which function failed.
+the value of a `fn` when printed is `<fn name>`, or `<script>` for the top-level
+code. an anonymous function has no name in the source, so a stack trace shows
+`<anonymous>`, which tells you the function is a literal without pretending to
+know which one it was.
 
 ## what is not a function
 

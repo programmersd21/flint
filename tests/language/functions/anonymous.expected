@@ -1,0 +1,13 @@
+list index 5 out of bounds (len 1).
+[line 61] in <anonymous>()
+[line 13] in apply()
+[line 61] in nothing()
+[line 63] in script
+25
+16
+15
+42
+120
+0
+1
+caught: list index 10 out of bounds (len 2).

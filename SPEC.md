@@ -51,6 +51,7 @@ declaration    = fnDecl | letDecl | constDecl | importDecl | exportDecl | statem
 letDecl        = "let" IDENTIFIER ( "=" expression )? terminator ;
 constDecl      = "const" IDENTIFIER "=" expression terminator ;
 fnDecl         = "fn" IDENTIFIER "(" parameters? ")" "{" block "}" ;
+fnExpr         = "fn" "(" parameters? ")" "{" block "}" ;
 importDecl     = "import" STRING terminator ;
 exportDecl     = "export" ( fnDecl | letDecl | constDecl ) ;
 
@@ -102,10 +103,15 @@ loosest to tightest:
 10. type assertion: `as`
 11. unary: `!`, `not`, `-`
 12. call, subscript, field: `()`, `[]`, `.`
-13. primary: literals, identifiers, grouping, list, table
+13. primary: literals, identifiers, grouping, list, table, function literal
 
 `<=` is not `!(>)`. `NaN` is unordered, so the two forms differ on NaN and the
 compiler emits a separate opcode for each.
+
+A function literal (`fnExpr` above) is a primary expression: `fn(x) { return x }`
+evaluates to a closure, and the same rules for parameters, returns, closures and
+naming apply as for a declared function. An unnamed function reports itself as
+`<anonymous>` in a stack trace.
 
 ### type assertions
 
