@@ -1,0 +1,63 @@
+# Functions as values.
+#
+# `fn(a, b) { ... }` is an expression, so a function can be passed, returned
+# or stored like any other value. The named form stays for the common case:
+# it reads better at the top level, and its name is what a stack trace shows.
+
+let square = fn(x) {
+	return x * x
+}
+print(square(5))
+
+fn apply(f, v) {
+	return f(v)
+}
+print(apply(square, 4))
+
+# a closure returned from a function, capturing its parameter
+fn adder(base) {
+	return fn(x) {
+		return base + x
+	}
+}
+print(adder(10)(5))
+
+# immediately applied, with no binding at all
+print(apply(fn(x) { return x + 1 }, 41))
+
+# recursion works through the name the value was bound to
+let fact = fn(n) {
+	if n <= 1 {
+		return 1
+	}
+	return n * fact(n - 1)
+}
+print(fact(5))
+
+# two closures over one variable stay independent
+fn counters() {
+	let out = []
+	let i = 0
+	while i < 2 {
+		let captured = i
+		push(out, fn() { return captured })
+		i += 1
+	}
+	return out
+}
+let cs = counters()
+print(cs[0]())
+print(cs[1]())
+
+# an error raised inside an anonymous function is an ordinary error
+try {
+	apply(fn(x) { return [1, 2][10] }, 1)
+} catch e {
+	print("caught: " + e.message)
+}
+
+# an uncaught one names the function in the trace
+fn nothing() {
+	return apply(fn(x) { return [1][5] }, 0)
+}
+nothing()

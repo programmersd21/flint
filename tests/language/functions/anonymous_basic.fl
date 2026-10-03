@@ -1,0 +1,31 @@
+# The short version of anonymous.fl, without the uncaught error at the end,
+# so the last thing the suite does with this feature is a success.
+
+let square = fn(x) {
+	return x * x
+}
+print(square(5))
+
+fn apply(f, v) {
+	return f(v)
+}
+print(apply(square, 4))
+print(apply(fn(x) { return x + 1 }, 41))
+
+fn adder(base) {
+	return fn(x) {
+		return base + x
+	}
+}
+print(adder(10)(5))
+
+# named and anonymous functions are the same kind of value
+fn named(x) {
+	return x - 1
+}
+print(apply(named, 10))
+print(apply(fn(x) { return x - 1 }, 10))
+
+# zero-argument anonymous function
+let now = fn() { return 42 }
+print(now())
