@@ -1,20 +1,15 @@
-# Flint 0.8.0 Packages & Toolchain
+# Packages
 
-Flint 0.8.0 features integrated project management and toolchain commands.
+0.8.0 does not have a package manager, a registry or a lockfile. This file
+stays as the place those will be documented once they exist, and describes
+only what is true today.
 
-## Package Manifest (`flint.toml`)
-```toml
-[package]
-name = "my_app"
-version = "1.0.0"
+Today the only ways to get code into a script are:
 
-[dependencies]
-```
+* `import "lib/util.fl"` for a source-relative module file
+* a standard-library module by name from the usual lookup path
+  (`$FLINT_STDLIB`, `<exe-dir>/lib`, `~/.flint/stdlib`)
+* `flint sync` to refresh the installed copy of the standard library
 
-## Toolchain Commands
-- `flint run`: Execute scripts or project entry point.
-- `flint check`: Run static verification and linting.
-- `flint test`: Discover and run test suites.
-- `flint fmt`: Format Flint source files deterministically.
-- `flint lint`: Report potential bugs, dead code, and style issues.
-- `flint sync`: Synchronize standard library files.
+A future `flint.toml` / `flint.lock` / `flint install` workflow is planned,
+but nothing here should be quoted in an issue or wiki page as if it exists.
