@@ -1,0 +1,46 @@
+# Ranges: a..b is half-open, and a..b..s steps the difference.
+#
+# A range captures at the moment it is iterated rather than allocating a list
+# of every value, so the loop never builds what `for` would have discarded.
+
+for i in 0..5 {
+	print(i)
+}
+print("---")
+
+# a step changes the stride, and a negative one runs the range backwards
+for i in 0..10..3 {
+	print(i)
+}
+print("---")
+
+for i in 10..0..-5 {
+	print(i)
+}
+print("---")
+
+# a range whose start has already passed its end is empty, and so is one
+# stepped the wrong way
+for i in 5..5 {
+	print("never")
+}
+for i in 0..5..-1 {
+	print("never")
+}
+print("empty ok")
+
+# ...and a step that is zero is refused before the loop, or it would loop
+# forever
+try {
+	for i in 0..10..0 {
+		print(i)
+	}
+} catch e {
+	print("caught: " + e.message)
+}
+
+# a step can be a variable and a negative literal both
+let s = -2
+for i in 4..-1..s {
+	print(i)
+}

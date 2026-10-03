@@ -978,8 +978,7 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "ProcessError", process_error_ctor, 1);
 	vm_define_native(vm, "ModuleError", module_error_ctor, 1);
 	vm_define_native(vm, "PackageError", package_error_ctor, 1);
-	vm_define_native(
-	        vm, "__range_step_error", range_step_error_native, 0);
+	vm_define_native(vm, "__range_step_error", range_step_error_native, 0);
 	/* -1 for the arity because input() takes zero or one argument, and
 	 * a fixed-arity native cannot express that. the check is inside. */
 	vm_define_native(vm, "input", input_native, -1);
