@@ -81,7 +81,9 @@ An error is a table with `type` (a string naming the category) and `message`
 (a string) fields. The constructors `Error`, `TypeError`, `ValueError`,
 `IOError`, `NetworkError`, `TimeoutError`, `ProcessError`, `ModuleError` and
 `PackageError` build these tables. `throw` accepts any value, not just
-error tables.
+error tables. A runtime error picks its category from its message -- an
+index failure is a `ValueError`, a type disagreement a `TypeError` -- so
+caught runtime errors carry the same shape as thrown ones.
 
 `for x in expr` iterates a list, a string (one byte per step), or a range
 when `expr` contains `..`. ranges are half-open: `1..5` is 1, 2, 3, 4.

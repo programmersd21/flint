@@ -1,13 +1,14 @@
 # args -- the command line your script was called with.
 #
-#     import args
-#     print(args.count())
-#     print(args.get(0))
+#     import args as argv
+#     print(argv.count())
+#     print(argv.get(0))
 #
-# the builtin `args()` returns the script's argv without the interpreter's
-# own arguments. this module wraps it so a script can ask the common
-# questions without re-writing the loop each time: how many arguments, and
-# whether one of them is a known flag.
+# the alias is not optional style: a bare `import args` binds `args` in your
+# globals, which shadows the builtin `args()` this module is built on, and
+# every function below then tries to call a table. alias it and both names
+# stay usable.
+#
 
 export fn all() {
     return args()

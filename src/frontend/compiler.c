@@ -2900,16 +2900,22 @@ static void import_declaration(void)
 		 * Drop the extension. `stop` walks back from the end of the
 		 * component to its last '.', but only when that leaves a name
 		 * behind -- ".fl" must not reduce to nothing, and "a.b.fl" is
-		 * `a.b` rather than `a`.
+		 * `a.b` rather than `a`. With no dot at all the whole
+		 * component is the name: "shapes" binds `shapes`, not `s`.
 		 */
 		const char *stop = end;
 		while (stop > slash + 1 && stop[-1] != '.')
 			stop--;
 		/* back off the dot itself. the loop above stops with `stop`
 		 * one past the '.', because the test reads stop[-1] before
-		 * the decrement, so leaving it there yields "geometry." */
+		 * the decrement, so leaving it there yields "geometry.". when
+		 * the loop stopped for lack of a dot rather than finding one,
+		 * `stop` is at slash + 1 and the whole component -- which is
+		 * what `n` below must measure -- is kept. */
 		if (stop < end && stop[-1] == '.')
 			stop--;
+		else if (stop == slash + 1)
+			stop = end;
 		size_t n = (size_t)(stop - slash);
 		if (n >= sizeof(derived))
 			n = sizeof(derived) - 1;

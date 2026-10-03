@@ -660,6 +660,102 @@ static void report_pending(VM *vm)
 	clear_pending(vm);
 }
 
+/*
+ * Classify a failure message into one of the documented error types, so
+ * `catch e { e.type }` is useful: a type mismatch is TypeError, a bad
+ * value is ValueError, an indigestible document is ParseError, a network
+ * transport failure is NetworkError, a process failure is ProcessError,
+ * a module problem is ModuleError, a file system problem is IOError, and
+ * everything else is a plain Error.
+ *
+ * Match is by the literal prefix the VM and the natives emit, which is why
+ * these are patterns over strings and not a second argument to every caller:
+ * the classification stays in one place rather than in sixty call sites.
+ */
+static const char *error_type_for(const char *message)
+{
+	/* json and parsing */
+	if (strstr(message, "invalid json:") == message ||
+	        strstr(message, "json:") == message)
+		return "ParseError";
+
+	/* network */
+	if (strstr(message, "http error:") == message ||
+	        strstr(message, "transport failure") != NULL ||
+	        strstr(message, "could not resolve") != NULL ||
+	        strstr(message, "URL must start") != NULL)
+		return "NetworkError";
+
+	/* processes */
+	if (strstr(message, "process.run") == message ||
+	        strstr(message, "cannot fork") != NULL ||
+	        strstr(message, "cannot exec") != NULL ||
+	        strstr(message, "process exited") != NULL)
+		return "ProcessError";
+
+	/* modules */
+	if (strstr(message, "cannot resolve module path") == message ||
+	        strstr(message, "import cycle:") == message ||
+	        strstr(message, "module '") == message ||
+	        strstr(message, "could not open module file") != NULL ||
+	        strstr(message, "could not seek in") != NULL ||
+	        strstr(message, "could not size") != NULL ||
+	        strstr(message, "could not rewind") != NULL ||
+	        strstr(message, "could not read") != NULL ||
+	        strstr(message, "out of memory loading") != NULL ||
+	        strstr(message, "imports failed") != NULL ||
+	        strstr(message, "expected %d arguments but got"))
+		return "ModuleError";
+
+	/* files and operating-system boundaries */
+	if (strstr(message, "cannot read") != NULL ||
+	        strstr(message, "cannot write") != NULL ||
+	        strstr(message, "cannot remove") != NULL ||
+	        strstr(message, "cannot mkdir") != NULL ||
+	        strstr(message, "cannot rename") != NULL ||
+	        strstr(message, "cannot move") != NULL ||
+	        strstr(message, "cannot chdir") != NULL ||
+	        strstr(message, "cannot getcwd") != NULL ||
+	        strstr(message, "cannot stat") != NULL ||
+	        strstr(message, "could not open") != NULL ||
+	        strstr(message, "could not seek") != NULL ||
+	        strstr(message, "could not size") != NULL ||
+	        strstr(message, "could not rewind") != NULL ||
+	        strstr(message, "is too large") != NULL ||
+	        strstr(message, "could not list") != NULL ||
+	        strstr(message, "could not create") != NULL)
+		return "IOError";
+
+	if (strstr(message, "out of memory") != NULL)
+		return "Error";
+
+	/* a type name disagreement */
+	if (strstr(message, "must be") != NULL ||
+	        strstr(message, "only tables have fields") != NULL ||
+	        strstr(message, "can only call functions") != NULL ||
+	        strstr(message, "operands must be") != NULL ||
+	        strstr(message, "expected type '") != NULL ||
+	        strstr(message, "argument to") != NULL ||
+	        strstr(message, "first argument to") != NULL ||
+	        (strstr(message, "cannot redefine constant") == NULL &&
+	                strstr(message, "cannot assign to constant") != NULL))
+		return "TypeError";
+
+	/* a value problem: numbers that do not convert, bounds that are
+	 * whole numbers, empty lists, indices that run past the end */
+	if (strstr(message, "cannot convert") != NULL ||
+	        strstr(message, "out of bounds") != NULL ||
+	        strstr(message, "cannot pop from an empty list") != NULL ||
+	        strstr(message, "must be a whole number") != NULL ||
+	        strstr(message, "must be a finite number") != NULL ||
+	        strstr(message, "is an empty") != NULL ||
+	        strstr(message, "a range step cannot be zero") != NULL ||
+	        strstr(message, "slice bounds must be whole numbers") != NULL)
+		return "ValueError";
+
+	return "Error";
+}
+
 Value fl_error_value(VM *vm, const char *type, const char *message)
 {
 	ObjTable *t = new_flint_table(vm);
@@ -738,7 +834,7 @@ void vm_runtime_error(VM *vm, const char *format, ...)
 	        format,
 	        args);
 	va_end(args);
-	Value err = fl_error_value(vm, "Error", message);
+	Value err = fl_error_value(vm, error_type_for(message), message);
 	if (message != fallback)
 		free(message);
 	vm_throw_value(vm, err);
