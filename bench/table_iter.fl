@@ -1,0 +1,12 @@
+# table iteration: entries in insertion order, key and value per step.
+let t = {}
+let i = 0
+while i < 20000 {
+    t["k" + str(i)] = i
+    i += 1
+}
+let total = 0
+for k, v in t {
+    total += v
+}
+print(total)

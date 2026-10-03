@@ -1,0 +1,8 @@
+# setenv with an empty name is refused before the call.
+#
+# setenv would refuse it anyway, and the message should name the problem
+# rather than the call. a separate file because a runtime error stops the
+# script: nothing after this line would run.
+import os
+
+print(os.setenv("", "x"))

@@ -1,0 +1,63 @@
+# organize -- sort files in a directory by extension.
+#
+# run it:  ./flint examples/organize.fl <directory>
+#
+# moves every regular file into a subdirectory named for its extension:
+# photo.jpg becomes jpg/photo.jpg, notes.txt becomes txt/notes.txt, and
+# files with no extension go into noext/. uses fs.listdir, path.ext and
+# exec() to call mv(1) -- moving is one place where the system's own tool
+# already handles cross-device renames, permissions and prompting, so the
+# script orchestrates rather than reimplementing.
+#
+# dry run first: run with no arguments to see what it *would* do.
+
+import fs
+import path
+
+fn dest_for(dir, name) {
+    # path.ext keeps its dot (".jpg", not "jpg"), so rebuild from index 1
+    # on. strings index by byte and concatenate with +, which is all this
+    # takes. a hidden directory would sort oddly and hide from plain ls,
+    # which is not what organizing means.
+    let e = path.ext(name)
+    let sub = "noext"
+    if len(e) > 1 {
+        let rest = ""
+        let i = 1
+        while i < len(e) {
+            rest = rest + e[i]
+            i += 1
+        }
+        sub = rest
+    }
+    return path.join(dir, sub)
+}
+
+if len(args()) == 0 {
+    print("usage: flint organize.fl <directory>")
+    print("moves each file into <directory>/<ext>/")
+    exit(1)
+}
+
+let dir = args()[0]
+let names = fs.listdir(dir)
+if names == nil {
+    print("cannot read " + dir)
+    exit(1)
+}
+
+for name in names {
+    if name == "." or name == ".." { continue }
+    let full = path.join(dir, name)
+    if fs.isdir(full) { continue }
+    let dest = dest_for(dir, name)
+    if not fs.exists(dest) {
+        fs.mkdir(dest)
+    }
+    let code = exec("mv", full, path.join(dest, name))
+    if code != 0 {
+        print("could not move " + name)
+    } else {
+        print(name + " -> " + dest)
+    }
+}

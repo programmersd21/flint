@@ -1,0 +1,29 @@
+# let {a, b} = t binds each name from the table's fields.
+#
+# Flat names only: no nesting, no defaults, no renaming. Each name becomes
+# an ordinary binding by the ordinary rules, so a missing key reads nil
+# (as with any field access) and const works the same way. Duplicates follow
+# plain `let`: an error inside a function, an overwrite at the top level.
+# Anything fancier would be a second declaration system.
+let config = {host: "example.com", port: 8080}
+let {host, port} = config
+print(host)
+print(port)
+
+# missing keys are nil, not an error
+let {missing} = config
+print(missing)
+
+# inside a function, where the slots have to line up with the stack
+fn total(t) {
+    let {a, b} = t
+    return a + b
+}
+print(total({a: 3, b: 4}))
+
+# const destructuring obeys const
+const {x, y} = {x: 10, y: 20}
+print(x + y)
+
+# the source table is untouched and still usable afterwards
+print(config.host)

@@ -76,17 +76,18 @@ ranges are half-open: `1..5` is 1, 2, 3, 4.
 loosest to tightest:
 
 1. assignment: `=`, `+=`, `-=`, `*=`, `/=`
-2. `or`
-3. `and`
-4. equality: `==`, `!=`
-5. comparison: `<`, `<=`, `>`, `>=`
-6. range: `..`
-7. term: `+`, `-`
-8. factor: `*`, `/`, `%`
-9. type assertion: `as`
-10. unary: `!`, `not`, `-`
-11. call, subscript, field: `()`, `[]`, `.`
-12. primary: literals, identifiers, grouping, list, table
+2. nil-coalescing: `??` (right associative)
+3. `or`
+4. `and`
+5. equality: `==`, `!=`
+6. comparison: `<`, `<=`, `>`, `>=`
+7. range: `..`
+8. term: `+`, `-`
+9. factor: `*`, `/`, `%`
+10. type assertion: `as`
+11. unary: `!`, `not`, `-`
+12. call, subscript, field: `()`, `[]`, `.`
+13. primary: literals, identifiers, grouping, list, table
 
 `<=` is not `!(>)`. `NaN` is unordered, so the two forms differ on NaN and the
 compiler emits a separate opcode for each.
@@ -105,6 +106,30 @@ failure the program stops with a runtime error naming both types.
 
 the assertion runs at run time, not at compile time, because the value may come
 from a module that has not been read yet or from a function parameter.
+
+### nil-coalescing
+
+`a ?? b` evaluates `a`. when it is not nil that is the result and `b` never
+runs. when it is nil, `b` runs and its value is the result.
+
+only nil triggers the fallback. `false`, `0`, `""`, `[]` and `{}` all stay.
+right-associative: `a ?? b ?? c` is `a ?? (b ?? c)`. binds looser than `or`
+and tighter than assignment.
+
+```flint
+let port = config["port"] ?? 8080
+```
+
+### destructuring
+
+`let {a, b} = t` binds each name from the table's fields, by the ordinary
+binding rules. flat names only: no nesting, no defaults, no renaming.
+`const` works the same way. a missing key reads nil. duplicates follow plain
+`let`: an error inside a function, an overwrite at the top level.
+
+```flint
+let {host, port} = config
+```
 
 ## semantics
 
@@ -224,6 +249,11 @@ script can pass one to another.
 | `len(x)` | bytes in a string, elements in a list. an error for anything else |
 | `push(list, item)` | append in place, returns the item |
 | `pop(list)` | remove and return the last element. an error when empty |
+| `insert(list, i, v)` | place `v` at `i`, shifting right. returns `v`. `-1` is where `xs[-1]` reads |
+| `remove(list, i)` | take out and return the element at `i`. negatives count from the end |
+| `keys(t)` | key strings in insertion order, as a fresh list |
+| `has(t, k)` | whether the table holds the key, by content |
+| `delete(t, k)` | remove the key, true when something was removed |
 | `str(val)` | string form of a scalar. containers give `<object>` |
 | `type(val)` | one of the seven type names |
 | `input([prompt])` | one line from stdin, `nil` at end of file |

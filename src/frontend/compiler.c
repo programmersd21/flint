@@ -41,6 +41,7 @@
 typedef enum {
 	PREC_NONE,
 	PREC_ASSIGNMENT,
+	PREC_COALESCE,
 	PREC_OR,
 	PREC_AND,
 	PREC_EQUALITY,
@@ -952,6 +953,7 @@ static void define_variable(int global, bool is_const)
 static void expression(void);
 static void statement(void);
 static void declaration(void);
+static void let_destructure(bool is_const);
 static void block(void);
 static ParseRule *get_rule(TokenType type);
 static void parse_precedence(Precedence precedence);
@@ -1281,6 +1283,31 @@ static void or_(bool can_assign)
 	parse_precedence(PREC_OR);
 	patch_jump(end_jump);
 }
+/*
+ * `a ?? b`: b when a is nil, a otherwise, with b evaluated only if needed.
+ *
+ * One jump, not two. The value is already on top of the stack: if it is not
+ * nil, jump past the fallback and keep it; if it is nil, fall through, pop
+ * it, and evaluate the right side in its place. Either path leaves exactly
+ * one value, which is what makes this compose: `a ?? b ?? c` nests without
+ * stack bookkeeping.
+ *
+ * Right-associative, like assignment: the right side parses at the same
+ * level, so `a ?? b ?? c` is `a ?? (b ?? c)`. Left would evaluate the middle
+ * before knowing whether the left needs it, which defeats the short circuit
+ * this exists for.
+ *
+ * Only nil triggers the fallback. False, 0 and "" are all values that stay,
+ * which is the entire difference from `or` and the reason both exist.
+ */
+static void coalesce(bool can_assign)
+{
+	(void)can_assign;
+	int end_jump = emit_jump(OP_JUMP_IF_NOT_NIL);
+	emit_byte(OP_POP);
+	parse_precedence(PREC_COALESCE);
+	patch_jump(end_jump);
+}
 
 /*
  * `expr as T` -- a checked type assertion.
@@ -1512,6 +1539,7 @@ static ParseRule rules[] = {
         [TOKEN_NIL] = {literal, NULL, PREC_NONE},
         [TOKEN_NOT] = {unary, NULL, PREC_NONE},
         [TOKEN_OR] = {NULL, or_, PREC_OR},
+        [TOKEN_QUESTION_QUESTION] = {NULL, coalesce, PREC_COALESCE},
         [TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
         [TOKEN_RETURN] = {NULL, NULL, PREC_NONE},
         [TOKEN_TRUE] = {literal, NULL, PREC_NONE},
@@ -1673,6 +1701,23 @@ static void for_statement(void)
 
 	consume(TOKEN_IDENTIFIER, "expect variable name after 'for'.");
 	Token var_name = state.parser.previous;
+
+	/*
+	 * `for k, v in table` iterates entries. The comma is what selects
+	 * table iteration rather than list iteration: a single variable
+	 * ranges, lists and strings, and two variables always mean table
+	 * pairs. That keeps one `for` with two shapes instead of two loops,
+	 * and it means the compiler never has to guess a container's type --
+	 * the syntax already said.
+	 */
+	bool pair_mode = false;
+	Token val_name = var_name;
+	if (match(TOKEN_COMMA)) {
+		consume(TOKEN_IDENTIFIER,
+		        "expect value name after ',' in for loop.");
+		val_name = state.parser.previous;
+		pair_mode = true;
+	}
 	consume(TOKEN_IN, "expect 'in' after for variable.");
 
 	/*
@@ -1688,6 +1733,17 @@ static void for_statement(void)
 
 		/* a range if a ".." followed the first expression */
 		if (match(TOKEN_DOT_DOT)) {
+			/*
+			 * A pair loop over a range is meaningless -- ranges
+			 * yield one value per step, and there is no key to
+			 * pair it with. Say so here rather than emitting a
+			 * loop that misbehaves.
+			 */
+			if (pair_mode) {
+				error("cannot iterate a range with two "
+				      "variables; ranges yield one value.");
+				return;
+			}
 			/* stack: [start] then [start][end] */
 			expression();
 
@@ -1740,6 +1796,113 @@ static void for_statement(void)
 			emit_constant(NUMBER_VAL(1));
 			emit_byte(OP_ADD);
 			emit_bytes(OP_SET_LOCAL, (uint8_t)var_slot);
+			emit_byte(OP_POP);
+
+			emit_loop(loop.start);
+			patch_jump(exit_jump);
+			emit_byte(OP_POP);
+
+			for (int i = 0; i < loop.break_count; i++)
+				patch_jump(loop.break_jumps[i]);
+
+			state.loop = loop.enclosing;
+			end_scope();
+			return;
+		}
+
+		/*
+		 * Table iteration. The table expression is already on the
+		 * stack, exactly as with lists, and the shape below mirrors
+		 * the list loop on purpose: hidden table, hidden index, two
+		 * user variables filled per iteration. Reading the two side by
+		 * side should show the same loop with different loads.
+		 *
+		 * The count is re-read every iteration through OP_TABLE_COUNT,
+		 * so entries appended in the body are visited. Entries removed
+		 * shift everything after them down by position, which the
+		 * documentation states plainly rather than preventing: a loop
+		 * that mutates its own table is the author's responsibility,
+		 * and the behaviour is positional rather than surprising.
+		 */
+		if (pair_mode) {
+			Token hidden_table = {TOKEN_IDENTIFIER,
+			        " table",
+			        6,
+			        var_name.line,
+			        false,
+			        var_name.offset};
+			add_local(hidden_table, false);
+			mark_initialized();
+
+			emit_constant(NUMBER_VAL(0));
+			Token hidden_tidx = {TOKEN_IDENTIFIER,
+			        " tidx",
+			        5,
+			        var_name.line,
+			        false,
+			        var_name.offset};
+			add_local(hidden_tidx, false);
+			mark_initialized();
+
+			/* key and value both start nil, filled per iteration */
+			emit_byte(OP_NIL);
+			add_local(var_name, false);
+			mark_initialized();
+			emit_byte(OP_NIL);
+			add_local(val_name, false);
+			mark_initialized();
+
+			int table_slot = state.current->local_count - 4;
+			int tidx_slot = state.current->local_count - 3;
+			int key_slot = state.current->local_count - 2;
+			int val_slot = state.current->local_count - 1;
+
+			LoopContext loop;
+			loop.enclosing = state.loop;
+			loop.scope_depth = state.current->scope_depth;
+			loop.start = current_chunk()->count;
+			loop.continue_target = -1;
+			loop.break_count = 0;
+			loop.continue_count = 0;
+			state.loop = &loop;
+
+			/* condition: idx < table_count(table) */
+			emit_bytes(OP_GET_LOCAL, (uint8_t)tidx_slot);
+			emit_bytes(OP_GET_LOCAL, (uint8_t)table_slot);
+			emit_byte(OP_TABLE_COUNT);
+			emit_byte(OP_LESS);
+
+			int exit_jump = emit_jump(OP_JUMP_IF_FALSE);
+			emit_byte(OP_POP);
+
+			/* key = table_key(table, idx) */
+			emit_bytes(OP_GET_LOCAL, (uint8_t)table_slot);
+			emit_bytes(OP_GET_LOCAL, (uint8_t)tidx_slot);
+			emit_byte(OP_TABLE_KEY);
+			emit_bytes(OP_SET_LOCAL, (uint8_t)key_slot);
+			emit_byte(OP_POP);
+
+			/* value = table_value(table, idx) */
+			emit_bytes(OP_GET_LOCAL, (uint8_t)table_slot);
+			emit_bytes(OP_GET_LOCAL, (uint8_t)tidx_slot);
+			emit_byte(OP_TABLE_VALUE);
+			emit_bytes(OP_SET_LOCAL, (uint8_t)val_slot);
+			emit_byte(OP_POP);
+
+			consume(TOKEN_LEFT_BRACE,
+			        "expect '{' after for-in expression.");
+			begin_scope();
+			block();
+			end_scope();
+
+			for (int i = 0; i < loop.continue_count; i++)
+				patch_jump(loop.continue_jumps[i]);
+
+			/* idx = idx + 1 */
+			emit_bytes(OP_GET_LOCAL, (uint8_t)tidx_slot);
+			emit_constant(NUMBER_VAL(1));
+			emit_byte(OP_ADD);
+			emit_bytes(OP_SET_LOCAL, (uint8_t)tidx_slot);
 			emit_byte(OP_POP);
 
 			emit_loop(loop.start);
@@ -2025,6 +2188,21 @@ static void fn_declaration(void)
 /* let, with or without an initializer. no initializer means nil. */
 static void let_declaration(void)
 {
+	/*
+	 * Table destructuring: `let {host, port} = config`.
+	 *
+	 * Flat names only -- no nesting, no defaults, no renaming. Each name
+	 * becomes an ordinary binding by the ordinary rules: missing keys read
+	 * nil (as with any field access), duplicates are a redeclaration
+	 * error, and const works the same way through const_declaration.
+	 * Anything fancier is a second declaration system, and this one stays
+	 * small on purpose.
+	 */
+	if (check(TOKEN_LEFT_BRACE)) {
+		let_destructure(false);
+		return;
+	}
+
 	int global = parse_variable("expect variable name.", false);
 
 	if (match(TOKEN_EQUAL))
@@ -2036,10 +2214,153 @@ static void let_declaration(void)
 	define_variable(global, false);
 }
 
+/*
+ * Shared by let and const destructuring. is_const threads through exactly
+ * as it does for a plain declaration.
+ */
+static void let_destructure(bool is_const)
+{
+	consume(TOKEN_LEFT_BRACE, "expect '{' after 'let'.");
+
+	/*
+	 * Parse the names first, into tokens, because the expression comes
+	 * after them in source order. Token is a window into the source
+	 * buffer, which outlives compilation, so storing them is safe.
+	 */
+	Token names[MAX_LOCALS];
+	int name_count = 0;
+	for (;;) {
+		consume(TOKEN_IDENTIFIER, "expect variable name in '{...}'.");
+		if (name_count >= MAX_LOCALS) {
+			error("too many names in destructuring.");
+			return;
+		}
+		names[name_count++] = state.parser.previous;
+		if (!match(TOKEN_COMMA))
+			break;
+	}
+	consume(TOKEN_RIGHT_BRACE, "expect '}' after destructured names.");
+	consume(TOKEN_EQUAL, "expect '=' after destructured names.");
+
+	/*
+	 * Locals need a value in every slot before the working code runs.
+	 *
+	 * A local slot is stack memory, and anything pushed afterwards lands
+	 * on the lowest free position -- which is a user slot if the user
+	 * slots sit above the stack top with nothing in them. for-in avoids
+	 * this by pushing a NIL per hidden slot first, and this does the
+	 * same: one NIL per name, each immediately claimed, so every slot
+	 * holds a real value below a top that only moves up from here.
+	 *
+	 * Globals need none of this: they live in a table, not on the
+	 * stack, so there is nothing to overlap.
+	 */
+	bool local = state.current->scope_depth > 0;
+	/*
+	 * Remember where the user slots start: they are declared next, in
+	 * order, so name i lives at first_slot + i. The hidden table slot
+	 * comes after them, which puts every user slot below every working
+	 * value for the rest of the statement.
+	 */
+	int first_slot = state.current->local_count;
+	if (local) {
+		for (int i = 0; i < name_count; i++) {
+			emit_byte(OP_NIL);
+			state.parser.previous = names[i];
+			declare_variable(is_const);
+			mark_initialized();
+		}
+	}
+
+	expression();
+	consume_terminator();
+
+	/*
+	 * The table now sits on top of the stack, so it becomes a hidden
+	 * local -- the same shape for-in uses for its list. Everything after
+	 * this reads through it, and the top stays above it for the rest of
+	 * the statement, so no working value ever lands on a live slot.
+	 */
+	Token hidden = {TOKEN_IDENTIFIER,
+	        " table",
+	        6,
+	        names[0].line,
+	        false,
+	        names[0].offset};
+	add_local(hidden, false);
+	mark_initialized();
+	int table_slot = state.current->local_count - 1;
+
+	/*
+	 * One load-and-bind per name. declare_variable runs with
+	 * parser.previous temporarily set for the globals case, because it
+	 * reads the name from there; locals were already declared above.
+	 */
+	Token saved = state.parser.previous;
+	for (int i = 0; i < name_count; i++) {
+		int constant = -1;
+		int slot = -1;
+		if (!local) {
+			state.parser.previous = names[i];
+			declare_variable(is_const);
+			constant = identifier_constant(&state.parser.previous);
+		} else {
+			/*
+			 * Slots were assigned in order above, starting at
+			 * first_slot: name i lives at first_slot + i, all
+			 * below the hidden table slot. Recomputing beats
+			 * re-resolving, because resolve_local would find the
+			 * name but could not distinguish it from an outer
+			 * binding of the same spelling.
+			 */
+			slot = first_slot + i;
+		}
+
+		/* load table.field, leaving the value on top */
+		emit_bytes(OP_GET_LOCAL, (uint8_t)table_slot);
+		emit_indexed(OP_GET_FIELD,
+		        OP_GET_FIELD_LONG,
+		        identifier_constant(&names[i]));
+
+		/* bind it, by the same rules as a plain declaration */
+		if (!local) {
+			if (exporting) {
+				if (is_const) {
+					emit_indexed(
+					        OP_DEFINE_GLOBAL_CONST_EXPORT,
+					        OP_DEFINE_GLOBAL_CONST_EXPORT_LONG,
+					        constant);
+				} else {
+					emit_indexed(OP_DEFINE_GLOBAL_EXPORT,
+					        OP_DEFINE_GLOBAL_EXPORT_LONG,
+					        constant);
+				}
+			} else if (is_const) {
+				emit_indexed(OP_DEFINE_GLOBAL_CONST,
+				        OP_DEFINE_GLOBAL_CONST_LONG,
+				        constant);
+			} else {
+				emit_indexed(OP_DEFINE_GLOBAL,
+				        OP_DEFINE_GLOBAL_LONG,
+				        constant);
+			}
+		} else {
+			emit_bytes(OP_SET_LOCAL, (uint8_t)slot);
+			emit_byte(OP_POP);
+		}
+	}
+	state.parser.previous = saved;
+}
+
 /* const. the initializer is mandatory: a const with no value has nothing to
  * be constant about. */
 static void const_declaration(void)
 {
+	if (check(TOKEN_LEFT_BRACE)) {
+		let_destructure(true);
+		return;
+	}
+
 	int global = parse_variable("expect variable name.", true);
 
 	consume(TOKEN_EQUAL, "expect '=' after const name.");

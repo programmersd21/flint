@@ -1,0 +1,35 @@
+# table access beyond literal field names.
+#
+# `t[k]` reads and writes through a computed key, where `t.name` only takes
+# a literal. Both compare by content, so a key built at run time finds the
+# entry a literal created -- pointer comparison would answer nil here, which
+# is the bug this test pins down.
+let t = {ab: 1}
+let k = "a" + "b"
+print(t[k])
+t[k] = 99
+print(t.ab)
+print(t["missing"])
+
+# keys() lists every key in insertion order, as a fresh list that mutating
+# does not affect the table
+let ks = keys(t)
+print(len(ks))
+print(ks[0])
+push(ks, "zzz")
+print(len(keys(t)))
+
+# has() asks by content. a non-string cannot be a key, which is false rather
+# than an error: asking about something that cannot be there is a no.
+print(has(t, "ab"))
+print(has(t, "zzz"))
+print(has(t, 42))
+
+# delete() removes and reports. deleting what is not there is false rather
+# than an error: "make sure this is gone" should not fail when it is.
+print(delete(t, "ab"))
+print(has(t, "ab"))
+print(delete(t, "ab"))
+
+# a computed key that was never stored reads nil, like any missing key
+print(t["never" + "here"])

@@ -1,0 +1,16 @@
+# computed keys, has/delete, and keys() over a mid-size table.
+let t = {}
+let i = 0
+while i < 10000 {
+    t["k" + str(i)] = i * 2
+    i += 1
+}
+let hits = 0
+let j = 0
+while j < 10000 {
+    let k = "k" + str(j)
+    if has(t, k) { hits += t[k] }
+    j += 1
+}
+print(hits)
+print(len(keys(t)))

@@ -1,0 +1,3 @@
+invalid environment variable name.
+[line 55] in setenv()
+[line 8] in script

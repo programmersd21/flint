@@ -14,9 +14,44 @@ prints both.
 cpu      Intel Core i5-1235U
 kernel   Linux x86-64
 compiler gcc (GCC) 16.2.1, -O2 -DNDEBUG
-flint    v0.5.0
+flint    v0.7.0
 runs     median of 15 (7 for the slow cases), outliers discarded
 ```
+
+## measured, new in 0.7.0
+
+three new cases for the three new capabilities. no before numbers exist
+because the capabilities did not.
+
+| case           | median  | what it measures |
+|----------------|---------|------------------|
+| `table_iter`   | 519ms   | 20k-entry table, full `for k, v` walk with accumulation |
+| `table_access` | 513ms   | 10k computed-key reads plus `has()` plus `keys()` |
+| `coalesce`     | 464ms   | 5M iterations of `v ?? -1`, short-circuit, no allocation |
+
+the table cases are dominated by string hashing on computed keys
+(`"k" + str(i)` interns-or-compares per lookup), not by the loop itself --
+which is why they sit near 500ms for tens of thousands of entries while the
+numeric loops below do millions of iterations in comparable time. that cost
+is honest: it is the content comparison 0.5.0 bought, applied per lookup.
+
+## spot check: no regressions in existing cases
+
+same machine, same runner, switch build:
+
+| case           | median  |
+|----------------|---------|
+| `arith_add`    | 1064ms  |
+| `calls`        | 195ms   |
+| `strings`      | 99ms    |
+| `list_iter`    | 33ms    |
+| `range_loop`   | 167ms   |
+| `json_roundtrip` | 7ms   |
+| `startup`      | 0.6ms   |
+
+startup is unchanged at well under a millisecond, which continues to be the
+number that matters most for the shell-pipeline case this language is aimed
+at.
 
 Reproduce with `python3 bench/bench.py`, or `python3 bench/bench.py --json
 out.json` to get the same numbers machine-readably. The runner records the

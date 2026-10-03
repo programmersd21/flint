@@ -220,6 +220,18 @@ Value vm_pop(VM *vm);
 /* prints the message and a stack trace, then unwinds the stack. */
 void vm_runtime_error(VM *vm, const char *format, ...);
 
+/*
+ * Validate a script value as an index into something `count` long.
+ *
+ * Shared by the interpreter's subscript handlers and by natives that take
+ * positions, so `xs[1.5]`, `xs[1e30]` and `insert(xs, "a", v)` all fail the
+ * same way in all places: finite, whole, in range, with negatives counting
+ * from the end. One function rather than three copies is what keeps those
+ * identical.
+ */
+bool vm_value_to_index(
+        VM *vm, Value value, int count, int *out, const char *what);
+
 void vm_define_native(VM *vm, const char *name, NativeFn function, int arity);
 
 #endif /* FL_VM_H */

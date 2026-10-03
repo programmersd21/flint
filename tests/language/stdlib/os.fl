@@ -1,0 +1,49 @@
+# os -- platform answers, without pinning platform values.
+#
+# these tests check shapes rather than values: name() is a string, pid() is a
+# positive number, chdir to a missing directory is false. checking the actual
+# platform name would make the test wrong on a different machine, which is
+# the reason the assertions are about types and behaviour.
+#
+# chdir is tested against the current directory, which always exists, and the
+# test returns there afterwards so the rest of the suite is unaffected. a test
+# that leaves the process in another directory would be a surprise for
+# everything after it.
+
+import os
+
+# platform answers are strings
+print(type(os.name()) == "string")
+print(type(os.arch()) == "string")
+print(os.pathsep() == "/" or os.pathsep() == "\\")
+
+# getcwd agrees with itself and is a string
+let here = os.getcwd()
+print(type(here) == "string")
+print(len(here) > 0)
+
+# chdir to where we already are succeeds and changes nothing
+print(os.chdir(here))
+print(os.getcwd() == here)
+
+# chdir to nowhere fails rather than stopping the script
+print(os.chdir("/no/such/directory/flint-os-test"))
+
+# environment round trip through our own variable, so the test does not
+# depend on anything the machine happens to have set
+print(os.setenv("FLINT_OS_TEST", "hello"))
+print(os.getenv("FLINT_OS_TEST", ""))
+print(os.unsetenv("FLINT_OS_TEST"))
+print(os.getenv("FLINT_OS_TEST", "gone"))
+
+
+# pid is a positive number, and two calls agree
+print(os.pid() > 0)
+print(os.pid() == os.pid())
+
+# homedir and tmpdir are strings or nil, depending on the platform. either is
+# fine; what matters is that they answer without failing.
+let home = os.homedir()
+print(home == nil or type(home) == "string")
+let tmp = os.tmpdir()
+print(tmp == nil or type(tmp) == "string")

@@ -231,6 +231,8 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return jump_instruction("OP_JUMP", 1, chunk, offset);
 	case OP_JUMP_IF_FALSE:
 		return jump_instruction("OP_JUMP_IF_FALSE", 1, chunk, offset);
+	case OP_JUMP_IF_NOT_NIL:
+		return jump_instruction("OP_JUMP_IF_NOT_NIL", 1, chunk, offset);
 	case OP_LOOP:
 		return jump_instruction("OP_LOOP", -1, chunk, offset);
 	case OP_CALL:
@@ -243,6 +245,12 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return simple_instruction("OP_RETURN", offset);
 	case OP_LIST_LEN:
 		return simple_instruction("OP_LIST_LEN", offset);
+	case OP_TABLE_COUNT:
+		return simple_instruction("OP_TABLE_COUNT", offset);
+	case OP_TABLE_KEY:
+		return simple_instruction("OP_TABLE_KEY", offset);
+	case OP_TABLE_VALUE:
+		return simple_instruction("OP_TABLE_VALUE", offset);
 	case OP_BUILD_LIST:
 		return byte_instruction("OP_BUILD_LIST", chunk, offset);
 	/*

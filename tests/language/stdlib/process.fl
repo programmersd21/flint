@@ -1,0 +1,51 @@
+# process -- running programs and reading what they said.
+#
+# every case here runs a real child and checks what came back. the commands
+# are echo, sh, cat and sleep: all present on any posix system, none of them
+# doing anything the test machine cannot do. wall-clock time is asserted only
+# as "it finished", never as an exact duration, because CI machines are slow
+# in ways that have nothing to do with this code.
+
+import process
+
+# a clean run: output captured, status zero, not timed out
+let ok = process.run(["echo", "hello"])
+print(ok.stdout)
+print(ok.stderr)
+print(ok.code)
+print(ok.timed_out)
+
+# arguments are separate strings, never split: a filename with a space in it
+# is one argument, not two
+let spaced = process.run(["echo", "two words"])
+print(spaced.stdout)
+print(spaced.code)
+
+# a failing child: nonzero status, stderr captured, stdout empty
+let bad = process.run(["ls", "/no/such/directory/flint-process-test"])
+print(bad.code)
+print(len(bad.stdout))
+print(len(bad.stderr) > 0)
+print(bad.timed_out)
+
+# not found: 127, by the shell convention exec() already uses
+let missing = process.run(["flint-no-such-program-xyz"])
+print(missing.code)
+
+# options: cwd, stdin, and timeout
+let here = process.run_opts(["pwd"], {cwd: "/tmp"})
+print(here.stdout)
+print(here.code)
+
+let echoed = process.run_opts(["cat"], {stdin: "through the pipe"})
+print(echoed.stdout)
+print(echoed.code)
+
+# sleep 5 with a 200ms timeout: killed, flagged, and carrying SIGKILL's code
+let slow = process.run_opts(["sleep", "5"], {timeout: 200})
+print(slow.timed_out)
+print(slow.code)
+
+# an unknown option is an error, not silently dropped
+let strict = process.run_opts(["echo", "x"], {directory: "/tmp"})
+print(strict.code)

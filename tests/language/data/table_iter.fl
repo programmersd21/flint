@@ -1,0 +1,43 @@
+# for k, v in table iterates entries in insertion order.
+#
+# Tables are parallel arrays, not a hash, so position i always means the
+# i-th inserted entry. That order is the contract: it is what the loop
+# relies on, and it is what keys() returns.
+let t = {a: 1, b: 2}
+for k, v in t {
+    print(k)
+    print(v)
+}
+
+# an empty table runs zero times, like an empty list
+for k, v in {} {
+    print("never")
+}
+
+# break and continue work, because the desugar is the same loop shape as
+# list iteration with different loads
+let u = {a: 1, b: 2, c: 3}
+for k, v in u {
+    if k == "b" { continue }
+    if k == "c" { break }
+    print(k)
+}
+
+# nested loops keep separate indices: different hidden locals per loop
+let m = {x: 1, y: 2}
+let total = 0
+for k1, v1 in m {
+    for k2, v2 in m {
+        total += v1 * 10 + v2
+    }
+}
+print(total)
+
+# appending inside the body extends the loop: the count is re-read every
+# iteration, so the new entry is visited. removing shifts entries down by
+# position. both are documented in docs/data.md rather than prevented.
+let g = {x: 10}
+for k, v in g {
+    if k == "x" { g["y"] = 20 }
+}
+print(len(keys(g)))

@@ -1,0 +1,43 @@
+# config -- read a JSON config file with defaults.
+#
+# run it:  ./flint examples/config.fl [config.json]
+#
+# configuration is a table with opinions about missing keys: every lookup
+# goes through ??, so the file can omit anything the defaults already cover.
+# json.parse gives nil on malformed input rather than stopping the script,
+# which is what lets this report "not valid JSON" instead of dying in the
+# parser.
+
+import json
+import fs
+
+fn load_config(path) {
+    # read() stops the script when the file is missing, so check first.
+    # a config file that is not there is not an error: it means defaults.
+    if not fs.exists(path) {
+        return {}
+    }
+    let text = fs.read(path)
+    let parsed = json.parse(text)
+    if parsed == nil {
+        print(path + " is not valid JSON, using defaults")
+        return {}
+    }
+    return parsed
+}
+
+let cfg_path = "config.json"
+if len(args()) > 0 {
+    cfg_path = args()[0]
+}
+
+let cfg = load_config(cfg_path)
+let host = cfg["host"] ?? "127.0.0.1"
+let port = cfg["port"] ?? 8080
+let workers = cfg["workers"] ?? 4
+let debug = cfg["debug"] ?? false
+
+print("host:    " + host)
+print("port:    " + str(port))
+print("workers: " + str(workers))
+print("debug:   " + str(debug))

@@ -1,0 +1,44 @@
+# envcheck -- are the environment variables this project needs actually set.
+#
+# run it:  ./flint examples/envcheck.fl
+#
+# reads a list of required and optional names, reports each one, and exits
+# nonzero when anything required is missing. the pattern is getenv with a
+# sentinel default rather than env() with a nil check: the result is always
+# a string, so there is no branch on nil anywhere in the loop.
+#
+# edit the two tables for your own project. the checking logic stays the
+# same no matter how many names are in them.
+
+import os
+
+let required = ["HOME", "PATH"]
+let optional = ["EDITOR", "PAGER", "FLINT_STDLIB"]
+
+let missing = []
+for name in required {
+    # a sentinel that cannot be a real value, so "unset" and "set to this"
+    # are the same answer and there is nothing to distinguish.
+    let value = os.getenv(name, "FLINT-UNSET-SENTINEL-9f3a")
+    if value == "FLINT-UNSET-SENTINEL-9f3a" {
+        push(missing, name)
+        print("missing required: " + name)
+    } else {
+        print("ok: " + name)
+    }
+}
+
+for name in optional {
+    let value = os.getenv(name, "")
+    if value == "" {
+        print("unset (ok): " + name)
+    } else {
+        print("ok: " + name + "=" + value)
+    }
+}
+
+if len(missing) > 0 {
+    print(str(len(missing)) + " required variables missing")
+    exit(1)
+}
+print("environment looks good")

@@ -1,5 +1,78 @@
 # releases
 
+## v0.7.0
+
+a daily-use release. the language learns to talk to the operating system,
+tables learn to be iterated, and two small syntax additions cover the config
+patterns every script rewrites by hand.
+
+### os and process
+
+`import os` answers what the machine knows: platform and architecture,
+working directory, environment variables with defaults, home and temporary
+directories, and the process id.
+
+```flint
+import os
+print(os.name() + "/" + os.arch())
+print(os.getenv("HOME", ""))
+```
+
+`import process` runs programs and reads what they said. the command is a
+list, never a string, and there is no shell anywhere in the path. both
+streams are captured, so a child that writes a lot to stderr cannot deadlock
+a parent that reads stdout.
+
+```flint
+import process
+let r = process.run(["git", "status", "--short"])
+print(r.code)
+print(r.stdout)
+```
+
+options are a table with `cwd`, `stdin` and `timeout` keys, all optional.
+unknown keys are an error rather than ignored. a timeout kills with SIGKILL
+and reports `timed_out: true` alongside the wait status, so a timeout kill
+is distinguishable from a signal death.
+
+### tables grow up
+
+`for k, v in t` walks entries in insertion order. `t[k]` reads and writes
+through computed keys. `keys(t)`, `has(t, k)` and `delete(t, k)` ask and
+remove. field access compares by content now, so a key built at run time
+finds the entry a literal created -- pointer comparison would answer nil
+there, which was a latent 0.5.0 inconsistency.
+
+lists gain `insert` and `remove` with the same index rules as subscript.
+
+### two small syntax additions
+
+`a ?? b` is `b` when `a` is nil and `a` otherwise, with the right side
+running only when needed. only nil triggers it: `false`, `0` and `""` stay.
+right-associative, looser than `or`, tighter than `=`.
+
+`let {host, port} = config` binds each name from the table's fields. flat
+names only; missing keys read nil; `const` works the same way.
+
+### deliberately not shipped
+
+`defer` was evaluated and deferred. its motivating example needs file
+handles, which do not exist -- only whole-file `read`/`write` -- so there is
+nothing to clean up yet. and the failure policy for a deferred action that
+itself fails needs per-action error isolation the unwind model does not
+have. the design is in ARCHITECTURE.md for when handles land. a cleanup
+construct with nothing to clean up would be scope creep with a good name.
+
+no table `sort`: heterogeneous values have no total order worth promising.
+no native loader, no JIT, per the plan.
+
+### gate
+
+49 tests on release under gcc and clang, on the computed-goto build, and
+under ASan + UBSan + GC-on-every-allocation -- plus new tests for every
+feature above. diagnostics, unit tests, clang-tidy, clang-format,
+trailing-newline check clean. every example runs.
+
 ## v0.6.1
 
 `num()`, the install story, and imports that enforce themselves.

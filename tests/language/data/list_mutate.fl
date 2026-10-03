@@ -1,0 +1,26 @@
+# insert and remove, with the same index rules as subscript.
+#
+# Negative indices count from the end in both directions: insert(xs, -1, v)
+# goes where xs[-1] reads, and remove(xs, -1) takes what xs[-1] would give.
+# insert at exactly len(xs) appends. Anything else out of range, fractional,
+# or non-numeric fails the same way subscript does, because reading and
+# writing through a bad index are the same bug wherever they happen.
+let xs = [1, 2, 3]
+print(insert(xs, 1, 9))
+print(xs)
+print(insert(xs, -1, 7))
+print(xs)
+print(insert(xs, 5, 8))
+print(xs)
+
+print(remove(xs, 1))
+print(xs)
+print(remove(xs, -1))
+print(xs)
+print(remove(xs, 0))
+print(xs)
+
+# removing the last element leaves an empty list, which is still a list
+print(remove(xs, 0))
+print(remove(xs, 0))
+print(len(xs))

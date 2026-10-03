@@ -93,12 +93,21 @@ for x in [] { print("never") }
 for c in "abc" { print(c) }
 ```
 
-`for` over a table is an error. tables have no defined iteration order, so
-there is nothing to iterate. use the keys you know.
+`for k, v in t` walks every entry of a table in insertion order:
 
 ```flint
-for k in {a: 1} { print(k) }   # error: len() must be a string or list
+let t = {a: 1, b: 2}
+for k, v in t {
+    print(k)
+    print(v)
+}
 ```
+
+insertion order is the contract, because tables are insertion ordered to
+begin with. the count is re-read every iteration, so entries appended in the
+body are visited; entries removed shift everything after them down. a loop
+that mutates its own table is the author's responsibility. nested loops keep
+separate positions, and `break` and `continue` work.
 
 ## break and continue
 

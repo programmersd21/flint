@@ -1,0 +1,79 @@
+# os -- the operating system, thinly.
+#
+#     import os
+#     print(os.name() + "/" + os.arch())
+#
+# platform answers, the working directory, and the environment. filesystem
+# operations are fs, path strings are path, and running programs is exec():
+# this module answers questions about the machine rather than changing it,
+# with chdir and setenv as the two deliberate exceptions.
+#
+# every function here returns a value rather than failing, except where the
+# platform genuinely cannot answer -- homedir() and tmpdir() give nil then,
+# and chdir() gives false. a script that needs the reason can check before
+# calling: fs.exists() for paths, and the value itself for everything else.
+
+# "linux", "darwin", "windows", "freebsd", or "unknown".
+export fn name() {
+    return __os_name()
+}
+
+# "x86_64", "aarch64", "x86", "arm", or "unknown".
+export fn arch() {
+    return __os_arch()
+}
+
+# "/" everywhere but windows, where it is "\\".
+export fn pathsep() {
+    return __os_pathsep()
+}
+
+# where the process is standing, or nil when it cannot be read.
+export fn getcwd() {
+    return __os_getcwd()
+}
+
+# move there. false when the directory does not exist or cannot be entered,
+# which is a fact about the filesystem and not a reason to stop a script.
+export fn chdir(path) {
+    return __os_chdir(path)
+}
+
+# the variable, or the default when it is not set. env(name) already exists
+# and gives nil for a missing name; this one takes the fallback explicitly,
+# which is what a config reader wants -- the result is always a string and
+# the caller never branches on nil.
+export fn getenv(name, fallback) {
+    return __os_getenv(name, fallback)
+}
+
+# set it for this process and its children. false only when the name itself
+# is invalid; the empty string and a name containing '=' are refused before
+# the call, because setenv would refuse them anyway and the message should
+# name the problem.
+export fn setenv(name, value) {
+    return __os_setenv(name, value)
+}
+
+# remove it. unsetting a name that was never set succeeds, which matches what
+# a script means by it.
+export fn unsetenv(name) {
+    return __os_unsetenv(name)
+}
+
+# the user's home directory, or nil when the platform will not say. $HOME on
+# posix, USERPROFILE (or HOMEDRIVE+HOMEPATH) on windows.
+export fn homedir() {
+    return __os_homedir()
+}
+
+# a writable scratch directory, or nil when none is configured. $TMPDIR on
+# posix, falling back to /tmp; TEMP on windows.
+export fn tmpdir() {
+    return __os_tmpdir()
+}
+
+# this process's id.
+export fn pid() {
+    return __os_pid()
+}

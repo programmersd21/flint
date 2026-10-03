@@ -365,6 +365,11 @@ Token scan_token(void)
 		if (match('.'))
 			return make_token(TOKEN_DOT_DOT);
 		return make_token(TOKEN_DOT);
+	/* "??" is nil-coalescing. a lone "?" is not valid flint. */
+	case '?':
+		if (match('?'))
+			return make_token(TOKEN_QUESTION_QUESTION);
+		return error_token("unexpected character '?'.");
 	case '-':
 		if (match('='))
 			return make_token(TOKEN_MINUS_EQUAL);

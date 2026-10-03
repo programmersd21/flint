@@ -1,0 +1,7 @@
+# setenv with '=' in the name is refused before the call.
+#
+# a separate file because a runtime error stops the script. see
+# os_setenv_empty.fl for why these are two files rather than one.
+import os
+
+print(os.setenv("HAS=EQUALS", "x"))

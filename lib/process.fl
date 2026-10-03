@@ -1,0 +1,45 @@
+# process -- run programs and read what they said.
+#
+#     import process
+#     let r = process.run(["git", "status", "--short"])
+#     if r.code != 0 { print(r.stderr) }
+#
+# the command is a list, never a string. a single string would have to be
+# split somewhere, and splitting on spaces breaks on filenames that contain
+# them -- which is the injection-shaped bug exec() exists to avoid. an
+# argument list has no such question, so there is no string form here either.
+#
+# no shell, ever. execvp searches PATH and interprets nothing, so `process`
+# cannot be talked into running `; rm -rf /` no matter what the arguments
+# contain. a script that genuinely wants a shell says so explicitly:
+#
+#     process.run(["sh", "-c", "ls | head"])
+
+# Run the program and capture everything it said.
+#
+# Returns a table with four fields, always the same four:
+#
+#   stdout     what the child wrote to standard output, as a string
+#   stderr     what the child wrote to standard error, as a string
+#   code       the exit status: 0 for success, the child's own code after
+#              that, 128 plus the signal number for a signal death, 127
+#              for "not found" and 126 when exec could not run at all
+#   timed_out  whether the timeout below fired. false on every normal run.
+#
+# The second argument is optional and every key in it is optional:
+#
+#   cwd      run there instead of here. must be a string.
+#   stdin    piped to the child's standard input. must be a string.
+#   timeout  milliseconds before the child is killed with SIGKILL. must be
+#            a non-negative number; leaving it out waits as long as it takes.
+#
+# An unknown option is an error rather than ignored: an option the runtime
+# does not understand is almost certainly a misspelled option it does, and
+# silently dropping it would run the child differently than asked.
+export fn run(cmd) {
+    return __process_run(cmd)
+}
+
+export fn run_opts(cmd, opts) {
+    return __process_run(cmd, opts)
+}

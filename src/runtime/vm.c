@@ -566,7 +566,7 @@ void vm_runtime_error(VM *vm, const char *format, ...)
  *
  * `what` is "list" or "string" and only appears in the message.
  */
-static bool value_to_index(
+bool vm_value_to_index(
         VM *vm, Value value, int count, int *out, const char *what)
 {
 	if (!IS_NUMBER(value)) {
@@ -1097,6 +1097,15 @@ static InterpretResult run(VM *vm, int base_frame)
 #endif
 
 		uint8_t instruction = READ_BYTE();
+		/*
+		 * No `break` inside a loop in any handler below. The
+		 * computed-goto build rewrites every break in this switch
+		 * into a dispatch jump, so a break meant for a `for` skips
+		 * the code after the loop instead. Early exit from a loop
+		 * is `goto` to a handler-local label (field_done,
+		 * index_found, ...), which survives the transform because
+		 * the transform only touches break.
+		 */
 		switch (instruction) {
 		case OP_CONSTANT: {
 			Value constant = READ_CONSTANT();
@@ -1509,6 +1518,15 @@ static InterpretResult run(VM *vm, int base_frame)
 				frame->ip += offset;
 			break;
 		}
+		case OP_JUMP_IF_NOT_NIL: {
+			/* peeks, does not pop: a non-nil left side stays for
+			 * the end of the `??`, and a nil one falls through to
+			 * the POP that clears it for the right side. */
+			uint16_t offset = READ_SHORT();
+			if (!IS_NIL(peek(vm, 0)))
+				frame->ip += offset;
+			break;
+		}
 		case OP_LOOP: {
 			/* signed 16-bit backward offset, negated on the way in */
 			/*
@@ -1646,6 +1664,65 @@ static InterpretResult run(VM *vm, int base_frame)
 			vm->stack_top[-1] = NUMBER_VAL((double)length);
 			break;
 		}
+		case OP_TABLE_COUNT: {
+			/*
+			 * The entry count, in place like OP_LIST_LEN.
+			 *
+			 * The loop condition re-reads this every iteration, so
+			 * entries appended inside the body are visited and the
+			 * loop cannot overrun a table that shrank: the bound is
+			 * always current. That is a deliberate semantic, not an
+			 * accident -- see the for-in documentation for what
+			 * mutation during iteration means.
+			 */
+			Value target = peek(vm, 0);
+			if (!IS_FLINT_TABLE(target)) {
+				vm_runtime_error(vm,
+				        "argument to len() must be a table.");
+				return INTERPRET_RUNTIME_ERROR;
+			}
+			vm->stack_top[-1] = NUMBER_VAL(
+			        (double)AS_FLINT_TABLE(target)->count);
+			break;
+		}
+		case OP_TABLE_KEY:
+		case OP_TABLE_VALUE: {
+			/*
+			 * The key or value at a numeric position.
+			 *
+			 * Tables are insertion-ordered, so position `i` always
+			 * means the i-th inserted entry. The index goes through
+			 * the same whole-number validation as list indexing --
+			 * fractional, negative-out-of-range and non-numeric
+			 * indices fail the same way in both -- because reading
+			 * and writing through a bad index are the same bug
+			 * wherever the container lives.
+			 *
+			 * A position past the end can only happen if the table
+			 * shrank mid-loop. That is a runtime error rather than
+			 * nil, because silently yielding nothing for an entry
+			 * that was there a moment ago would hide the mutation
+			 * that removed it.
+			 */
+			Value index_val = vm_pop(vm);
+			Value target = vm_pop(vm);
+			if (!IS_FLINT_TABLE(target)) {
+				vm_runtime_error(vm,
+				        "can only index tables by position "
+				        "during iteration.");
+				return INTERPRET_RUNTIME_ERROR;
+			}
+			ObjTable *t = AS_FLINT_TABLE(target);
+			int idx;
+			if (!vm_value_to_index(
+			            vm, index_val, t->count, &idx, "table"))
+				return INTERPRET_RUNTIME_ERROR;
+			if (instruction == OP_TABLE_KEY)
+				vm_push(vm, STR_VAL(t->keys[idx]));
+			else
+				vm_push(vm, t->values[idx]);
+			break;
+		}
 		case OP_BUILD_LIST: {
 			/* the elements are on the stack above the placeholder
 			 * that was just pushed for the list itself */
@@ -1689,7 +1766,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			if (IS_LIST(target)) {
 				ObjList *list = AS_LIST(target);
 				int idx;
-				if (!value_to_index(vm,
+				if (!vm_value_to_index(vm,
 				            index_val,
 				            list->count,
 				            &idx,
@@ -1701,7 +1778,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				 * number */
 				ObjString *str = AS_STRING(target);
 				int idx;
-				if (!value_to_index(vm,
+				if (!vm_value_to_index(vm,
 				            index_val,
 				            str->length,
 				            &idx,
@@ -1713,9 +1790,45 @@ static InterpretResult run(VM *vm, int base_frame)
 				 * just walked past is a habit not worth forming. */
 				char c[2] = {str->chars[idx], '\0'};
 				vm_push(vm, STR_VAL(copy_string(vm, c, 1)));
+			} else if (IS_FLINT_TABLE(target)) {
+				/*
+				 * Table subscript with a computed key: `t[k]`
+				 * where k is a value rather than a literal name.
+				 *
+				 * Field access (`t.name`) only ever sees interned
+				 * constants, but a computed key is a runtime
+				 * string and may never have been interned -- so
+				 * this compares by content, not by pointer. The
+				 * field opcodes below do the same, for the same
+				 * reason: two equal strings must find each other
+				 * however they were made.
+				 *
+				 * A missing key is nil, exactly as with field
+				 * access. A non-string key is an error rather
+				 * than a nil, because silently accepting `t[42]`
+				 * would hide a bug in the key expression.
+				 */
+				ObjTable *t = AS_FLINT_TABLE(target);
+				if (!IS_STRING(index_val)) {
+					vm_runtime_error(vm,
+					        "table index must be a "
+					        "string.");
+					return INTERPRET_RUNTIME_ERROR;
+				}
+				ObjString *key = AS_STRING(index_val);
+				Value found = NIL_VAL;
+				for (int i = 0; i < t->count; i++) {
+					if (fl_strings_equal(t->keys[i], key)) {
+						found = t->values[i];
+						goto index_found;
+					}
+				}
+index_found:;
+				vm_push(vm, found);
 			} else {
 				vm_runtime_error(vm,
-				        "can only index lists and strings.");
+				        "can only index lists, strings and "
+				        "tables.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
 			break;
@@ -1727,9 +1840,61 @@ static InterpretResult run(VM *vm, int base_frame)
 
 			/* assignment target must already exist. there is no
 			 * append syntax; use push(). */
+			if (IS_FLINT_TABLE(target)) {
+				/*
+				 * Table subscript assignment: `t[k] = v`.
+				 *
+				 * Content comparison, as in OP_GET_INDEX above:
+				 * a computed key must find the entry a literal
+				 * key created. A missing key appends, which is
+				 * how a table grows through subscript; field
+				 * assignment (`t.name = v`) does the same.
+				 */
+				ObjTable *t = AS_FLINT_TABLE(target);
+				if (!IS_STRING(index_val)) {
+					vm_runtime_error(vm,
+					        "table index must be a "
+					        "string.");
+					return INTERPRET_RUNTIME_ERROR;
+				}
+				ObjString *key = AS_STRING(index_val);
+				bool found = false;
+				for (int i = 0; i < t->count; i++) {
+					if (fl_strings_equal(t->keys[i], key)) {
+						t->values[i] = val;
+						found = true;
+						goto set_index_found;
+					}
+				}
+set_index_found:;
+				if (!found) {
+					if (t->capacity < t->count + 1) {
+						int old_cap = t->capacity;
+						t->capacity =
+						        GROW_CAPACITY(old_cap);
+						t->keys = GROW_ARRAY(vm,
+						        ObjString *,
+						        t->keys,
+						        old_cap,
+						        t->capacity);
+						t->values = GROW_ARRAY(vm,
+						        Value,
+						        t->values,
+						        old_cap,
+						        t->capacity);
+					}
+					t->keys[t->count] = key;
+					t->values[t->count] = val;
+					t->count++;
+				}
+				vm_push(vm,
+				        val); /* assignment yields the value */
+				break;
+			}
 			if (!IS_LIST(target)) {
-				vm_runtime_error(
-				        vm, "can only index-assign to lists.");
+				vm_runtime_error(vm,
+				        "can only index-assign to lists and "
+				        "tables.");
 				return INTERPRET_RUNTIME_ERROR;
 			}
 			ObjList *list = AS_LIST(target);
@@ -1738,7 +1903,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			 * through a fractional or overflowing index are the same
 			 * bug, and one of them being checked is worse than
 			 * neither. */
-			if (!value_to_index(
+			if (!vm_value_to_index(
 			            vm, index_val, list->count, &idx, "list"))
 				return INTERPRET_RUNTIME_ERROR;
 			list->items[idx] = val;
@@ -1759,8 +1924,15 @@ static InterpretResult run(VM *vm, int base_frame)
 				 */
 				ObjTable *t = AS_FLINT_TABLE(target);
 				for (int i = 0; i < t->count; i++) {
-					/* keys are interned, so pointer compare */
-					if (t->keys[i] == name) {
+					/*
+					 * Content, not pointer, comparison.
+					 * Field names from constants are interned,
+					 * but a key stored by subscript may never
+					 * have been, and two equal strings must
+					 * find each other however they were made.
+					 */
+					if (fl_strings_equal(
+					            t->keys[i], name)) {
 						vm_push(vm, t->values[i]);
 						goto field_done;
 					}
@@ -1783,7 +1955,11 @@ field_done:;
 			if (IS_FLINT_TABLE(target)) {
 				ObjTable *t = AS_FLINT_TABLE(target);
 				for (int i = 0; i < t->count; i++) {
-					if (t->keys[i] == name) {
+					/* content comparison, as in OP_GET_FIELD:
+					 * a computed key must overwrite the entry
+					 * a literal key created, not duplicate it. */
+					if (fl_strings_equal(
+					            t->keys[i], name)) {
 						t->values[i] = val;
 						vm_push(vm, val);
 						goto field_set_done;
@@ -1854,13 +2030,13 @@ field_set_done:;
 			 */
 			bool found = false;
 			for (int i = 0; i < t->count; i++) {
-				if (t->keys[i] == name) {
+				if (fl_strings_equal(t->keys[i], name)) {
 					t->values[i] = val;
 					found = true;
-					break;
+					goto build_table_found;
 				}
 			}
-
+build_table_found:;
 			if (!found) {
 				/* grow both arrays together, they must stay parallel */
 				if (t->capacity < t->count + 1) {

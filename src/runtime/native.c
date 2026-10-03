@@ -196,6 +196,170 @@ static Value pop_native(VM *vm, int argc, Value *argv)
 }
 
 /*
+ * insert(xs, i, v) -> v, with v placed at position i.
+ *
+ * Everything at i and after shifts one slot right. Negative indices count
+ * from the end, as everywhere else: insert(xs, -1, v) puts v before the
+ * last element, and insert(xs, len(xs), v) is an append. The index goes
+ * through the same whole-number validation as subscript, so a fractional
+ * index fails here exactly as it does there.
+ */
+static Value insert_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_LIST(argv[0])) {
+		vm_runtime_error(
+		        vm, "first argument to insert() must be a list.");
+		return NIL_VAL;
+	}
+	ObjList *list = AS_LIST(argv[0]);
+	/*
+	 * One past the end is legal and means append, but negatives count
+	 * from the end of the *current* list -- insert(xs, -1, v) goes before
+	 * the last element, exactly where xs[-1] reads. Validating against
+	 * count+1 would shift every negative by one and make -1 mean append,
+	 * which contradicts indexing. So: exactly count appends, everything
+	 * else goes through the shared validation.
+	 */
+	int idx;
+	if (IS_NUMBER(argv[1]) && AS_NUMBER(argv[1]) == (double)list->count) {
+		idx = list->count;
+	} else if (!vm_value_to_index(vm, argv[1], list->count, &idx, "list")) {
+		return NIL_VAL;
+	}
+	if (list->capacity < list->count + 1) {
+		int old_cap = list->capacity;
+		list->capacity = GROW_CAPACITY(old_cap);
+		list->items = GROW_ARRAY(
+		        vm, Value, list->items, old_cap, list->capacity);
+	}
+	for (int i = list->count; i > idx; i--)
+		list->items[i] = list->items[i - 1];
+	list->items[idx] = argv[2];
+	list->count++;
+	return argv[2];
+}
+
+/*
+ * remove(xs, i) -> the removed value.
+ *
+ * Entries after i shift one slot left, preserving order for everything
+ * that remains. Negative indices count from the end. Removing from an
+ * empty list, or past either end, is an error rather than nil: silently
+ * returning nothing for a removal that removed nothing would hide the
+ * off-by-one that caused it.
+ */
+static Value remove_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	(void)vm;
+	if (!IS_LIST(argv[0])) {
+		vm_runtime_error(
+		        vm, "first argument to remove() must be a list.");
+		return NIL_VAL;
+	}
+	ObjList *list = AS_LIST(argv[0]);
+	int idx;
+	if (!vm_value_to_index(vm, argv[1], list->count, &idx, "list"))
+		return NIL_VAL;
+	Value removed = list->items[idx];
+	for (int i = idx; i < list->count - 1; i++)
+		list->items[i] = list->items[i + 1];
+	list->count--;
+	return removed;
+}
+
+/*
+ * keys(t) -> list of the table's key strings, in insertion order.
+ *
+ * A fresh list every call, so mutating the result never touches the table.
+ * Insertion order is guaranteed because the table itself is insertion
+ * ordered -- parallel arrays, not a hash -- so this is a copy rather than a
+ * traversal that could surprise.
+ */
+static Value keys_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_FLINT_TABLE(argv[0])) {
+		vm_runtime_error(vm, "argument to keys() must be a table.");
+		return NIL_VAL;
+	}
+	ObjTable *t = AS_FLINT_TABLE(argv[0]);
+	ObjList *out = new_list(vm);
+	vm_push(vm, OBJ_VAL(out));
+	if (t->count > 0) {
+		out->items = ALLOCATE(vm, Value, t->count);
+		out->capacity = t->count;
+		for (int i = 0; i < t->count; i++)
+			out->items[i] = STR_VAL(t->keys[i]);
+		out->count = t->count;
+	}
+	vm_pop(vm);
+	return OBJ_VAL(out);
+}
+
+/*
+ * has(t, k) -> whether the table holds this key.
+ *
+ * Content comparison, because a computed key is a runtime string and may
+ * never have been interned. Pointer comparison would answer "no" for a key
+ * that is plainly there, which is the same bug OP_GET_FIELD had before it
+ * was fixed. A non-string key is false rather than an error: asking about
+ * something that cannot be a key is a no, not a mistake.
+ */
+static Value has_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_FLINT_TABLE(argv[0])) {
+		vm_runtime_error(
+		        vm, "first argument to has() must be a table.");
+		return NIL_VAL;
+	}
+	if (!IS_STRING(argv[1]))
+		return FALSE_VAL;
+	ObjTable *t = AS_FLINT_TABLE(argv[0]);
+	ObjString *key = AS_STRING(argv[1]);
+	for (int i = 0; i < t->count; i++) {
+		if (fl_strings_equal(t->keys[i], key))
+			return TRUE_VAL;
+	}
+	return FALSE_VAL;
+}
+
+/*
+ * delete(t, k) -> true when something was removed.
+ *
+ * Entries after the removed one shift down, preserving insertion order for
+ * everything that remains. Deleting a missing key is false rather than an
+ * error: "make sure this is gone" should not fail when it already is.
+ */
+static Value delete_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	(void)vm;
+	if (!IS_FLINT_TABLE(argv[0])) {
+		vm_runtime_error(
+		        vm, "first argument to delete() must be a table.");
+		return NIL_VAL;
+	}
+	if (!IS_STRING(argv[1]))
+		return FALSE_VAL;
+	ObjTable *t = AS_FLINT_TABLE(argv[0]);
+	ObjString *key = AS_STRING(argv[1]);
+	for (int i = 0; i < t->count; i++) {
+		if (!fl_strings_equal(t->keys[i], key))
+			continue;
+		for (int j = i; j < t->count - 1; j++) {
+			t->keys[j] = t->keys[j + 1];
+			t->values[j] = t->values[j + 1];
+		}
+		t->count--;
+		return TRUE_VAL;
+	}
+	return FALSE_VAL;
+}
+
+/*
  * string form of any value. strings are returned as themselves, so this is
  * free in the common case. numbers reuse the integral check from print():
  * "4" not "4.000000".
@@ -745,6 +909,11 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "len", len_native, 1);
 	vm_define_native(vm, "push", push_native, 2);
 	vm_define_native(vm, "pop", pop_native, 1);
+	vm_define_native(vm, "insert", insert_native, 3);
+	vm_define_native(vm, "remove", remove_native, 2);
+	vm_define_native(vm, "keys", keys_native, 1);
+	vm_define_native(vm, "has", has_native, 2);
+	vm_define_native(vm, "delete", delete_native, 2);
 	vm_define_native(vm, "str", str_native, 1);
 	vm_define_native(vm, "num", num_native, 1);
 	vm_define_native(vm, "type", type_native, 1);

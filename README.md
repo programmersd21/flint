@@ -60,7 +60,7 @@ make install PREFIX=/usr/local LIBDIR=/usr/local/share/flint/lib
 
 there is nothing to uninstall beyond `make uninstall` -- no runtime, no shared
 libraries, no configuration, no build directory left behind. the whole thing is
-one binary and seven `.fl` files.
+one binary and nine `.fl` files.
 
 flint searches for its standard library in this order:
 

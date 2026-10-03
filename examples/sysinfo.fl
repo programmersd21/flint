@@ -1,0 +1,19 @@
+# sysinfo -- what machine is this.
+#
+# run it:  ./flint examples/sysinfo.fl
+#
+# prints platform, architecture, process id, working directory, home and
+# temporary directories, and path separator. nothing here can fail in a way
+# the script needs to handle: every value is either a string or nil, and nil
+# prints as nil, which is itself the information that the platform would not
+# answer.
+
+import os
+
+print("platform:  " + os.name() + "/" + os.arch())
+print("pid:       " + str(os.pid()))
+print("cwd:       " + str(os.getcwd()))
+print("home:      " + str(os.homedir()))
+print("tmp:       " + str(os.tmpdir()))
+print("pathsep:   " + os.pathsep())
+print("shell env: " + os.getenv("SHELL", "(not set)"))

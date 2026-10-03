@@ -127,6 +127,38 @@ popping an empty list is an error, not `nil`. there is no `tryPop`.
 print(pop([]))    # error: cannot pop from an empty list
 ```
 
+## insert
+
+place a value at a position, shifting everything after it right. returns the
+item, like `push`.
+
+```flint
+let xs = [1, 2, 3]
+print(insert(xs, 1, 9))   # 9
+print(xs)                 # [1, 9, 2, 3]
+```
+
+index rules match subscript exactly: negatives count from the end, so
+`insert(xs, -1, v)` goes where `xs[-1]` reads. exactly `len(xs)` appends.
+anything else out of range, fractional, or non-numeric fails the same way
+subscript does.
+
+## remove
+
+take the value out at a position and return it. entries after it shift left.
+
+```flint
+let xs = [1, 2, 3]
+print(remove(xs, 0))   # 1
+print(xs)              # [2, 3]
+print(remove(xs, -1))  # 3
+print(xs)              # [2]
+```
+
+removing past either end, from an empty list, or through a fractional index
+is an error rather than `nil`: silently returning nothing for a removal that
+removed nothing would hide the off-by-one that caused it.
+
 the slot is not cleared, so the popped value stays reachable until the list is
 collected. that is a deliberate simplification, and it is why a large list that
 you repeatedly pop does not shrink its memory.
@@ -446,6 +478,120 @@ an error.
 these are thin wrappers over `fopen`/`fread`/`fwrite`/`stat`. no buffering,
 no magic. what posix gives you is what you get.
 
+`read` and `write` stop the script with a clear error when they cannot do
+their job -- a missing source, an unwritable destination. a file that is not
+there is not an empty file, and returning nil for one would make every reader
+check for a case that is really a failure. check `exists()` first when a
+missing file is an expected outcome rather than an error.
+
+## listdir
+
+the names inside a directory, or `nil` when it cannot be read.
+
+```flint
+import fs
+
+let names = fs.listdir(".")
+if names == nil {
+    print("cannot read directory")
+    exit(1)
+}
+for name in names {
+    print(name)
+}
+```
+
+names, not paths: join them with `path.join`. `"."` and `".."` are included,
+exactly as the filesystem reports them. order is whatever the filesystem
+returns, which is to say unspecified.
+
+`nil` covers missing directories, permission failures, and the window
+between `exists()` and `listdir()` where the directory disappears. check
+`exists()` first when the reason matters; accept nil when it does not.
+
+## os
+
+platform answers, the working directory, and the environment. filesystem
+operations are `fs`, path strings are `path`, running programs is `exec()`
+or `process`: this module answers questions about the machine rather than
+changing it, with `chdir` and `setenv` as the two deliberate exceptions.
+
+```flint
+import os
+
+print(os.name() + "/" + os.arch())   # linux/x86_64, say
+print(os.getcwd())                   # where the process is standing
+print(os.getenv("HOME", ""))         # the value, or "" when unset
+print(os.pid())                      # this process's id
+```
+
+`name()` is one of `"linux"`, `"darwin"`, `"windows"`, `"freebsd"`,
+`"unknown"`. `arch()` is one of `"x86_64"`, `"aarch64"`, `"x86"`, `"arm"`,
+`"unknown"`. both answer from preprocessor macros, so they cannot be wrong
+about the binary they are compiled into -- but "unknown" is a real answer on
+a platform nobody taught them about, and a script that branches on it should
+have a fallback.
+
+`getenv(name, fallback)` takes the default explicitly, unlike `env(name)`
+which gives nil for a missing name. the result is always a string and the
+caller never branches on nil, which is what a config reader wants.
+
+`setenv` and `unsetenv` return booleans. unsetting a name that was never set
+succeeds. environment changes affect child processes, which is what makes
+them useful before `exec()` or `process.run()`.
+
+`homedir()` and `tmpdir()` give nil when the platform will not answer
+(`$HOME` unset, no `TEMP` on windows). a nil there is information -- there
+is no home to report -- not a failure.
+
+## process
+
+run a program and read what it said. the command is a list, never a string:
+a single string would have to be split somewhere, and splitting on spaces
+breaks on filenames that contain them.
+
+```flint
+import process
+
+let r = process.run(["git", "status", "--short"])
+print(r.code)      # 0
+print(r.stdout)    # the output, as a string
+```
+
+the result always has the same four fields: `stdout`, `stderr`, `code`, and
+`timed_out`. `code` follows the shell convention `exec()` already uses: the
+exit status, 128 plus the signal number for a signal death, 127 for "not
+found", 126 when exec could not run at all.
+
+```flint
+let r = process.run_opts(["ls", "/nonexistent"], {})
+print(r.code)        # 2
+print(r.timed_out)   # false
+```
+
+options are a table, and every key is optional. `cwd` runs there instead of
+here. `stdin` is piped to the child's standard input. `timeout` is
+milliseconds before the child is killed with SIGKILL:
+
+```flint
+let r = process.run_opts(["cat"], {stdin: "hello"})
+print(r.stdout)   # hello
+
+let slow = process.run_opts(["sleep", "5"], {timeout: 200})
+print(slow.timed_out)   # true
+print(slow.code)        # 137, which is 128 + 9
+```
+
+both streams are drained while the child runs, so a child that writes a lot
+to stderr while the parent reads stdout cannot deadlock -- 64K of unread
+stderr with nobody reading it is all a naive implementation takes. an
+unknown option is an error rather than ignored: an option the runtime does
+not understand is almost certainly a misspelled option it does.
+
+no shell, ever. `execvp` searches PATH and interprets nothing, so arguments
+keep their boundaries whatever they contain. a script that genuinely wants a
+shell says so explicitly with `["sh", "-c", ...]` and owns the quoting.
+
 ## collections
 
 ```flint
@@ -465,6 +611,44 @@ print(c.zip([1,2], ["a","b"])) # [[1, "a"], [2, "b"]]
 `reverse` returns a new list; the original is unchanged. `uniq` preserves
 first occurrence. `zip` stops at the shorter list. `min`, `max`, `sum` require
 a non-empty list and operate on numbers.
+
+## keys
+
+the key strings of a table, in insertion order, as a fresh list. mutating the
+result never touches the table.
+
+```flint
+let t = {b: 1, a: 2}
+print(keys(t))   # ["b", "a"]
+```
+
+## has
+
+whether the table holds the key. compares by content, so a key built at run
+time finds the entry a literal created.
+
+```flint
+let t = {ab: 1}
+print(has(t, "ab"))        # true
+print(has(t, "a" + "b"))   # true
+print(has(t, "zz"))        # false
+print(has(t, 42))          # false. only strings can be keys.
+```
+
+## delete
+
+remove an entry, reporting whether anything was removed. deleting a missing
+key is false rather than an error.
+
+```flint
+let t = {a: 1, b: 2}
+print(delete(t, "a"))   # true
+print(has(t, "a"))      # false
+print(delete(t, "a"))   # false
+```
+
+entries after the removed one shift down, preserving insertion order for
+everything that remains.
 
 ## json
 

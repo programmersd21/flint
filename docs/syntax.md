@@ -108,17 +108,18 @@ tightest binding first, which is the order you read them in:
 | level | operators | notes |
 |---|---|---|
 | 1 | `=`, `+=`, `-=`, `*=`, `/=` | assignment. right associative. |
-| 2 | `or` | |
-| 3 | `and` | |
-| 4 | `==`, `!=` | |
-| 5 | `<`, `<=`, `>`, `>=` | not chainable, see below |
-| 6 | `..` | ranges only, inside `for` |
-| 7 | `+`, `-` | |
-| 8 | `*`, `/`, `%` | |
-| 9 | `as` | type assertion |
-| 10 | `!`, `not`, `-` | prefix, unary |
-| 11 | `f()`, `a[i]`, `a.b` | postfix |
-| 12 | literals, names, `(...)`, `[...]`, `{...}` | |
+| 2 | `??` | nil-coalescing. right associative. |
+| 3 | `or` | |
+| 4 | `and` | |
+| 5 | `==`, `!=` | |
+| 6 | `<`, `<=`, `>`, `>=` | not chainable, see below |
+| 7 | `..` | ranges only, inside `for` |
+| 8 | `+`, `-` | |
+| 9 | `*`, `/`, `%` | |
+| 10 | `as` | type assertion |
+| 11 | `!`, `not`, `-` | prefix, unary |
+| 12 | `f()`, `a[i]`, `a.b` | postfix |
+| 13 | literals, names, `(...)`, `[...]`, `{...}` | |
 
 `and`, `or`, `not` and `else` are keywords, not operators. `&&`, `||` and `!`
 are not syntax; `!` is a prefix operator and means the same as `not`.
@@ -148,6 +149,48 @@ print(pick(1, 7))      # 1
 ```flint
 print(nil and 7)    # nil
 print(3 and 7)      # 7
+```
+
+### nil-coalescing
+
+`a ?? b` is `b` when `a` is nil, and `a` otherwise. only nil triggers the
+fallback: `false`, `0` and `""` are all values that stay, which is the entire
+difference from `or` and the reason both exist.
+
+```flint
+let config = {port: nil}
+print(config.port ?? 8080)   # 8080
+print(0 ?? 8080)              # 0
+print(false ?? true)          # false
+```
+
+the right side runs only when the left is nil. `5 ?? boom()` never calls
+`boom`. right-associative, so `a ?? b ?? c` is `a ?? (b ?? c)`: the middle
+is not evaluated before the left is known to need it.
+
+binds looser than `or` and tighter than `=`, which is the order C# uses and
+reads the way you expect: `a or b ?? c` is `a or (b ?? c)`.
+
+### destructuring
+
+`let {host, port} = config` binds each name from the table's fields. flat
+names only: no nesting, no defaults, no renaming.
+
+```flint
+let config = {host: "example.com", port: 8080}
+let {host, port} = config
+print(host)   # example.com
+print(port)   # 8080
+```
+
+each name becomes an ordinary binding by the ordinary rules. a missing key
+reads nil, as with any field access. a duplicate is a redeclaration error
+inside a function and an overwrite at the top level, exactly as with plain
+`let`. `const` works the same way.
+
+```flint
+let {missing} = config
+print(missing)   # nil
 ```
 
 ### comparisons do not chain

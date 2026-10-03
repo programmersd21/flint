@@ -14,13 +14,17 @@
 #include "value.h"
 #include "vm.h"
 
+#include <dirent.h>
 #include <errno.h>
+#include <limits.h>
+#include <math.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <sys/stat.h> /* stat, mkdir */
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -440,6 +444,218 @@ static Value env_native(VM *vm, int argc, Value *argv)
  * exception mechanism that does not exist. A status of 0 is success, anything
  * else is failure, which is what a shell checks.
  */
+/*
+ * OS information for lib/os.fl. These are thin and honest: each one answers
+ * a single question the C library already knows, with no caching, no
+ * abstraction, and platform branches only where the call genuinely differs.
+ *
+ * Windows gets best-effort answers where the call exists there (_getcwd,
+ * _chdir, GetCurrentProcessId) and nil or "unknown" where it does not. The
+ * primary target is POSIX; pretending otherwise would be dishonest, and so
+ * would refusing to build there.
+ */
+static Value os_name_native(VM *vm, int argc, Value *argv)
+{
+	(void)vm;
+	(void)argc;
+	(void)argv;
+#if defined(_WIN32)
+	return STR_VAL(new_string(vm, "windows", 7));
+#elif defined(__APPLE__)
+	return STR_VAL(new_string(vm, "darwin", 6));
+#elif defined(__linux__)
+	return STR_VAL(new_string(vm, "linux", 5));
+#elif defined(__FreeBSD__)
+	return STR_VAL(new_string(vm, "freebsd", 7));
+#else
+	return STR_VAL(new_string(vm, "unknown", 7));
+#endif
+}
+
+static Value os_arch_native(VM *vm, int argc, Value *argv)
+{
+	(void)vm;
+	(void)argc;
+	(void)argv;
+#if defined(__x86_64__) || defined(_M_X64)
+	return STR_VAL(new_string(vm, "x86_64", 6));
+#elif defined(__aarch64__) || defined(_M_ARM64)
+	return STR_VAL(new_string(vm, "aarch64", 7));
+#elif defined(__i386__) || defined(_M_IX86)
+	return STR_VAL(new_string(vm, "x86", 3));
+#elif defined(__arm__) || defined(_M_ARM)
+	return STR_VAL(new_string(vm, "arm", 3));
+#else
+	return STR_VAL(new_string(vm, "unknown", 7));
+#endif
+}
+
+static Value os_pathsep_native(VM *vm, int argc, Value *argv)
+{
+	(void)vm;
+	(void)argc;
+	(void)argv;
+#ifdef _WIN32
+	return STR_VAL(new_string(vm, "\\", 1));
+#else
+	return STR_VAL(new_string(vm, "/", 1));
+#endif
+}
+
+/* the working directory, or nil when it cannot be read. a directory the
+ * process cannot stat is not a string, and inventing one would be worse. */
+static Value os_getcwd_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	(void)argv;
+#ifdef _WIN32
+	char *cwd = _getcwd(NULL, 0);
+#else
+	char *cwd = getcwd(NULL, 0);
+#endif
+	if (cwd == NULL)
+		return NIL_VAL;
+	/* getcwd allocates with malloc, and new_string copies: free ours. */
+	Value out = STR_VAL(new_string(vm, cwd, (int)strlen(cwd)));
+	free(cwd);
+	return out;
+}
+
+static Value os_chdir_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "argument to chdir() must be a string.");
+		return NIL_VAL;
+	}
+#ifdef _WIN32
+	int rc = _chdir(AS_CSTRING(argv[0]));
+#else
+	int rc = chdir(AS_CSTRING(argv[0]));
+#endif
+	return rc == 0 ? TRUE_VAL : FALSE_VAL;
+}
+
+/*
+ * getenv with a default. env(name) already exists and returns nil for a
+ * missing variable; this one takes the fallback explicitly, which is what a
+ * config reader wants: `os.getenv("HOME", "")` is a string either way, and
+ * the caller never branches on nil.
+ */
+static Value os_getenv_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0]) || !IS_STRING(argv[1])) {
+		vm_runtime_error(vm, "arguments to getenv() must be strings.");
+		return NIL_VAL;
+	}
+	const char *value = getenv(AS_CSTRING(argv[0]));
+	const char *text = value != NULL ? value : AS_CSTRING(argv[1]);
+	return STR_VAL(new_string(vm, text, (int)strlen(text)));
+}
+
+static Value os_setenv_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0]) || !IS_STRING(argv[1])) {
+		vm_runtime_error(vm, "arguments to setenv() must be strings.");
+		return NIL_VAL;
+	}
+	const char *name = AS_CSTRING(argv[0]);
+	/* setenv rejects '=' in the name and an empty name; check before the
+	 * call so the error names the problem rather than the call. */
+	if (name[0] == '\0' || strchr(name, '=') != NULL) {
+		vm_runtime_error(vm, "invalid environment variable name.");
+		return NIL_VAL;
+	}
+#ifdef _WIN32
+	int rc = _putenv_s(name, AS_CSTRING(argv[1]));
+#else
+	int rc = setenv(name, AS_CSTRING(argv[1]), 1);
+#endif
+	return rc == 0 ? TRUE_VAL : FALSE_VAL;
+}
+
+static Value os_unsetenv_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0])) {
+		vm_runtime_error(
+		        vm, "argument to unsetenv() must be a string.");
+		return NIL_VAL;
+	}
+#ifdef _WIN32
+	int rc = _putenv_s(AS_CSTRING(argv[0]), "");
+#else
+	int rc = unsetenv(AS_CSTRING(argv[0]));
+#endif
+	/* unsetting a name that was never set succeeds on every platform
+	 * here, which matches what a script means by it. */
+	return rc == 0 ? TRUE_VAL : FALSE_VAL;
+}
+
+/* the user's home directory, or nil when the platform will not say. */
+static Value os_homedir_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	(void)argv;
+#ifdef _WIN32
+	const char *home = getenv("USERPROFILE");
+	if (home == NULL) {
+		const char *drive = getenv("HOMEDRIVE");
+		const char *path = getenv("HOMEPATH");
+		if (drive == NULL || path == NULL)
+			return NIL_VAL;
+		size_t n = strlen(drive) + strlen(path);
+		char *joined = malloc(n + 1);
+		if (joined == NULL)
+			return NIL_VAL;
+		memcpy(joined, drive, strlen(drive));
+		memcpy(joined + strlen(drive), path, strlen(path) + 1);
+		Value out = STR_VAL(new_string(vm, joined, (int)n));
+		free(joined);
+		return out;
+	}
+#else
+	const char *home = getenv("HOME");
+	if (home == NULL)
+		return NIL_VAL;
+#endif
+	return STR_VAL(new_string(vm, home, (int)strlen(home)));
+}
+
+/* a writable scratch directory, or nil when none is configured. */
+static Value os_tmpdir_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	(void)argv;
+#ifdef _WIN32
+	const char *tmp = getenv("TEMP");
+	if (tmp == NULL)
+		tmp = getenv("TMP");
+	if (tmp == NULL)
+		return NIL_VAL;
+	return STR_VAL(new_string(vm, tmp, (int)strlen(tmp)));
+#else
+	const char *tmp = getenv("TMPDIR");
+	if (tmp == NULL)
+		tmp = "/tmp";
+	return STR_VAL(new_string(vm, tmp, (int)strlen(tmp)));
+#endif
+}
+
+static Value os_pid_native(VM *vm, int argc, Value *argv)
+{
+	(void)vm;
+	(void)argc;
+	(void)argv;
+#ifdef _WIN32
+	return NUMBER_VAL((double)GetCurrentProcessId());
+#else
+	return NUMBER_VAL((double)getpid());
+#endif
+}
+
 static Value exit_native(VM *vm, int argc, Value *argv)
 {
 	int status = 0;
@@ -736,10 +952,473 @@ static Value write_file_native(VM *vm, int argc, Value *argv)
  * which searches PATH and does not interpret anything. A script that
  * genuinely wants a shell can say so, with system(), and owns the quoting.
  *
+ * So this takes the program and its arguments separately and calls execvp,
+ * which searches PATH and does not interpret anything. A script that
+ * genuinely wants a shell can say so, with system(), and owns the quoting.
+ *
  * Returns the exit status: 0 for success, the child's code for a normal
  * failure, and 127 or 126 for the shell's own "not found" and "not
  * executable" conventions, which is what a shell would have reported.
  */
+/*
+ * process.run(cmd) and process.run(cmd, opts) -> table.
+ *
+ * The captured-output counterpart to exec(). Where exec() hands the child's
+ * streams to the terminal and returns a bare status, this captures both
+ * streams into strings and returns everything at once:
+ *
+ *     {stdout: "...", stderr: "...", code: 0, timed_out: false}
+ *
+ * `cmd` is a non-empty list of strings: the program, then its arguments.
+ * There is deliberately no string form. A single string would have to be
+ * split somewhere, and splitting on spaces breaks on filenames that contain
+ * them -- which is the injection-shaped bug exec() exists to avoid. An
+ * argument list has no such question.
+ *
+ * `opts` is a table, and every key is optional:
+ *   cwd      run there instead of here. must be a string.
+ *   stdin    piped to the child's standard input. must be a string.
+ *   timeout  milliseconds before the child is killed. must be a
+ *            non-negative number; missing means wait as long as it takes.
+ *
+ * Unknown keys are an error rather than ignored. An option the runtime does
+ * not understand is almost certainly a misspelled option it does, and
+ * silently dropping it would run the child with different behaviour than
+ * the script asked for.
+ *
+ * Both streams are drained with poll() while the child runs. Reading one to
+ * EOF and then the other deadlocks as soon as the child fills the second
+ * pipe's buffer while the parent is still reading the first -- 64K of
+ * stderr with nobody reading it is all it takes. poll() waits on both and
+ * reads whatever is ready, so neither can fill.
+ *
+ * On timeout the child gets SIGKILL, the pipes are drained of whatever it
+ * wrote before dying, and timed_out comes back true with the code the wait
+ * reported. A timeout is not subtle and the result does not pretend it was
+ * clean.
+ *
+ * code follows the shell convention exec() uses: the exit status, 128+signo
+ * for a signal death, 127 for "not found", 126 for anything else that kept
+ * exec from running. timed_out disambiguates a SIGKILL the timeout sent
+ * from one the child earned on its own.
+ */
+static Value process_run_native(VM *vm, int argc, Value *argv)
+{
+	if (argc < 1 || argc > 2) {
+		vm_runtime_error(vm,
+		        "process.run() takes a command list and an optional "
+		        "options table.");
+		return NIL_VAL;
+	}
+	if (!IS_LIST(argv[0]) || AS_LIST(argv[0])->count == 0) {
+		vm_runtime_error(vm,
+		        "process.run() takes a non-empty list of strings: "
+		        "the program, then its arguments.");
+		return NIL_VAL;
+	}
+	ObjList *cmd = AS_LIST(argv[0]);
+	for (int i = 0; i < cmd->count; i++) {
+		if (!IS_STRING(cmd->items[i])) {
+			vm_runtime_error(vm,
+			        "process.run() argument %d must be a string.",
+			        i + 1);
+			return NIL_VAL;
+		}
+	}
+
+	/* options, all optional. defaults mean inherit: same directory, no
+	 * input, wait as long as it takes. */
+	const char *cwd = NULL;
+	const char *input = NULL;
+	size_t input_left = 0;
+	long timeout_ms = -1;
+	if (argc == 2) {
+		if (!IS_FLINT_TABLE(argv[1])) {
+			vm_runtime_error(
+			        vm, "process.run() options must be a table.");
+			return NIL_VAL;
+		}
+		ObjTable *opts = AS_FLINT_TABLE(argv[1]);
+		for (int i = 0; i < opts->count; i++) {
+			const char *key = opts->keys[i]->chars;
+			if (strcmp(key, "cwd") == 0) {
+				if (!IS_STRING(opts->values[i])) {
+					vm_runtime_error(vm,
+					        "process.run() option 'cwd' "
+					        "must be a string.");
+					return NIL_VAL;
+				}
+				cwd = AS_CSTRING(opts->values[i]);
+			} else if (strcmp(key, "stdin") == 0) {
+				if (!IS_STRING(opts->values[i])) {
+					vm_runtime_error(vm,
+					        "process.run() option 'stdin' "
+					        "must be a string.");
+					return NIL_VAL;
+				}
+				input = AS_CSTRING(opts->values[i]);
+				input_left = (size_t)AS_STRING(opts->values[i])
+				                     ->length;
+			} else if (strcmp(key, "timeout") == 0) {
+				/*
+				 * Validated as finite and fitting in an int
+				 * before the cast below. (long) on NaN, infinity
+				 * or a double past LONG_MAX is undefined
+				 * behaviour, not a large timeout -- and a
+				 * script asking to wait forever should say so
+				 * by omitting the key rather than by passing
+				 * infinity and getting whatever the cast
+				 * produces.
+				 */
+				if (!IS_NUMBER(opts->values[i]) ||
+				        isnan(AS_NUMBER(opts->values[i])) ||
+				        isinf(AS_NUMBER(opts->values[i])) ||
+				        AS_NUMBER(opts->values[i]) < 0 ||
+				        AS_NUMBER(opts->values[i]) >
+				                (double)INT_MAX) {
+					vm_runtime_error(vm,
+					        "process.run() option "
+					        "'timeout' "
+					        "must be a non-negative number "
+					        "of milliseconds.");
+					return NIL_VAL;
+				}
+				timeout_ms = (long)AS_NUMBER(opts->values[i]);
+			} else {
+				vm_runtime_error(vm,
+				        "unknown process.run() option '%s'.",
+				        key);
+				return NIL_VAL;
+			}
+		}
+	}
+
+	/* child_argv borrows the flint strings on the vm stack, which stay
+	 * rooted across the fork below -- the same arrangement exec() uses. */
+	char **child_argv = malloc(sizeof(char *) * (size_t)(cmd->count + 1));
+	if (child_argv == NULL) {
+		vm_runtime_error(vm, "out of memory in process.run().");
+		return NIL_VAL;
+	}
+	for (int i = 0; i < cmd->count; i++)
+		child_argv[i] = AS_CSTRING(cmd->items[i]);
+	child_argv[cmd->count] = NULL;
+
+	/* one pipe per captured stream, plus one for stdin when there is
+	 * input to send. all created before the fork, so a pipe failure is
+	 * an ordinary error rather than a half-built child. */
+	int out_pipe[2] = {-1, -1};
+	int err_pipe[2] = {-1, -1};
+	int in_pipe[2] = {-1, -1};
+	if (pipe(out_pipe) != 0 || pipe(err_pipe) != 0 ||
+	        (input != NULL && pipe(in_pipe) != 0)) {
+		if (out_pipe[0] != -1) {
+			close(out_pipe[0]);
+			close(out_pipe[1]);
+		}
+		if (err_pipe[0] != -1) {
+			close(err_pipe[0]);
+			close(err_pipe[1]);
+		}
+		free(child_argv);
+		vm_runtime_error(
+		        vm, "cannot create pipes: %s.", strerror(errno));
+		return NIL_VAL;
+	}
+
+	fflush(stdout);
+	fflush(stderr);
+
+	pid_t pid = fork();
+	if (pid < 0) {
+		close(out_pipe[0]);
+		close(out_pipe[1]);
+		close(err_pipe[0]);
+		close(err_pipe[1]);
+		if (in_pipe[0] != -1) {
+			close(in_pipe[0]);
+			close(in_pipe[1]);
+		}
+		free(child_argv);
+		vm_runtime_error(vm, "cannot fork: %s.", strerror(errno));
+		return NIL_VAL;
+	}
+
+	if (pid == 0) {
+		/*
+		 * Child: wire the pipes onto 0/1/2, move directories, run.
+		 * Nothing here may allocate, lock, or return -- the child
+		 * shares the parent's buffers and heap, so anything but
+		 * dup2/chdir/exec/_exit risks running them twice.
+		 */
+		if (input != NULL) {
+			close(in_pipe[1]);
+			if (in_pipe[0] != STDIN_FILENO) {
+				dup2(in_pipe[0], STDIN_FILENO);
+				close(in_pipe[0]);
+			}
+		}
+		close(out_pipe[0]);
+		close(err_pipe[0]);
+		dup2(out_pipe[1], STDOUT_FILENO);
+		dup2(err_pipe[1], STDERR_FILENO);
+		close(out_pipe[1]);
+		close(err_pipe[1]);
+		if (cwd != NULL && chdir(cwd) != 0)
+			/* NOLINTNEXTLINE(misc-include-cleaner) */
+			_exit(126);
+		execvp(child_argv[0], child_argv);
+		/* NOLINTNEXTLINE(misc-include-cleaner) */
+		_exit(errno == ENOENT ? 127 : 126);
+	}
+
+	/* parent from here. the write ends belong to the child now; closing
+	 * ours is what lets us see EOF, and forgetting any one of them hangs
+	 * the drain loop below on a pipe that can never close. */
+	free(child_argv);
+	close(out_pipe[1]);
+	close(err_pipe[1]);
+	if (input != NULL)
+		close(in_pipe[0]);
+
+	/* feed stdin first, before reading anything back. a child that reads
+	 * all of its input before writing -- `cat`, `grep`, most filters --
+	 * would otherwise block on an empty stdin pipe while the parent blocks
+	 * on an empty stdout pipe, and neither would move again. */
+	if (input != NULL) {
+		while (input_left > 0) {
+			ssize_t n = write(in_pipe[1], input, input_left);
+			if (n < 0) {
+				/* NOLINTNEXTLINE(misc-include-cleaner) */
+				if (errno == EINTR)
+					continue;
+				/* EPIPE means the child exited without reading
+				 * everything, which is its right. anything
+				 * else is reported below through the wait. */
+				break;
+			}
+			input += n;
+			input_left -= (size_t)n;
+		}
+		close(in_pipe[1]);
+	}
+
+	/* drain both streams. geometric growth from one page, like every
+	 * other growing buffer in the runtime. */
+	size_t out_cap = 4096;
+	size_t out_len = 0;
+	char *out_buf = malloc(out_cap);
+	size_t err_cap = 4096;
+	size_t err_len = 0;
+	char *err_buf = malloc(err_cap);
+	if (out_buf == NULL || err_buf == NULL) {
+		free(out_buf);
+		free(err_buf);
+		close(out_pipe[0]);
+		close(err_pipe[0]);
+		vm_runtime_error(vm, "out of memory in process.run().");
+		return NIL_VAL;
+	}
+
+	bool out_done = false;
+	bool err_done = false;
+	bool timed_out = false;
+	for (;;) {
+		if (out_done && err_done)
+			break;
+		/* <poll.h> and <errno.h> are included at the top; the cleaner
+		 * does not see through the loop. same class of false positive
+		 * as the _exit one below. */
+		/* NOLINTNEXTLINE(misc-include-cleaner) */
+		struct pollfd fds[2];
+		fds[0].fd = out_pipe[0];
+		/* NOLINTNEXTLINE(misc-include-cleaner) */
+		fds[0].events = out_done ? 0 : POLLIN;
+		fds[1].fd = err_pipe[0];
+		/* NOLINTNEXTLINE(misc-include-cleaner) */
+		fds[1].events = err_done ? 0 : POLLIN;
+		/* NOLINTNEXTLINE(misc-include-cleaner) */
+		int ready = poll(fds, 2, timeout_ms < 0 ? -1 : (int)timeout_ms);
+		if (ready < 0) {
+			/* NOLINTNEXTLINE(misc-include-cleaner) */
+			if (errno == EINTR)
+				continue;
+			break;
+		}
+		if (ready == 0) {
+			/* the timeout fired with output still coming. kill,
+			 * then fall out of the loop to drain whatever is left
+			 * and reap: the pipes hold it whether or not the
+			 * child is alive to write more. */
+			kill(pid, SIGKILL);
+			timed_out = true;
+			break;
+		}
+		for (int s = 0; s < 2; s++) {
+			if (fds[s].revents == 0)
+				continue;
+			char **buf = s == 0 ? &out_buf : &err_buf;
+			size_t *len = s == 0 ? &out_len : &err_len;
+			size_t *cap = s == 0 ? &out_cap : &err_cap;
+			if (*len == *cap) {
+				size_t fresh = *cap * 2;
+				char *grown = realloc(*buf, fresh);
+				if (grown == NULL) {
+					free(out_buf);
+					free(err_buf);
+					close(out_pipe[0]);
+					close(err_pipe[0]);
+					vm_runtime_error(vm,
+					        "out of memory in "
+					        "process.run().");
+					return NIL_VAL;
+				}
+				*buf = grown;
+				*cap = fresh;
+			}
+			ssize_t n = read(fds[s].fd, *buf + *len, *cap - *len);
+			if (n <= 0) {
+				/* EOF or a dead pipe: this stream is done.
+				 * errors other than EINTR end it too, because
+				 * a stream that cannot be read has nothing
+				 * left to give and the wait below still
+				 * reports what happened. */
+				if (n < 0 && errno == EINTR)
+					continue;
+				if (s == 0)
+					out_done = true;
+				else
+					err_done = true;
+			} else {
+				*len += (size_t)n;
+			}
+		}
+	}
+
+	/* whatever is left after a timeout kill: the child is dead or dying,
+	 * but its last writes may still be in the pipes. */
+	while (!out_done || !err_done) {
+		struct pollfd fds[2];
+		fds[0].fd = out_pipe[0];
+		fds[0].events = out_done ? 0 : POLLIN;
+		fds[1].fd = err_pipe[0];
+		fds[1].events = err_done ? 0 : POLLIN;
+		int ready = poll(fds, 2, 0);
+		if (ready <= 0)
+			break;
+		for (int s = 0; s < 2; s++) {
+			if (fds[s].revents == 0)
+				continue;
+			char **buf = s == 0 ? &out_buf : &err_buf;
+			size_t *len = s == 0 ? &out_len : &err_len;
+			size_t *cap = s == 0 ? &out_cap : &err_cap;
+			if (*len == *cap) {
+				size_t fresh = *cap * 2;
+				char *grown = realloc(*buf, fresh);
+				if (grown == NULL)
+					break;
+				*buf = grown;
+				*cap = fresh;
+			}
+			ssize_t n = read(fds[s].fd, *buf + *len, *cap - *len);
+			if (n <= 0) {
+				if (n < 0 && errno == EINTR)
+					continue;
+				if (s == 0)
+					out_done = true;
+				else
+					err_done = true;
+			} else {
+				*len += (size_t)n;
+			}
+		}
+	}
+	close(out_pipe[0]);
+	close(err_pipe[0]);
+
+	int status = 0;
+	while (waitpid(pid, &status, 0) < 0) {
+		/* NOLINTNEXTLINE(misc-include-cleaner) */
+		if (errno != EINTR) {
+			free(out_buf);
+			free(err_buf);
+			vm_runtime_error(vm,
+			        "cannot wait for child: %s.",
+			        strerror(errno));
+			return NIL_VAL;
+		}
+	}
+
+	double code;
+	if (WIFEXITED(status))
+		code = (double)WEXITSTATUS(status);
+	else if (WIFSIGNALED(status))
+		code = 128.0 + (double)WTERMSIG(status);
+	else
+		code = 127.0;
+
+	/*
+	 * The result table. Built field by field with each string pushed
+	 * across the allocations that can collect, which is the same rooting
+	 * discipline as everywhere else a native builds a value: nothing
+	 * unrooted survives a GROW_ARRAY.
+	 *
+	 * Lengths are checked against INT_MAX before the conversion, because
+	 * a child can write more than a flint string can hold and (int) on
+	 * that size is undefined behaviour, not a long string.
+	 */
+	if (out_len > (size_t)INT_MAX || err_len > (size_t)INT_MAX) {
+		free(out_buf);
+		free(err_buf);
+		vm_runtime_error(
+		        vm, "process.run() output is too large to hold.");
+		return NIL_VAL;
+	}
+	ObjTable *result = new_flint_table(vm);
+	vm_push(vm, OBJ_VAL(result));
+
+	ObjString *out_str = new_string(vm, out_buf, (int)out_len);
+	vm_push(vm, STR_VAL(out_str));
+	ObjString *err_str = new_string(vm, err_buf, (int)err_len);
+	vm_push(vm, STR_VAL(err_str));
+	free(out_buf);
+	free(err_buf);
+
+	static const char *field_names[4] = {
+	        "stdout", "stderr", "code", "timed_out"};
+	Value field_vals[4] = {STR_VAL(out_str),
+	        STR_VAL(err_str),
+	        NUMBER_VAL(code),
+	        timed_out ? TRUE_VAL : FALSE_VAL};
+	for (int i = 0; i < 4; i++) {
+		ObjString *name = copy_string(
+		        vm, field_names[i], (int)strlen(field_names[i]));
+		vm_push(vm, STR_VAL(name));
+		if (result->capacity < result->count + 1) {
+			int old_cap = result->capacity;
+			result->capacity = GROW_CAPACITY(old_cap);
+			result->keys = GROW_ARRAY(vm,
+			        ObjString *,
+			        result->keys,
+			        old_cap,
+			        result->capacity);
+			result->values = GROW_ARRAY(vm,
+			        Value,
+			        result->values,
+			        old_cap,
+			        result->capacity);
+		}
+		result->keys[result->count] = name;
+		result->values[result->count] = field_vals[i];
+		result->count++;
+		vm_pop(vm);
+	}
+	vm_pop(vm); /* err_str */
+	vm_pop(vm); /* out_str */
+	vm_pop(vm); /* the result */
+	return OBJ_VAL(result);
+}
+
 static Value exec_native(VM *vm, int argc, Value *argv)
 {
 	if (argc < 1 || !IS_STRING(argv[0])) {
@@ -881,6 +1560,113 @@ static Value isdir_native(VM *vm, int argc, Value *argv)
 	return S_ISDIR(st.st_mode) ? TRUE_VAL : FALSE_VAL;
 }
 
+/*
+ * listdir(path) -> list of names, or nil when the directory cannot be read.
+ *
+ * Names, not full paths: the caller joins with path.join, which keeps this
+ * honest about what it knows. "." and ".." are included, exactly as the
+ * filesystem reports them -- filtering them would be a policy this function
+ * has no business making, and every caller that cares already skips dotfiles
+ * for its own reasons.
+ *
+ * Order is whatever the filesystem returns. Not sorted, not insertion
+ * order, not promised: a script that needs determinism sorts the result
+ * itself (or should, once there is a sort to call).
+ *
+ * Nil on any failure -- missing directory, permission denied -- because a
+ * listing that cannot be read has no entries to report, and the caller that
+ * needs the reason already checked fs.exists() first. That two-step is the
+ * documented pattern, not an accident: exists-then-list has a TOCTOU window,
+ * and nil covers it.
+ */
+static Value listdir_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "Argument to listdir() must be a string.");
+		return NIL_VAL;
+	}
+#ifdef _WIN32
+	/* FindFirstFile needs a pattern, not a bare directory. */
+	ObjString *pattern = NULL;
+	{
+		const char *dir = AS_CSTRING(argv[0]);
+		size_t n = strlen(dir);
+		char *pat = malloc(n + 3);
+		if (pat == NULL) {
+			vm_runtime_error(vm, "out of memory in listdir().");
+			return NIL_VAL;
+		}
+		memcpy(pat, dir, n);
+		memcpy(pat + n, "\\*", 3);
+		pattern = copy_string(vm, pat, (int)(n + 2));
+		free(pat);
+	}
+	vm_push(vm, STR_VAL(pattern));
+	WIN32_FIND_DATAA found;
+	HANDLE handle = FindFirstFileA(pattern->chars, &found);
+	vm_pop(vm);
+	if (handle == INVALID_HANDLE_VALUE)
+		return NIL_VAL;
+	ObjList *out = new_list(vm);
+	vm_push(vm, OBJ_VAL(out));
+	do {
+		ObjString *name = copy_string(
+		        vm, found.cFileName, (int)strlen(found.cFileName));
+		vm_push(vm, STR_VAL(name));
+		if (out->count == out->capacity) {
+			int old_cap = out->capacity;
+			out->capacity = GROW_CAPACITY(old_cap);
+			out->items = GROW_ARRAY(
+			        vm, Value, out->items, old_cap, out->capacity);
+		}
+		out->items[out->count++] = vm->stack_top[-1];
+		vm_pop(vm);
+	} while (FindNextFileA(handle, &found));
+	FindClose(handle);
+	vm_pop(vm);
+	return OBJ_VAL(out);
+#else
+	DIR *dir = opendir(AS_CSTRING(argv[0]));
+	if (dir == NULL)
+		return NIL_VAL;
+	ObjList *out = new_list(vm);
+	vm_push(vm, OBJ_VAL(out));
+	for (;;) {
+		/*
+		 * readdir is the one libc call here that can fail without
+		 * returning NULL for end-of-stream, so errno is cleared
+		 * first and checked after: a stale errno from an earlier
+		 * call would otherwise report an error that never happened.
+		 */
+		errno = 0;
+		struct dirent *entry = readdir(dir);
+		if (entry == NULL) {
+			if (errno != 0) {
+				closedir(dir);
+				vm_pop(vm);
+				return NIL_VAL;
+			}
+			break;
+		}
+		ObjString *name = copy_string(
+		        vm, entry->d_name, (int)strlen(entry->d_name));
+		vm_push(vm, STR_VAL(name));
+		if (out->count == out->capacity) {
+			int old_cap = out->capacity;
+			out->capacity = GROW_CAPACITY(old_cap);
+			out->items = GROW_ARRAY(
+			        vm, Value, out->items, old_cap, out->capacity);
+		}
+		out->items[out->count++] = vm->stack_top[-1];
+		vm_pop(vm);
+	}
+	closedir(dir);
+	vm_pop(vm);
+	return OBJ_VAL(out);
+#endif
+}
+
 /* __rand() -> number in [0, 1)
  *
  * xorshift64*, seeded from the clock and the pid on first use. this is not
@@ -1019,6 +1805,9 @@ void register_sys_natives(VM *vm)
 	vm_define_native(vm, "read_file", read_file_native, 1);
 	vm_define_native(vm, "write_file", write_file_native, 2);
 	vm_define_native(vm, "exec", exec_native, -1);
+	/* -1 because process.run() takes one or two arguments, and the
+	 * fixed-arity check cannot express that. it checks inside. */
+	vm_define_native(vm, "__process_run", process_run_native, -1);
 
 	/* the fs, random and time modules are written in flint over these.
 	 * they are the only system-level entry points they need, so the
@@ -1027,11 +1816,25 @@ void register_sys_natives(VM *vm)
 	vm_define_native(vm, "__remove", remove_native, 1);
 	vm_define_native(vm, "__mkdir", mkdir_native, 1);
 	vm_define_native(vm, "__isdir", isdir_native, 1);
+	vm_define_native(vm, "__listdir", listdir_native, 1);
 	vm_define_native(vm, "__rand", rand_native, 0);
 	vm_define_native(vm, "__seed", seed_native, 1);
 	vm_define_native(vm, "__now", time_now_native, 0);
 	vm_define_native(vm, "__clock_ms", clock_ms_native, 0);
 	vm_define_native(vm, "__sleep", sleep_native, 1);
 	vm_define_native(vm, "__time_str", time_str_native, 1);
+
+	/* the os module is written in flint over these, like fs above. */
+	vm_define_native(vm, "__os_name", os_name_native, 0);
+	vm_define_native(vm, "__os_arch", os_arch_native, 0);
+	vm_define_native(vm, "__os_pathsep", os_pathsep_native, 0);
+	vm_define_native(vm, "__os_getcwd", os_getcwd_native, 0);
+	vm_define_native(vm, "__os_chdir", os_chdir_native, 1);
+	vm_define_native(vm, "__os_getenv", os_getenv_native, 2);
+	vm_define_native(vm, "__os_setenv", os_setenv_native, 2);
+	vm_define_native(vm, "__os_unsetenv", os_unsetenv_native, 1);
+	vm_define_native(vm, "__os_homedir", os_homedir_native, 0);
+	vm_define_native(vm, "__os_tmpdir", os_tmpdir_native, 0);
+	vm_define_native(vm, "__os_pid", os_pid_native, 0);
 	register_json_natives(vm);
 }

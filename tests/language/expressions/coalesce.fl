@@ -1,0 +1,31 @@
+# ?? is nil-coalescing with short-circuit evaluation.
+#
+# Only nil triggers the fallback. False, 0 and "" are all values that stay,
+# which is the entire difference from `or` and the reason both exist. The
+# right side runs only when the left is nil: `5 ?? boom()` never calls boom.
+print(nil ?? "fallback")
+print(0 ?? "fallback")
+print(false ?? "fallback")
+print("" ?? "fallback")
+print("x" ?? "fallback")
+
+# right-associative: a ?? b ?? c is a ?? (b ?? c)
+print(nil ?? nil ?? "deep")
+print(1 ?? 2 ?? 3)
+
+# the config-file shape this exists for
+let config = {port: nil}
+print(config.port ?? 8080)
+let full = {host: "example.com"}
+print(full.host ?? "127.0.0.1")
+
+# missing table keys are nil, so they fall back too
+print(full.missing ?? "default")
+
+# short circuit: the right side must not run when the left is not nil
+fn boom() {
+    print("RAN")
+    return 1
+}
+print(5 ?? boom())
+print(nil ?? boom())

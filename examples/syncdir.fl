@@ -1,0 +1,70 @@
+# syncdir -- copy new and changed files from one tree to another.
+#
+# run it:  ./flint examples/syncdir.fl <src> <dst>
+#
+# compares by content length: a destination file with the same byte count as
+# the source is assumed current, and everything else is copied. that is not
+# rsync -- there are no checksums, no timestamps, no deletions -- but it is
+# honest about what it promises, and for generated trees where a build
+# rewrites every file, length is usually enough to skip the identical ones.
+#
+# directories are created as needed. files starting with "." are skipped, on
+# the theory that a sync tool should not touch version control metadata
+# unless asked.
+
+import fs
+import path
+
+fn sync_file(src, dst) {
+    # read() and write() stop the script with a clear error when they
+    # cannot do their job -- a missing source or an unwritable destination
+    # is a real failure, not a nil to check for. so this function either
+    # copies or never returns, and the boolean is only about skipping.
+    let body = fs.read(src)
+    if fs.exists(dst) {
+        let old = fs.read(dst)
+        if len(old) == len(body) {
+            return true
+        }
+    }
+    fs.write(dst, body)
+    print(src + " -> " + dst)
+    return true
+}
+
+fn sync_dir(src, dst) {
+    if not fs.exists(dst) {
+        fs.mkdir(dst)
+    }
+    let names = fs.listdir(src)
+    if names == nil {
+        print("cannot read " + src)
+        return false
+    }
+    let ok = true
+    for name in names {
+        if starts_with(name, ".") { continue }
+        let s = path.join(src, name)
+        let d = path.join(dst, name)
+        if fs.isdir(s) {
+            if not sync_dir(s, d) {
+                ok = false
+            }
+        } else {
+            if not sync_file(s, d) {
+                ok = false
+            }
+        }
+    }
+    return ok
+}
+
+if len(args()) < 2 {
+    print("usage: flint syncdir.fl <src> <dst>")
+    exit(1)
+}
+
+if not sync_dir(args()[0], args()[1]) {
+    exit(1)
+}
+print("done")

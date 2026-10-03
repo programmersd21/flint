@@ -1,0 +1,40 @@
+# build -- run compiler tools and stop at the first failure.
+#
+# run it:  ./flint examples/build.fl
+#
+# a build script is a list of commands with opinions about failure: run each
+# one, print what it said when it fails, and stop. process.run captures both
+# streams, so the script decides what to show rather than the terminal
+# deciding for it.
+#
+# the commands below compile this repository's own C sources the way `make`
+# would describe them, minus the dependency tracking. swap in any commands;
+# the structure -- run, check code, print streams, stop -- stays the same.
+
+import process
+
+let steps = [
+    ["cc", "-fsyntax-only", "-Isrc/core", "-Isrc/frontend",
+     "-Isrc/runtime", "-Isrc/util", "src/main.c"],
+    ["cc", "-fsyntax-only", "-Isrc/core", "-Isrc/frontend",
+     "-Isrc/runtime", "-Isrc/util", "src/runtime/vm.c"]
+]
+
+let failed = false
+for step in steps {
+    print("+ " + step[0] + " " + step[len(step) - 1])
+    let r = process.run_opts(step, {})
+    if r.code != 0 {
+        print("failed with status " + str(r.code))
+        if len(r.stderr) > 0 {
+            print(r.stderr)
+        }
+        failed = true
+        break
+    }
+}
+
+if failed {
+    exit(1)
+}
+print("all steps passed")

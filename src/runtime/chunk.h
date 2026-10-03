@@ -118,6 +118,27 @@ typedef enum {
 	 * Operands: none. Stack: [list] -> [number].
 	 */
 	OP_LIST_LEN,
+	/*
+	 * The three table-iteration primitives, emitted only by `for k in t`
+	 * and `for k, v in t`.
+	 *
+	 * A table is insertion-ordered parallel arrays, so position `i` always
+	 * means the i-th inserted entry. The loop holds an index in a hidden
+	 * local and reads through these, exactly as list iteration holds an
+	 * index and reads through OP_GET_INDEX -- same shape, same reasoning.
+	 *
+	 * All three take no operands:
+	 *   OP_TABLE_COUNT  [table] -> [number]
+	 *   OP_TABLE_KEY    [table][index] -> [key-string]
+	 *   OP_TABLE_VALUE  [table][index] -> [value]
+	 *
+	 * Bounds are checked with the same whole-number validation as list
+	 * indexing, so a fractional or out-of-range index fails the same way
+	 * in both.
+	 */
+	OP_TABLE_COUNT,
+	OP_TABLE_KEY,
+	OP_TABLE_VALUE,
 	OP_BUILD_LIST,
 	OP_BUILD_TABLE,
 	/*
@@ -189,6 +210,15 @@ typedef enum {
 	OP_DEFINE_GLOBAL_EXPORT_LONG,
 	OP_DEFINE_GLOBAL_CONST_EXPORT,
 	OP_DEFINE_GLOBAL_CONST_EXPORT_LONG,
+	/*
+	 * Jump when the top of stack is not nil, peeking rather than popping.
+	 *
+	 * Emitted only by `??`, which needs "keep the value and skip the
+	 * fallback" in one jump: if the left side is not nil it stays and the
+	 * right side never runs; if it is nil the jump falls through to a POP
+	 * and the right side takes its place. Either path leaves one value.
+	 */
+	OP_JUMP_IF_NOT_NIL,
 } OpCode;
 
 typedef struct {

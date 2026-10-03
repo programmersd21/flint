@@ -144,6 +144,40 @@ compile time. The loader copies only flagged bindings into the table the
 importer receives. Finding exports by diffing the global table -- what v0.5.0
 did -- cannot tell a helper from a public function.
 
+## subprocesses
+
+`process.run` forks, wires two pipes plus an optional stdin pipe, and drains
+both streams with `poll()` while the child runs. reading one stream to EOF
+and then the other deadlocks as soon as the child fills the second pipe's
+buffer -- 64K of unread stderr is all it takes -- so both are drained
+together. an optional timeout kills with SIGKILL, and the result carries a
+`timed_out` flag so a timeout kill is distinguishable from a signal death.
+
+the child does nothing but `dup2`, `chdir`, `execvp` and `_exit`. forking
+before anything that can allocate or lock is what keeps the child from running
+a parent's stdio buffer or malloc lock. no shell anywhere: `execvp` searches
+PATH and interprets nothing.
+
+## deferred features
+
+two designs were evaluated and deliberately not shipped.
+
+`defer` needs per-frame cleanup stacks, scope tracking, and -- hardest -- an
+error policy for a deferred action that itself fails. "run the rest anyway"
+requires per-action error isolation the unwind model does not have; "stop at
+the first failure" abandons cleanup it promised to run. either is a coherent
+choice, but either is also VM surgery on the return and unwind paths, and
+there are currently no resource handles in the language that need cleanup:
+only whole-file `read`/`write` exist, no `open`/`close`. a cleanup construct
+with nothing to clean up is scope creep with a good name. when file handles
+land, this design is the starting point.
+
+destructuring shipped instead, because it is parser work over existing
+opcodes: `let {a, b} = t` compiles to a hidden table local plus one
+load-and-bind per name, with locals pre-filled so every slot holds a value
+below a top that only moves up. no VM changes, no new opcodes, no new failure
+modes.
+
 ## bytecode verification
 
 every chunk is verified before it runs. the pass checks that each opcode is a

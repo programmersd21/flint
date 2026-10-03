@@ -1,0 +1,50 @@
+# dirinfo -- what is in this directory.
+#
+# run it:  ./flint examples/dirinfo.fl [path]
+#
+# counts files against directories, totals the sizes it can stat, and names
+# the largest thing it finds. uses fs.listdir, path.join and fs.isdir, and
+# nothing else: no shell, no find(1), no parsing of command output.
+
+import fs
+import path
+import os
+
+let dir = os.getcwd()
+if len(args()) > 0 {
+    dir = args()[0]
+}
+
+let names = fs.listdir(dir)
+if names == nil {
+    print("cannot read " + dir)
+    exit(1)
+}
+
+let files = 0
+let dirs = 0
+let biggest = ""
+let biggest_size = -1
+for name in names {
+    if name == "." or name == ".." { continue }
+    let full = path.join(dir, name)
+    if fs.isdir(full) {
+        dirs += 1
+    } else {
+        files += 1
+        # read() stops the script with a clear error when a file cannot
+        # be read, so there is no nil to check for here. a file that was
+        # listed a moment ago but is gone now is a real failure, not an
+        # empty file, and failing loudly is the honest response.
+        let text = fs.read(full)
+        if len(text) > biggest_size {
+            biggest_size = len(text)
+            biggest = name
+        }
+    }
+}
+
+print(dir + ": " + str(files) + " files, " + str(dirs) + " dirs")
+if biggest != "" {
+    print("largest: " + biggest + " (" + str(biggest_size) + " bytes)")
+}

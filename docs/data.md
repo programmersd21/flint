@@ -81,8 +81,20 @@ print(pop(xs))  # 4
 print(len(xs))  # 3
 ```
 
-there is no `insert`, no `remove`, no `slice`, no `sort`, no `map`, no
-`filter`, no `join`. every one of those is a function you write:
+`insert()` and `remove()` work by position, with the same index rules as
+subscript: negatives count from the end, fractions and out-of-range fail the
+same way. `insert` at exactly `len(xs)` appends; `remove` returns what it took.
+
+```flint
+let xs = [1, 2, 3]
+insert(xs, 1, 9)
+print(xs)          # [1, 9, 2, 3]
+print(remove(xs, 1))  # 9
+print(xs)          # [1, 2, 3]
+```
+
+there is no `slice`, no `sort`, no `map`, no `filter`, no `join`. every one
+of those is a function you write:
 
 ```flint
 fn map(xs, f) {
@@ -174,22 +186,71 @@ print(t.missing)    # nil, no error
 because of that, a miss and a stored `nil` are indistinguishable. if you need
 to tell them apart you need a sentinel of your own.
 
-### ordering
+### computed keys
 
-tables preserve insertion order and have no defined iteration order beyond
-that, because you cannot iterate them at all:
+a literal name after the dot is one way to reach a field. a value in brackets
+is the other: `t[k]` reads the entry whose key equals `k`, and `t[k] = v`
+writes it, creating the entry when it is missing.
 
 ```flint
-for k in t { print(k) }    # error: len() must be a string or list
+let t = {ab: 1}
+let k = "a" + "b"
+print(t[k])     # 1. the key was built at run time.
+t[k] = 99
+print(t.ab)     # 99
+print(t["zz"])  # nil, like any missing key
 ```
 
-use the keys you know, or keep the key list alongside.
+both directions compare by content, so a key built at run time finds the
+entry a literal created. the key must be a string; anything else is an error
+rather than a miss, because `t[42]` is a bug in the key expression.
+
+### iteration
+
+`for k, v in t` walks every entry in insertion order:
+
+```flint
+let t = {a: 1, b: 2}
+for k, v in t {
+    print(k)
+    print(v)
+}
+```
+
+insertion order is the contract, because the table is insertion ordered to
+begin with. the count is re-read every iteration, so entries appended in the
+body are visited; entries removed shift everything after them down by
+position. a loop that mutates its own table is the author's responsibility,
+and the behaviour is positional rather than surprising.
+
+nested loops keep separate positions, and `break` and `continue` work,
+because the desugar is the same loop shape as list iteration with different
+loads.
+
+### asking and removing
+
+```flint
+let t = {a: 1}
+print(keys(t))       # ["a"]. a fresh list, in insertion order.
+print(has(t, "a"))   # true
+print(has(t, "zz"))  # false
+print(has(t, 42))    # false. only strings can be keys.
+print(delete(t, "a"))  # true. the entry is gone.
+print(has(t, "a"))     # false
+print(delete(t, "a"))  # false. already gone is not an error.
+```
+
+`keys()` returns a new list every call, so mutating the result never touches
+the table. `has()` with a non-string key is false rather than an error:
+asking about something that cannot be a key is a no. `delete()` on a missing
+key is false for the same reason "make sure this is gone" should not fail
+when it already is.
 
 ### growth
 
 adding a key grows the table by doubling, and a write to an existing key
-overwrites. there is no delete, so a key once added is there for the life of
-the table.
+overwrites. deleted entries shift the survivors down, preserving insertion
+order for everything that remains.
 
 ## which one to use
 
