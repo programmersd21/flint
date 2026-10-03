@@ -1,0 +1,150 @@
+# Errors and the other features, in one file each way round.
+#
+# Every one of these pairs is a place where two subsystems meet: an error
+# crosses a closure, a loop, a module boundary, a collection and a native call.
+# Testing them apart is not enough, because the interesting failures are at the
+# seams.
+
+# --- closures: an error crossing a captured variable ---
+
+fn counter() {
+	let n = 0
+	let bump = fn() {
+		n += 1
+		if n > 3 {
+			throw "over the limit"
+		}
+		return n
+	}
+	let read = fn() { return n }
+	return [bump, read]
+}
+
+let c = counter()
+print(c[0]())
+print(c[0]())
+print(c[0]())
+try {
+	c[0]()
+} catch e {
+	print("caught: " + e)
+}
+# the counter kept its value through the unwind
+print(c[1]())
+
+# --- two closures over one variable, one throwing ---
+
+fn pair() {
+	let shared = 0
+	return [
+		fn() {
+			shared += 1
+			return shared
+		},
+		fn() {
+			throw "the second one always fails"
+		},
+	]
+}
+
+let p = pair()
+print(p[0]())
+try {
+	p[1]()
+} catch e {
+	print("caught: " + e)
+}
+print(p[0]())
+
+# --- closures in a list, failing one at a time ---
+
+let fs = []
+let i = 0
+while i < 4 {
+	let captured = i
+	push(fs, fn() {
+		if captured % 2 == 0 {
+			throw "even " + str(captured)
+		}
+		return captured
+	})
+	i += 1
+}
+
+for f in fs {
+	try {
+		print(f())
+	} catch e {
+		print("caught: " + e)
+	}
+}
+
+# --- errors through a table and a list of results ---
+
+# the shape a library wants: a list of values, each either a result or an
+# error, rather than an exception per item
+fn attempt(f) {
+	try {
+		return {ok: f()}
+	} catch e {
+		return {error: e.message}
+	}
+}
+
+let results = [attempt(fn() { return 1 }),
+	attempt(fn() { return [][0] }), attempt(fn() { return 3 })]
+for r in results {
+	if has(r, "ok") {
+		print("ok " + str(r["ok"]))
+	} else {
+		print("error " + r["error"])
+	}
+}
+
+# --- an error inside a loop that closes a closure each iteration ---
+
+let closures = []
+for j in 0..5 {
+	let captured = j
+	push(closures, fn() {
+		if captured == 3 {
+			throw "three"
+		}
+		return captured
+	})
+}
+
+for f in closures {
+	try {
+		print(f())
+	} catch e {
+		print("caught: " + e)
+	}
+}
+
+# --- module globals surviving an error ---
+
+import "state_mod.fl" as st
+try {
+	st.explode()
+} catch e {
+	print("caught: " + e.message)
+}
+print(st.value())
+print(st.describe())
+
+# --- a native call inside a try, several deep ---
+
+fn deep_native(x) {
+	return len([1, 2, 3]) - x
+}
+
+for k in 0..4 {
+	try {
+		print(deep_native(k))
+	} catch e {
+		print("caught: " + e.message)
+	}
+}
+
+print("all done")

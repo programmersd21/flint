@@ -1,0 +1,10 @@
+1
+2
+3
+3
+ran 3 times
+4
+4
+caught: cannot assign to constant 'CEILING'.
+caught: can only call functions.
+done

@@ -1558,17 +1558,30 @@ dispatch_resume:;
 			 * unknown name would create it and the error below
 			 * would report "undefined" for a name that exists.
 			 */
-			if (table_is_const(vm->globals, name)) {
+			/*
+			 * The same environment the read path uses: the closure's
+			 * own module when it has one, and the running module
+			 * otherwise. Using only vm->globals here meant a module
+			 * function that assigned to its own private global
+			 * failed with "undefined variable" as soon as it was
+			 * called from outside the module's import -- the read
+			 * path found the name through closure->module and the
+			 * write path did not.
+			 */
+			Table *env = frame->closure->module != NULL
+			                     ? frame->closure->module
+			                     : vm->globals;
+			if (table_is_const(env, name)) {
 				vm_runtime_error(vm,
 				        "cannot assign to constant '%s'.",
 				        name->chars);
 				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 
-			if (table_set(vm, vm->globals, name, peek(vm, 0))) {
+			if (table_set(vm, env, name, peek(vm, 0))) {
 				/* assigning to something that was not declared
 				 * just created it. undo that and complain. */
-				table_delete(vm->globals, name);
+				table_delete(env, name);
 				vm_runtime_error(vm,
 				        "undefined variable '%s'.",
 				        name->chars);

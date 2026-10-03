@@ -1,0 +1,76 @@
+# Nesting, shadowing and the scope rules around handlers.
+#
+# A handler is popped when its block ends, whether it ended normally or by
+# returning, so a try two calls deep cannot catch an error raised after the
+# inner call returned.
+
+# a handler is per-invocation, not per-function: two calls in sequence, each
+# with its own try, do not see each other's handlers
+fn twice(f) {
+	f()
+	f()
+}
+
+let seen = 0
+twice(fn() {
+	try {
+		seen += 1
+	} catch e {
+	}
+})
+print(seen)
+
+# recursion with a try in every frame: the innermost handler catches first
+fn recurse(n) {
+	try {
+		if n == 0 {
+			throw "bottom"
+		}
+		return recurse(n - 1)
+	} catch e {
+		return "caught at depth " + str(n)
+	}
+}
+print(recurse(3))
+
+# ...and with no handler anywhere near, the error propagates out. the recursive
+# call below has no try at all, so nothing in this file catches it; the
+# uncaught version of it is recursion_uncaught.fl
+fn recurse_uncaught(n) {
+	if n == 0 {
+		throw "bottom"
+	}
+	return recurse_uncaught(n - 1)
+}
+recurse_uncaught(3)
+print("never")
+
+# a try inside a nested block, where the block's locals are not the script's
+let shadowed = "outer"
+{
+	let shadowed = "inner"
+	try {
+		throw "from the inner block"
+	} catch e {
+		print(e)
+	}
+}
+print(shadowed)
+
+# the catch binding is a local of the catch body and does not leak
+try {
+	throw "leaky"
+} catch e {
+	print(e)
+}
+print("after the try")
+
+# a catch without a binding discards the error
+try {
+	throw "discarded"
+} catch {
+	print("caught something")
+}
+
+# ...and a try without a catch is a compile error, since there is nothing to
+# do with an error that nothing handles. see try_without_catch.fl

@@ -1,0 +1,8 @@
+bottom
+[line 41] in recurse_uncaught()
+[line 43] in recurse_uncaught()
+[line 43] in recurse_uncaught()
+[line 43] in recurse_uncaught()
+[line 45] in script
+2
+caught at depth 0

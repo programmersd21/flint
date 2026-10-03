@@ -1,0 +1,7 @@
+# A module that loads normally. The control for module_throw.fl.
+
+export let value = 42
+
+export fn double(x) {
+	return x * 2
+}

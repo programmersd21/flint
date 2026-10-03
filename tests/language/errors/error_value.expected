@@ -1,0 +1,19 @@
+table
+Error
+something went wrong
+something went wrong
+Error
+Error
+TypeError
+ValueError
+IOError
+NetworkError
+TimeoutError
+ProcessError
+ModuleError
+PackageError
+number
+42
+3
+caught nil: true
+caught bool: true

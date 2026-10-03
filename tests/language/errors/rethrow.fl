@@ -1,0 +1,61 @@
+# Errors from the file system and json, rethrown with context.
+#
+# The shape most library code ends up with: catch what you were given, add
+# what you know, raise it again. It only works if a caught error is an
+# ordinary value.
+
+import fs
+
+fn read_config(path) {
+	try {
+		return fs.read(path)
+	} catch e {
+		throw IOError("could not read config at " + path + ": " + e.message)
+	}
+}
+
+fn load(path) {
+	try {
+		return read_config(path)
+	} catch e {
+		throw Error("startup failed: " + e.message)
+	}
+}
+
+try {
+	load("/nonexistent-directory-for-tests/config.json")
+} catch e {
+	print(e.type)
+	print(e.message)
+}
+
+# the same value caught twice in a row keeps working, which is what makes the
+# pattern above safe to write
+try {
+	load("/nonexistent-directory-for-tests/config.json")
+} catch e {
+	print("again: " + e.message)
+}
+
+# an error caught and deliberately dropped, so the caller sees success. this is
+# the difference an error system buys: recovering is a decision, not a side
+# effect.
+fn read_or_default(path, fallback) {
+	try {
+		return fs.read(path)
+	} catch e {
+		return fallback
+	}
+}
+
+print(read_or_default("/nonexistent-directory-for-tests/x", "default"))
+
+# ...and a file that does exist, so the function above is not just a stub
+let dir = "flint_rethrow_test"
+fs.mkdir(dir)
+fs.write(dir + "/real.json", "real contents")
+print(read_or_default(dir + "/real.json", "default"))
+print(read_or_default(dir + "/real.json", "default"))
+
+fs.remove(dir + "/real.json")
+fs.remove(dir)

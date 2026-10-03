@@ -1,0 +1,15 @@
+# An uncaught error, under every diagnostic format.
+#
+# The default (legacy) format is the bare message plus a trace. Human format
+# adds the file, the line, a caret under the failing expression and the
+# diagnostic code. JSON format is the same facts for a tool.
+#
+# This file ends on one uncaught error, so which format was requested is the
+# only variable. Each format is asserted separately, since the file can only
+# produce one of them per run.
+
+let xs = [1, 2, 3]
+let text = "a string, not a list"
+print(xs[0])
+print(text[0])
+print(xs[99])

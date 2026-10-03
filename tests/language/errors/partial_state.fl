@@ -1,0 +1,66 @@
+# The catch block sees the error the try block did not get to finish.
+#
+# Everything the try body had already computed and not yet stored is gone when
+# the handler runs: the VM restores the value stack to the depth the try block
+# began at. That is what makes the restore safe, and it is also visible here:
+# a local the try body had not finished assigning has no value to carry.
+
+try {
+	let finished = "set before the error"
+	print(finished)
+	let never_set = 0
+	never_set = [1, 2][9]
+	print(never_set)
+} catch e {
+	print("caught: " + e.message)
+}
+
+# a partial list built inside the try body is not visible afterwards, and does
+# not need to be: locals do not outlive their block.
+fn build_partial() {
+	let acc = []
+	let i = 0
+	try {
+		while i < 10 {
+			push(acc, i)
+			i += 1
+			if i == 5 {
+				throw "stopped at " + str(i)
+			}
+		}
+	} catch e {
+		# `acc` is this function's local, not the try block's, so it survived
+		return acc
+	}
+	return acc
+}
+
+print(build_partial())
+
+# a captured variable is different: it lives in an upvalue, which unwinding
+# closes rather than discards, so the closure still sees the old value
+fn capture_before_error() {
+	let seen = 0
+	let f = fn() { return seen }
+	try {
+		seen = 7
+		throw "after the capture"
+	} catch e {
+		print(f())
+	}
+}
+
+capture_before_error()
+
+# ...and one created after the error is not: it is inside the try body
+fn capture_inside_error() {
+	try {
+		let inside = 1
+		let f = fn() { return inside }
+		throw "before f is ever called"
+	} catch e {
+		print("handler ran")
+	}
+}
+
+capture_inside_error()

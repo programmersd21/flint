@@ -1,0 +1,28 @@
+# Errors and the repl.
+#
+# The repl runs one line at a time, so a try on one line cannot span the next
+# one: each line is compiled and run separately, and a block left open at the
+# end of a line is carried to the next. What has to hold is that an error on
+# one line does not poison the session: the next line runs normally.
+#
+# Run this file with: flint < tests/language/errors/repl_session.fl
+
+print("first")
+throw Error("an error on its own line")
+print("second")
+try {
+	throw Error("caught on a later line")
+} catch e {
+	print("caught: " + e.message)
+}
+print("third")
+let f = fn() { throw "from a function" }
+try {
+	f()
+} catch e {
+	print("caught: " + e)
+}
+print("fourth")
+let survivors = [1, 2, 3]
+print(survivors[2])
+print("fifth")

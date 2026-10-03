@@ -1,0 +1,19 @@
+# An error raised after a `return` out of a try block.
+#
+# The try in return_from_try.fl retired its handler on the way out, so an error
+# raised by the next statement has nothing to catch it and stops the script.
+# That is the property that makes the retirement meaningful: a handler that
+# outlived its block would catch errors belonging to code that never ran
+# inside it.
+
+fn get_list(x) {
+	try {
+		return [1, 2][x]
+	} catch e {
+		return -1
+	}
+}
+
+print(get_list(0))
+print([5][3])
+print("never printed")

@@ -1,0 +1,25 @@
+# A module whose state outlives a failure inside it.
+#
+# Imported by cross_feature.fl and module_state.fl. The point is that the
+# module's globals are its own: a failure unwinds the stack, not the module's
+# environment, and the environment is still there afterwards.
+
+let count = 0
+
+export fn increment() {
+	count += 1
+	return count
+}
+
+export fn value() {
+	return count
+}
+
+export fn explode() {
+	count += 100
+	throw IOError("module failed after counting to " + str(count))
+}
+
+export fn describe() {
+	return "count is " + str(count)
+}

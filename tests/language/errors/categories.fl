@@ -1,0 +1,52 @@
+# The error categories, one each.
+#
+# Flint has no class hierarchy: an error is a table whose `type` field names a
+# category, and which category it is decides how a program should react. The
+# categories below are the ones the runtime and the standard library raise.
+#
+# Which one an error has is a promise, so each one is thrown here and checked
+# for the field the type is meant to carry, not just that it was caught.
+
+fn kind(f) {
+	try {
+		f()
+	} catch e {
+		return e.type
+	}
+	return "none"
+}
+
+print(kind(fn() { throw Error("a") }))
+print(kind(fn() { throw TypeError("b") }))
+print(kind(fn() { throw ValueError("c") }))
+print(kind(fn() { throw IOError("d") }))
+print(kind(fn() { throw NetworkError("e") }))
+print(kind(fn() { throw TimeoutError("f") }))
+print(kind(fn() { throw ProcessError("g") }))
+print(kind(fn() { throw ModuleError("h") }))
+print(kind(fn() { throw PackageError("i") }))
+
+# a runtime error has the same shape as a thrown one, with `Error` as the
+# category: the language has one error shape, and the runtime errors are not a
+# separate kind of thing that only some call sites can produce
+print(kind(fn() { return [1][9] }))
+print(kind(fn() { return "a" + 1 }))
+print(kind(fn() { return undefined_name_here }))
+
+# the constructors are values, so a library can take one as a parameter and
+# fail with whatever category its caller asked for
+fn fail_with(make, message) {
+	throw make(message)
+}
+
+try {
+	fail_with(NetworkError, "connection reset")
+} catch e {
+	print(e.type + " / " + e.message)
+}
+
+try {
+	fail_with(TimeoutError, "took too long")
+} catch e {
+	print(e.type + " / " + e.message)
+}

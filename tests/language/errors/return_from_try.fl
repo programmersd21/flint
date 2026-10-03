@@ -1,0 +1,79 @@
+# return out of a try body
+#
+# break, continue and return all leave a try block without running the rest of
+# it, and each has to retire the handler it was inside. For break and continue
+# that is just an ordering question, since neither evaluates anything after the
+# jump. return is different: it evaluates a value first, and that evaluation
+# can fail. A handler retired before the value was computed is a handler that
+# was never there.
+
+fn via_return(x) {
+	try {
+		return [1, 2, 3][x]
+	} catch e {
+		return -1
+	}
+}
+print(via_return(0))
+print(via_return(9))
+
+# the return value can be any expression that fails, not just an index
+fn parse_two(s) {
+	try {
+		return num(s) * 2
+	} catch e {
+		return 0
+	}
+}
+print(parse_two("21"))
+print(parse_two("nope"))
+
+# ...including a call into another function that fails
+fn inner(x) {
+	return [7][x]
+}
+fn outer(x) {
+	try {
+		return inner(x)
+	} catch e {
+		return "caught"
+	}
+}
+print(outer(0))
+print(outer(4))
+
+# a return from inside a loop nested in a try still unwinds the loop
+fn first_big(xs) {
+	try {
+		let i = 0
+		while i < len(xs) {
+			if xs[i] > 5 {
+				return xs[i]
+			}
+			i += 1
+		}
+		return 0
+	} catch e {
+		return -1
+	}
+}
+print(first_big([1, 2, 9, 3]))
+print(first_big([1, 2, 3]))
+
+# after all of that, the handler is gone: an error outside the try is not
+# caught by a try that has already returned
+fn once_only(should_fail) {
+	try {
+		if should_fail {
+			throw "inside"
+		}
+		return "no error"
+	} catch e {
+		return "caught: " + e
+	}
+}
+print(once_only(true))
+print(once_only(false))
+
+# and an error raised after a return from a try block is uncaught, so it is in
+# its own file: return_uncaught.fl
