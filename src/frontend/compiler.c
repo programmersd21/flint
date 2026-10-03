@@ -1901,11 +1901,21 @@ static void for_statement(void)
 				emit_byte(OP_EQUAL);
 				int ok = emit_jump(OP_JUMP_IF_FALSE);
 				emit_byte(OP_POP);
-				ObjString *err_str = copy_string(state.vm,
-				        "a range step cannot be zero.",
-				        28);
-				emit_constant(STR_VAL(err_str));
-				emit_byte(OP_THROW);
+				/*
+				 * Raises from a native so the error has the
+				 * standard table shape with `type` and
+				 * `message`, like every other runtime error,
+				 * rather than a bare thrown string. A script
+				 * that does `catch e { e.message }` then sees
+				 * the same thing it sees for any runtime
+				 * failure.
+				 */
+				int fn = identifier_constant_from(
+				        "__range_step_error", 18);
+				emit_indexed(OP_GET_GLOBAL,
+				        OP_GET_GLOBAL_LONG, fn);
+				emit_bytes(OP_CALL, 0);
+				emit_byte(OP_POP);
 				patch_jump(ok);
 				emit_byte(OP_POP);
 			}
