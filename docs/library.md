@@ -674,3 +674,48 @@ because a function is not JSON and pretending it is makes round-trips wrong.
 circular references are not detected. the vm will overflow the call stack
 first, which is a fine outcome: a circular structure is a bug, not an edge
 case to handle gracefully.
+
+## http
+
+`import http` makes outbound request. `http.get`, `http.post`, `http.put`,
+`http.delete`, `http.request` and `http.get_json` are the entry points. they
+accept options tables: `url`, `method`, `body`, `headers` (a table),
+`timeout` in milliseconds (default 10000), and `follow` for redirects
+(default true, up to five).
+
+```flint
+import http
+
+let res = http.get("https://api.example.com/data", {headers: {"User-Agent": "flint"}})
+if res.ok {
+    print(res.body)
+} else {
+    print(res.error)
+}
+```
+
+the result is a table with:
+
+| key           | meaning                                   |
+| ------------- | ----------------------------------------- |
+| `ok`          | true only for a 2xx response             |
+| `status`      | the http status number                    |
+| `status_text` | the reason phrase                         |
+| `headers`     | response headers, a table                 |
+| `body`        | the response body as a string             |
+| `url`         | the final url after redirects             |
+| `redirects`   | how many redirects were followed          |
+| `error`       | an error message, or an empty string      |
+
+`http://` and `https://` are both supported. redirects 301/302/303 collapse
+to a GET without a body; 307/308 keep method and body. response bodies are
+returned as-is: no automatic gzip decoding.
+
+`http.get_json(url, opts)` returns `json.parse(res.body)` when the request
+succeeds, and `nil` on failure or redirect chains the server chose that no
+longer carry the body you expect.
+
+max redirects is five. a transport failure -- dns, refused, timeout -- is
+reported with `ok: false`, `status: 0`, and the error message, not a runtime
+error. an unparseable url like `ftp://...` is a runtime error.
+

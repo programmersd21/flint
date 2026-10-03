@@ -1,0 +1,8 @@
+# outer -- imports a sibling module, then exports its own thing.
+# regression test: the export table must come from this module env, not
+# from whichever module this one imported last.
+import "inner.fl"
+
+export fn who() {
+    return inner.who() + "+outer"
+}

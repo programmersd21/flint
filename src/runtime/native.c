@@ -761,6 +761,10 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	}
 	vm->globals_envs[vm->globals_used] = ALLOCATE(vm, Table, 1);
 	table_init(vm->globals_envs[vm->globals_used]);
+	/* Remember the table pointer for this module. We can't read it by
+	 * index at export-table build time because nested imports push their
+	 * own tables on top, shifting globals_used. */
+	Table *module_env = vm->globals_envs[vm->globals_used];
 	vm->globals_used++;
 	vm->globals = vm->globals_envs[vm->globals_used - 1];
 	vm->globals_count++;
@@ -814,9 +818,6 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	ObjTable *bag = new_flint_table(vm);
 	vm_push(vm, OBJ_VAL(bag));
 
-	/* vm->globals_count was decremented above; point at the module's table
-	 * again to read its exports out. */
-	Table *module_env = vm->globals_envs[vm->globals_used - 1];
 	for (int i = 0; i < module_env->capacity; i++) {
 		ObjString *name = module_env->entries[i].key;
 		if (name == NULL)

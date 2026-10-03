@@ -6,6 +6,7 @@
 #include "sys.h"
 
 #include "jsonp.h"
+#include "http.h"
 
 #include <stdint.h>
 
@@ -351,6 +352,179 @@ bool sys_module_file_exists(const char *name)
 		}
 	}
 	return false;
+}
+
+/*
+ * The directory `flint sync` writes into.
+ *
+ * Deliberately not stdlib_dir(), which is the read-side answer and prefers
+ * <executable>/lib so a tarball works from anywhere. That directory belongs
+ * to whoever unpacked the tarball, and a package-installed binary has none:
+ * /usr/local/bin is full of other things. Writing there would need root and
+ * would be a surprise, so sync installs where `make install` does:
+ *
+ *   $FLINT_STDLIB         when the user set it, that is what they meant
+ *   $HOME/.flint/stdlib   the ordinary location
+ *
+ * NULL when neither is available, which is the case worth a message rather
+ * than a guess: HOME unset is rare but real inside some containers.
+ */
+const char *sys_stdlib_install_dir(void)
+{
+	static char buf[4096];
+	const char *env = getenv("FLINT_STDLIB");
+	if (env != NULL && env[0] != '\0') {
+		snprintf(buf, sizeof(buf), "%s", env);
+		return buf;
+	}
+	const char *home = getenv("HOME");
+	if (home == NULL || home[0] == '\0')
+		return NULL;
+	snprintf(buf, sizeof(buf), "%s/.flint/stdlib", home);
+	return buf;
+}
+
+/*
+ * mkdir -p. Every missing component is created, in order, and an existing
+ * directory is not an error: that is what makes this idempotent, which is
+ * what `flint sync` needs on every run.
+ */
+bool sys_make_dirs(const char *path)
+{
+	if (path == NULL || path[0] == '\0')
+		return false;
+
+	size_t len = strlen(path);
+	char work[4096];
+	if (len >= sizeof(work))
+		return false;
+	memcpy(work, path, len + 1);
+
+	/* the trailing slash is dropped so the last component is not doubled */
+	while (len > 1 && work[len - 1] == '/')
+		work[--len] = '\0';
+
+	for (size_t i = 1; i <= len; i++) {
+		if (work[i] != '/' && work[i] != '\0')
+			continue;
+		char saved = work[i];
+		work[i] = '\0';
+		/* NOLINTNEXTLINE(misc-include-cleaner) */
+		if (mkdir(work, 0755) != 0 && errno != EEXIST) {
+			work[i] = saved;
+			return false;
+		}
+		work[i] = saved;
+	}
+	return true;
+}
+
+/*
+ * Fetch a URL to a file.
+ *
+ * The one thing flint does not do itself. github serves raw files over https,
+ * and https means TLS, and TLS means either a dependency this language does
+ * not have or forty megabytes of source that would dwarf the interpreter. So
+ * the download runs curl(1) or wget(1) through execvp: two programs that are
+ * already installed on most machines, that keep their certificate store up to
+ * date on their own, and that nobody has to trust us to reimplement.
+ *
+ * Returns 0 on success. On failure the reason is on stderr from the downloader
+ * itself, and this returns non-zero; a missing downloader is reported here,
+ * because "command not found" from a forked child is not an explanation.
+ */
+int sys_fetch_url(const char *url, const char *dest)
+{
+	/* curl first, then wget. -f makes an HTTP error a failure instead of a
+	 * file full of "404: Not Found", which matters because the write
+	 * target is checked by compiling afterwards and a 404 body would be
+	 * caught -- but by the wrong layer, with the wrong message.
+	 *
+	 * The vectors are built here rather than kept in file-scope tables
+	 * because two of the entries are arguments, and a static array
+	 * initializer has to be constant. */
+	static const char *const curl_head[] = {
+	        "curl",
+	        "-fsS",
+	        "--proto",
+	        "=https,http",
+	        "--location",
+	        "--connect-timeout",
+	        "10",
+	        "--max-time",
+	        "120",
+	        "--output",
+	};
+	static const char *const wget_head[] = {
+	        "wget",
+	        "-q",
+	        "--timeout=10",
+	        "--tries=2",
+	        "-O",
+	};
+	const char *const *head = curl_head;
+	size_t headlen = sizeof(curl_head) / sizeof(curl_head[0]);
+	const char *program = curl_head[0];
+
+	fflush(stdout);
+	fflush(stderr);
+
+	for (int which = 0; which < 2; which++) {
+		if (which == 1) {
+			head = wget_head;
+			headlen = sizeof(wget_head) / sizeof(wget_head[0]);
+			program = wget_head[0];
+		}
+
+		/* the program's own arguments live in the vector, so the
+		 * child needs no environment at all */
+		char *cmd[16];
+		if (headlen + 2 > sizeof(cmd) / sizeof(cmd[0]))
+			return -1;
+		size_t n = 0;
+		for (size_t i = 0; i < headlen; i++)
+			cmd[n++] = (char *)(uintptr_t)head[i];
+		cmd[n++] = (char *)(uintptr_t)dest;
+		cmd[n++] = (char *)(uintptr_t)url;
+		cmd[n] = NULL;
+
+		pid_t pid = fork();
+		if (pid < 0)
+			return -1;
+		if (pid == 0) {
+			/* child: exec and nothing else, so it cannot run a
+			 * parent's stdio buffer or malloc lock */
+			/* NOLINTNEXTLINE(misc-include-cleaner) */
+			execvp(program, cmd);
+			/* 127 is the shell's "not found", and the parent turns
+			 * it into "try the next downloader" */
+			/* NOLINTNEXTLINE(misc-include-cleaner) */
+			_exit(127);
+		}
+
+		int status = 0;
+		while (waitpid(pid, &status, 0) < 0) {
+			/* NOLINTNEXTLINE(misc-include-cleaner) */
+			if (errno != EINTR)
+				return -1;
+		}
+		if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+			return 0;
+
+		/* 127 means the program is not installed, so try the other
+		 * one. any other status is a real failure and the downloader
+		 * already explained it. */
+		if (which == 0 && WIFEXITED(status) &&
+		        WEXITSTATUS(status) == 127)
+			continue;
+		return -1;
+	}
+
+	fprintf(stderr,
+	        "flint sync needs curl(1) or wget(1) to download the standard\n"
+	        "library. Install one of them, or set FLINT_STDLIB to a\n"
+	        "directory you maintain yourself.\n");
+	return -1;
 }
 
 /*
@@ -1837,4 +2011,5 @@ void register_sys_natives(VM *vm)
 	vm_define_native(vm, "__os_tmpdir", os_tmpdir_native, 0);
 	vm_define_native(vm, "__os_pid", os_pid_native, 0);
 	register_json_natives(vm);
+	register_http_natives(vm);
 }

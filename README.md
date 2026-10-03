@@ -24,8 +24,9 @@ make release
 * lists, tables, strings and modules
 * bytecode verifier
 * computed-goto interpreter
-* standard library
+* standard library with os, process and http
 * human and json diagnostics
+* `flint sync` for updating the library
 * no runtime dependencies beyond libc and libm
 
 the implementation is small enough to read.
@@ -132,10 +133,26 @@ the other's, which was not true before 0.6.0.
 | `path`        | path manipulation            |
 | `collections` | collection helpers           |
 | `json`        | parsing and serialization    |
+| `os`          | the machine flint is on      |
+| `process`     | spawn programs, capture output |
+| `http`        | HTTP client requests         |
 
 the library is plain flint code where possible.
 
+## updating the standard library
+
 no package manager. no registry. no twelve-layer dependency tree to print a number.
+
+`flint sync` downloads the library from the repository and installs it into
+`~/.flint/stdlib`, where `make install` puts it. each file is compiled before
+it is installed, so a truncated download or a 404 leaves the old files alone.
+`--dry-run` shows what would change, and `--ref=v0.7.0` pins to a release
+tag instead of `main`:
+
+```sh
+flint sync --dry-run
+flint sync
+```
 
 ## vm
 

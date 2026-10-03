@@ -1,0 +1,4 @@
+# inner -- imported by outer.fl.
+export fn who() {
+    return "inner"
+}

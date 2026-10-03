@@ -158,6 +158,19 @@ before anything that can allocate or lock is what keeps the child from running
 a parent's stdio buffer or malloc lock. no shell anywhere: `execvp` searches
 PATH and interprets nothing.
 
+## http and sync
+
+`src/runtime/http.c` is an HTTP/1.1 client without a TLS stack, which is why
+it is two transports. `http://` is a native socket client built in the file
+itself -- a straight-line poll-driven send/recv loop. `https://` delegates
+to curl(1), because TLS is a dependency and the release has none. curl is
+required only when a script actually makes an https request, and nothing
+about the result differs by scheme: one parse path, one table shape.
+
+`flint sync` rides the same fork-exec-curl machinery, with one extra
+promise: a fetched module is verified by compiling it before it replaces the
+old one. A 404 or a half-downloaded file never becomes a broken library.
+
 ## deferred features
 
 two designs were evaluated and deliberately not shipped.

@@ -1,0 +1,2 @@
+import http
+print(http.get("ftp://example.com", nil))

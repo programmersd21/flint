@@ -1,0 +1,5 @@
+# A module importing a sibling module must still export its own names.
+import "outer.fl"
+
+print(outer.who())
+print(keys(outer))

@@ -1,0 +1,64 @@
+# lib/http.fl -- HTTP client for Flint
+#
+# Provides high-level HTTP client operations over __http_request.
+
+import json
+
+export fn request(opts) {
+    if type(opts) != "table" {
+        print("http.request: options must be a table")
+        return nil
+    }
+
+    let url = opts["url"]
+    if url == nil or type(url) != "string" {
+        print("http.request: url must be a string")
+        return nil
+    }
+
+    let method = opts["method"] ?? "GET"
+    let body = opts["body"]
+    let headers = opts["headers"]
+    let timeout = opts["timeout"] ?? 10000
+    let follow = opts["follow"] ?? true
+
+    return __http_request(url, method, body, headers, timeout, follow)
+}
+
+export fn get(url, opts) {
+    let o = opts ?? {}
+    o["url"] = url
+    o["method"] = "GET"
+    return request(o)
+}
+
+export fn post(url, body, opts) {
+    let o = opts ?? {}
+    o["url"] = url
+    o["method"] = "POST"
+    o["body"] = body
+    return request(o)
+}
+
+export fn put(url, body, opts) {
+    let o = opts ?? {}
+    o["url"] = url
+    o["method"] = "PUT"
+    o["body"] = body
+    return request(o)
+}
+
+export fn delete(url, opts) {
+    let o = opts ?? {}
+    o["url"] = url
+    o["method"] = "DELETE"
+    return request(o)
+}
+
+export fn get_json(url, opts) {
+    let res = get(url, opts)
+    if res != nil and res.ok {
+        return json.parse(res.body)
+    }
+    return nil
+}

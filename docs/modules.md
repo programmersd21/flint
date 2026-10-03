@@ -113,6 +113,14 @@ There is no search path for quoted imports and no symlink canonicalisation.
 Two spellings of one file load it twice, which is also why a module that has
 already loaded is cheap to import again: the cache is keyed by resolved path.
 
+Keeping the standard library current is `flint sync`: it downloads the
+modules from the project's github and installs them into `~/.flint/stdlib`,
+compiling each one before it is allowed to replace the old file. `--ref`
+pins to a release tag and `--url` points at a mirror. A library needing a
+builtin this binary does not have fails to compile, and sync reports that
+as "this stdlib is newer than your flint" rather than installing half a
+module.
+
 ## repeated imports
 
 A module runs once. Importing it again is a lookup, not a second run, and

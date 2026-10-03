@@ -1,0 +1,4 @@
+import http
+print(type(http.get))
+print(type(http.request))
+print(type(http.get_json))

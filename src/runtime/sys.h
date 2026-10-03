@@ -75,4 +75,34 @@ char *sys_resolve_module(const char *path);
  */
 bool sys_module_file_exists(const char *name);
 
+/*
+ * The directory `flint sync` installs into: $FLINT_STDLIB when set, else
+ * $HOME/.flint/stdlib, which is where `make install` puts it. NULL when
+ * neither is available.
+ *
+ * This is not the same answer as the loader's stdlib_dir(), which also
+ * considers <executable>/lib so a relocated tarball works. That directory
+ * belongs to whoever unpacked the tarball, and a package-installed binary has
+ * none, so writing there would need root and would surprise whoever did.
+ */
+const char *sys_stdlib_install_dir(void);
+
+/*
+ * mkdir -p. Every missing component, in order; an existing directory is
+ * success, not an error. False only on a real failure, with errno still set
+ * by the failing mkdir.
+ */
+bool sys_make_dirs(const char *path);
+
+/*
+ * Download a URL to a file. 0 on success, non-zero on failure with the
+ * downloader's own message already on stderr.
+ *
+ * https is done by curl(1) or wget(1), not by flint. TLS without a
+ * dependency is not a smaller amount of work here, it is forty megabytes of
+ * somebody else's C, and a language whose pitch is "no runtime dependencies
+ * beyond libc" does not get to quietly acquire one.
+ */
+int sys_fetch_url(const char *url, const char *dest);
+
 #endif /* FL_SYS_H */

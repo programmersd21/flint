@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -646,6 +647,9 @@ static void print_usage(FILE *stream)
 	        "  -v, --version           show the version and exit\n");
 	fprintf(stream, "  -e <code>               execute code and exit\n");
 	fprintf(stream, "  -                       read a script from stdin\n");
+	fprintf(stream,
+	        "  sync                    update the installed standard "
+	        "library\n");
 	fprintf(stream, "\n");
 	fprintf(stream, "Diagnostics:\n");
 	fprintf(stream, "\n");
@@ -733,6 +737,320 @@ static int explain_code(const char *code)
 	}
 	fprintf(stderr, "unknown diagnostic code '%s'\n", code);
 	return 64;
+}
+
+/*
+ * `flint sync`
+ *
+ * Downloads the standard library from the project's github repository and
+ * installs it where `make install` puts it. The point is that a stdlib is
+ * data, not code: `make install` copies whatever happened to be in lib/ at
+ * build time, and a user who installed a binary a week ago has no way to get
+ * the library that came with this week's fix. Sync is that way.
+ *
+ * Four rules, in order of how much they matter:
+ *
+ *   1. Nothing is installed until it has been compiled. A download goes to a
+ *      temporary name, is compiled in place, and is only then renamed over
+ *      the old file. A truncated transfer or a 404 page cannot break a
+ *      working install, which is the whole reason the step exists.
+ *   2. An identical file is left alone. Sync is run on a whim, often, and a
+ *      rewrite that changes nothing but the mtime is how people learn to
+ *      distrust a command.
+ *   3. The downloader is not flint. https needs TLS, TLS needs a dependency,
+ *      and this language's whole pitch is that it has none. curl(1) or
+ *      wget(1) already do it, keep their certificates current, and are two
+ *      processes that have been doing this for twenty years.
+ *   4. The module list is compiled in, on purpose. A library that needs a
+ *      new builtin is unusable to an older binary, so installing one would
+ *      leave a half-upgraded install that fails at import time instead of
+ *      failing here, where the message can be honest. Bump flint itself.
+ */
+
+/* the standard library, as shipped. keep in step with the lib directory. */
+static const char *const sync_modules[] = {
+        "collections",
+        "fs",
+        "json",
+        "math",
+        "os",
+        "path",
+        "process",
+        "random",
+        "time",
+};
+
+/* where the sources live. a mirror works: --url or FLINT_STDLIB_URL. */
+#define SYNC_DEFAULT_URL                                                       \
+	"https://raw.githubusercontent.com/programmersd21/flint"
+#define SYNC_DEFAULT_REF "main"
+
+static void print_sync_usage(FILE *stream)
+{
+	fprintf(stream, "Usage: flint sync [options]\n");
+	fprintf(stream, "\n");
+	fprintf(stream,
+	        "Download the standard library and install it into the\n");
+	fprintf(stream, "directory `make install` uses.\n");
+	fprintf(stream, "\n");
+	fprintf(stream, "Options:\n");
+	fprintf(stream, "\n");
+	fprintf(stream,
+	        "  --dry-run        print what would be fetched, write "
+	        "nothing\n");
+	fprintf(stream,
+	        "  --ref=<ref>      git ref to take. default: %s\n",
+	        SYNC_DEFAULT_REF);
+	fprintf(stream,
+	        "  --url=<base>     base URL. default: %s\n",
+	        SYNC_DEFAULT_URL);
+	fprintf(stream, "  -h, --help       show this help and exit\n");
+	fprintf(stream, "\n");
+	fprintf(stream, "Environment:\n");
+	fprintf(stream, "\n");
+	fprintf(stream,
+	        "  FLINT_STDLIB      install here instead of "
+	        "$HOME/.flint/stdlib\n");
+	fprintf(stream, "  FLINT_STDLIB_URL  default for --url\n");
+	fprintf(stream, "  FLINT_STDLIB_REF  default for --ref\n");
+	fprintf(stream, "\n");
+	fprintf(stream,
+	        "Each file is compiled before it is installed, and one that\n");
+	fprintf(stream,
+	        "does not compile is left out. Exit status is 0 when every\n");
+	fprintf(stream, "module installed, 69 when any failed, 73 when the\n");
+	fprintf(stream, "directory could not be created.\n");
+}
+
+/*
+ * Two files, byte for byte, without reading either into memory whole. A
+ * stdlib module is a few kilobytes, but this is a general helper and a
+ * general helper that mallocs a file size is a general helper that can fail
+ * on a file size.
+ */
+static bool files_are_identical(const char *a, const char *b)
+{
+	FILE *fa = fopen(a, "rb");
+	if (fa == NULL)
+		return false;
+	FILE *fb = fopen(b, "rb");
+	if (fb == NULL) {
+		fclose(fa);
+		return false;
+	}
+
+	/* fgetc rather than block reads: the byte-wise compare has no
+	 * indeterminate buffer states, which a fread-based loop always
+	 * seems to trip the analyzer on. the files are a few kilobytes
+	 * each, so the cost is theoretical. */
+	int ca = 0;
+	int cb = 0;
+	bool same = true;
+	for (;;) {
+		ca = fgetc(fa);
+		cb = fgetc(fb);
+		if (ca == EOF && cb == EOF)
+			break;
+		if (ca == EOF || cb == EOF || ca != cb) {
+			same = false;
+			break;
+		}
+	}
+	fclose(fa);
+	fclose(fb);
+	return same;
+}
+
+static int sync_stdlib(int argc, char **argv, int first)
+{
+	const char *url_base = getenv("FLINT_STDLIB_URL");
+	const char *ref = getenv("FLINT_STDLIB_REF");
+	bool dry_run = false;
+
+	if (url_base == NULL || url_base[0] == '\0')
+		url_base = SYNC_DEFAULT_URL;
+	if (ref == NULL || ref[0] == '\0')
+		ref = SYNC_DEFAULT_REF;
+
+	/* options are flint's own here, so they are read here rather than in
+	 * the pass in main(): that pass runs before it knows what the command
+	 * is, and a script's arguments must stay the script's. */
+	for (int i = first; i < argc; i++) {
+		const char *opt = argv[i];
+		if (strcmp(opt, "--dry-run") == 0) {
+			dry_run = true;
+		} else if (strcmp(opt, "-h") == 0 ||
+		           strcmp(opt, "--help") == 0) {
+			print_sync_usage(stdout);
+			return 0;
+		} else if (strncmp(opt, "--ref=", 6) == 0) {
+			ref = opt + 6;
+		} else if (strncmp(opt, "--url=", 6) == 0) {
+			url_base = opt + 6;
+		} else {
+			fprintf(stderr,
+			        "flint sync: unknown option '%s'\n"
+			        "  try 'flint sync --help'\n",
+			        opt);
+			return 64;
+		}
+	}
+	if (ref[0] == '\0' || url_base[0] == '\0') {
+		fprintf(stderr,
+		        "flint sync: --ref and --url both need a value\n");
+		return 64;
+	}
+
+	const char *dir = sys_stdlib_install_dir();
+	if (dir == NULL) {
+		fprintf(stderr,
+		        "flint sync: cannot tell where to install. Set "
+		        "FLINT_STDLIB\n  to the directory, or set HOME.\n");
+		return 73;
+	}
+
+	if (!dry_run && !sys_make_dirs(dir)) {
+		fprintf(stderr,
+		        "flint sync: cannot create '%s': %s\n",
+		        dir,
+		        strerror(errno));
+		return 73;
+	}
+
+	printf("syncing the standard library from %s at %s\ninto %s\n",
+	        url_base,
+	        ref,
+	        dir);
+	size_t count = sizeof(sync_modules) / sizeof(sync_modules[0]);
+	if (dry_run)
+		printf("%zu modules, nothing will be written\n", count);
+
+	int updated = 0;
+	int unchanged = 0;
+	int failed = 0;
+
+	/* one VM for the verification compiles. it is created here rather
+	 * than per file because each compile leaves globals behind and the
+	 * collector is not what this code should be testing. */
+	VM vm;
+	vm_init(&vm);
+	vm_set_diagnostics(&vm, FL_DIAG_SHORT, FL_COLOR_NEVER);
+	FlRunMode check = {.check = true};
+
+	for (size_t i = 0; i < count; i++) {
+		const char *name = sync_modules[i];
+
+		/* the URL is built into a buffer rather than assembled by
+		 * hand each time, and every length is checked, because a
+		 * --url that is 4000 characters long must be an error and
+		 * not a truncated request for the wrong file. */
+		size_t namelen = strlen(name);
+		size_t baselen = strlen(url_base);
+		size_t reflen = strlen(ref);
+		if (baselen + reflen + namelen + 12 > 1024) {
+			fprintf(stderr,
+			        "flint sync: the url is too long for '%s'\n",
+			        name);
+			failed++;
+			continue;
+		}
+		char url[1024];
+		snprintf(url,
+		        sizeof(url),
+		        "%s/%s/lib/%s.fl",
+		        url_base,
+		        ref,
+		        name);
+
+		if (namelen + 16 > 1024) {
+			fprintf(stderr,
+			        "flint sync: the name of '%s' is too long\n",
+			        name);
+			failed++;
+			continue;
+		}
+		char final_path[1024];
+		char temp_path[1024];
+		snprintf(final_path, sizeof(final_path), "%s/%s.fl", dir, name);
+		/* the temporary name is dotted, so an interrupted sync leaves
+		 * something that `ls` hides and `import` never sees */
+		snprintf(temp_path,
+		        sizeof(temp_path),
+		        "%s/.%s.fl.new",
+		        dir,
+		        name);
+
+		if (dry_run) {
+			printf("would fetch %s -> %s\n", url, final_path);
+			continue;
+		}
+
+		if (sys_fetch_url(url, temp_path) != 0) {
+			fprintf(stderr,
+			        "flint sync: %s: could not download %s\n",
+			        name,
+			        url);
+			(void)unlink(temp_path);
+			failed++;
+			continue;
+		}
+
+		/*
+		 * Compile before install. `flint --check` is exactly this
+		 * check, which is why it is the same code path rather than a
+		 * second parser nobody keeps in step.
+		 */
+		if (run_file(&vm, temp_path, &check) != 0) {
+			fprintf(stderr,
+			        "flint sync: %s: downloaded file does not "
+			        "compile.\n  left the installed copy alone; "
+			        "this is usually\n  a stdlib newer than this "
+			        "flint. Try --ref=v0.7.0.\n",
+			        name);
+			(void)unlink(temp_path);
+			failed++;
+			continue;
+		}
+
+		if (files_are_identical(temp_path, final_path)) {
+			printf("  %-12s unchanged\n", name);
+			(void)unlink(temp_path);
+			unchanged++;
+			continue;
+		}
+
+		if (rename(temp_path, final_path) != 0) {
+			fprintf(stderr,
+			        "flint sync: %s: cannot install: %s\n",
+			        name,
+			        strerror(errno));
+			(void)unlink(temp_path);
+			failed++;
+			continue;
+		}
+		printf("  %-12s updated\n", name);
+		updated++;
+	}
+
+	vm_free(&vm);
+
+	if (dry_run) {
+		printf("dry run: nothing was written\n");
+		return 0;
+	}
+
+	printf("%d updated, %d unchanged, %d failed\n",
+	        updated,
+	        unchanged,
+	        failed);
+	if (failed > 0) {
+		fprintf(stderr,
+		        "the installed library may now be a mixture of "
+		        "versions.\nrun it again when the network is "
+		        "behaving.\n");
+		return 69;
+	}
+	return 0;
 }
 
 int main(int argc, char *argv[])
@@ -933,6 +1251,17 @@ int main(int argc, char *argv[])
 		if (strcmp(flag, "-v") == 0 || strcmp(flag, "--version") == 0) {
 			printf("Flint %s\n", FLINT_VERSION);
 			return 0;
+		}
+		/*
+		 * `flint sync`. Only when no such file exists, because a
+		 * script is allowed to be called anything at all, and a
+		 * subcommand must not take a name away from a script the user
+		 * already has. The rule is "an existing file wins", so
+		 * `flint sync` runs ./sync where such a file exists, and
+		 * installs the library where it does not.
+		 */
+		if (strcmp(flag, "sync") == 0 && access(flag, F_OK) != 0) {
+			return sync_stdlib(argc, argv, arg + 1);
 		}
 		if (strcmp(flag, "-e") == 0) {
 			if (argc <= arg + 1) {
