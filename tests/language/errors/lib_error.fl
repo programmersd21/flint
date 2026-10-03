@@ -1,8 +1,9 @@
-# An error inside a module the standard library ships.
+# Errors from a module that is written like a library.
 #
-# The stdlib is written in Flint and imported like anything else, so a bug in a
-# library module is an ordinary error at the call site: catchable, with the
-# library's file named in the trace when it is not caught.
+# failing_lib.fl raises three different kinds of failure on purpose: a
+# categorised error, a bare string, and a runtime error raised by mistake. All
+# three reach the caller's catch, because an error is an error whatever its
+# origin.
 
 import "failing_lib.fl" as lib
 
@@ -23,10 +24,6 @@ try {
 	print(e.type + ": " + e)
 }
 
-# and one that works, so the failures above are the module's doing and not the
-# import's
-print(lib.working())
-
 # a library function that fails by mistake rather than on purpose: an
 # out-of-range index is still an error the caller can handle
 try {
@@ -34,3 +31,7 @@ try {
 } catch e {
 	print(e.type + ": " + e.message)
 }
+
+# and one that works, so the failures above are the module's doing and not the
+# import's
+print(lib.working())

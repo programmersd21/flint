@@ -1,8 +1,12 @@
-bottom
-[line 41] in recurse_uncaught()
-[line 43] in recurse_uncaught()
-[line 43] in recurse_uncaught()
-[line 43] in recurse_uncaught()
-[line 45] in script
 2
 caught at depth 0
+leaky
+after the try
+caught something
+catch binding: inner e
+outer: outer e
+visible inside: visible outside
+visible inside the catch: visible outside
+caught: done
+block only
+caught: after the block

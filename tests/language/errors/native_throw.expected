@@ -1,4 +1,10 @@
-undefined variable 'json'.
-[line 22] in script
+flint
+1
+parse failed: invalid json: expected a string at offset 1
+1
+none
+caught: json: cannot stringify a function
 caught a missing file
-caught: undefined variable 'json'.
+TypeError: t
+no error
+caught: second: first

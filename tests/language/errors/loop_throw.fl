@@ -76,8 +76,8 @@ for i in 0..4 {
 }
 print(hits)
 
-# a handler from a previous iteration must not catch a later error. each
-# iteration pushes and pops its own.
+# a handler from a previous iteration must not catch a later error: each
+# iteration pushes and pops its own
 let crossed = 0
 for i in 0..3 {
 	try {
@@ -96,3 +96,17 @@ for i in 0..3 {
 	}
 }
 print(crossed)
+
+# a range loop with step
+let stepped = 0
+for i in 0..10 {
+	try {
+		if i == 5 {
+			throw "at five"
+		}
+		stepped += 1
+	} catch e {
+		stepped += 100
+	}
+}
+print(stepped)

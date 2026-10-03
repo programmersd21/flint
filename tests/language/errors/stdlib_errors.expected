@@ -1,8 +1,11 @@
-undefined variable 'mkdir'.
-[line 48] in script
 flint
 1
 parse failed: invalid json: expected a string at offset 1
 parse failed: invalid json: expected ',' or ']' at offset 5
 1
 none
+true
+{"ok": true}
+caught: cannot read 'flint_fs_error_test/missing.json': No such file or directory.
+caught: cannot write 'flint_fs_error_test/nope/deeper/data.json': No such file or directory.
+exists is still false: true
