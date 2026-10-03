@@ -4,6 +4,7 @@ flint
 flint-debug
 flint-stress
 flint-goto*
+*_test
 build/
 *.o
 *.d

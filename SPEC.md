@@ -51,7 +51,7 @@ letDecl        = "let" IDENTIFIER ( "=" expression )? terminator ;
 constDecl      = "const" IDENTIFIER "=" expression terminator ;
 fnDecl         = "fn" IDENTIFIER "(" parameters? ")" "{" block "}" ;
 fnExpr         = "fn" "(" parameters? ")" "{" block "}" ;
-importDecl     = "import" STRING terminator ;
+importDecl     = "import" (STRING | IDENTIFIER) ("as" IDENTIFIER)? terminator ;
 exportDecl     = "export" ( fnDecl | letDecl | constDecl ) ;
 
 statement      = exprStmt | printStmt | ifStmt | whileStmt | forStmt
@@ -83,8 +83,13 @@ An error is a table with `type` (a string naming the category) and `message`
 `PackageError` build these tables. `throw` accepts any value, not just
 error tables.
 
-`for x in expr` iterates a list, or a range when `expr` contains `..`.
-ranges are half-open: `1..5` is 1, 2, 3, 4.
+`for x in expr` iterates a list, a string (one byte per step), or a range
+when `expr` contains `..`. ranges are half-open: `1..5` is 1, 2, 3, 4.
+`a..b..s` steps by `s`: `0..10..2` is 0, 2, 4, 6, 8, and a negative step
+iterates backwards. a zero step is an error; an empty result is not.
+
+tables iterate only in two-variable form: `for k, v in t` walks entries in
+insertion order. a single variable over a table is a runtime error.
 
 ### expression precedence
 
@@ -233,7 +238,8 @@ in a dozen passes, so the check is not theoretical.
 ### tables
 
 `{ key: value }` is a table literal. `t.key` reads it, `t.key = v` writes it.
-reading a key that was never set gives `nil`. there is no delete syntax.
+reading a key that was never set gives `nil`. there is no delete operator;
+use the `delete(t, k)` builtin.
 
 a table literal works in any expression position. it keeps itself on the
 stack between pairs rather than in a hidden local, which is what lets
@@ -275,6 +281,8 @@ script can pass one to another.
 | `has(t, k)` | whether the table holds the key, by content |
 | `delete(t, k)` | remove the key, true when something was removed |
 | `str(val)` | string form of a scalar. containers give `<object>` |
+| `ord(s)` | byte value of a one-character string |
+| `chr(n)` | one-character string for a byte value 0..255 |
 | `type(val)` | one of the seven type names |
 | `input([prompt])` | one line from stdin, `nil` at end of file |
 | `clock()` | process cpu time in seconds |
@@ -314,11 +322,11 @@ competitive rather than three times slower.
 
 ### internal maths
 
-ten names beginning `__` exist for a math library that is not in this
-repository. `__floor` `__sqrt` `__fma` `__ldexp` `__logb` `__fabs`
-`__copysign` `__hi32` `__lo32` `__from_bits`. the leading underscore marks
-them as not part of the language, and a script has no business calling
-them.
+ten names beginning `__` exist underneath `lib/math.fl`. `__floor` `__sqrt`
+`__fma` `__ldexp` `__logb` `__fabs` `__copysign` `__hi32` `__lo32`
+`__from_bits`. the leading underscore marks them as not part of the
+language: programs use the `math` module, which wraps them, and a script
+has no business calling them directly.
 
 `exec` calls `execvp` and never a shell. there is no path from this API to
 `/bin/sh`, so a filename containing a space, a semicolon or a `$(...)` is an

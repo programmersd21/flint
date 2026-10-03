@@ -17,10 +17,6 @@ program you can run: `./flint -e 'print(1)'`.
 | [diagnostics.md](diagnostics.md) | formats, current coverage, and `--fix` |
 | [limits.md](limits.md) | what the language does not do |
 | [internals.md](internals.md) | how the compiler and the vm work |
-| [security.md](security.md) | what flint promises and what it does not |
-| [native.md](native.md) | what does not exist yet for c extensions |
-| [packages.md](packages.md) | what does not exist yet for packages |
-| [compatibility.md](compatibility.md) | what a 0.8.0 user can rely on |
 
 the formal grammar and semantics are in [../SPEC.md](../SPEC.md), and the
 measured performance is in [../bench/RESULTS.md](../bench/RESULTS.md).
