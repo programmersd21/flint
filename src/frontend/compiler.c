@@ -1833,11 +1833,25 @@ static void for_statement(void)
 				      "variables; ranges yield one value.");
 				return;
 			}
-			/* stack: [start] then [start][end] */
+			/* stack: [start] then [start][end], then
+			 * [start][end][step] when a step was written */
 			expression();
 
-			/* the user's variable takes the start slot, and a
-			 * hidden local takes the end. */
+			/*
+			 * `a..b..s` steps the range. The step defaults to 1
+			 * and its sign decides both the comparison and the
+			 * direction, so the loop below branches on the sign
+			 * rather than being compiled twice: a step is usually a
+			 * literal, but it can be a variable, and two copies
+			 * of this loop would have to agree about everything
+			 * else.
+			 */
+			bool has_step = match(TOKEN_DOT_DOT);
+			if (has_step)
+				expression();
+
+			/* the user's variable takes the start slot, and hidden
+			 * locals take the end and the step. */
 			add_local(var_name, false);
 			mark_initialized();
 			Token hidden = {TOKEN_IDENTIFIER,
@@ -1847,6 +1861,19 @@ static void for_statement(void)
 			        false,
 			        var_name.offset};
 			add_local(hidden, false);
+			mark_initialized();
+
+			/* the step is on the stack only when it was written;
+			 * otherwise the constant one goes here. */
+			if (!has_step)
+				emit_constant(NUMBER_VAL(1));
+			Token hidden_step = {TOKEN_IDENTIFIER,
+			        " step",
+			        5,
+			        var_name.line,
+			        false,
+			        var_name.offset};
+			add_local(hidden_step, false);
 			mark_initialized();
 
 			LoopContext loop;
@@ -1861,16 +1888,47 @@ static void for_statement(void)
 			loop.continue_count = 0;
 			state.loop = &loop;
 
-			int var_slot = state.current->local_count - 2;
-			int end_slot = state.current->local_count - 1;
+			int var_slot = state.current->local_count - 3;
+			int end_slot = state.current->local_count - 2;
+			int step_slot = state.current->local_count - 1;
 
-			/* condition: var < end */
+			/*
+			 * condition: step >= 0 ? var < end : var > end
+			 *
+			 * The sign is tested once per iteration rather than
+			 * once per loop, because the step can be a variable
+			 * and only its value at loop entry decides which
+			 * direction the whole loop runs in. Hoisting that test
+			 * out of the loop is what keeps this one loop instead
+			 * of two, and a zero step is refused at run time
+			 * rather than looping forever.
+			 */
+			emit_bytes(OP_GET_LOCAL, (uint8_t)step_slot);
+			emit_constant(NUMBER_VAL(0));
+			emit_byte(OP_LESS_EQUAL);
+
+			int up_jump = emit_jump(OP_JUMP_IF_FALSE);
+			emit_byte(OP_POP);
+
+			/* ascending */
 			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
 			emit_bytes(OP_GET_LOCAL, (uint8_t)end_slot);
 			emit_byte(OP_LESS);
+			int ascending_exit = emit_jump(OP_JUMP_IF_FALSE);
+			emit_byte(OP_POP);
+			int to_body = emit_jump(OP_JUMP);
 
+			patch_jump(up_jump);
+			emit_byte(OP_POP); /* the step >= 0 test */
+
+			/* descending */
+			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
+			emit_bytes(OP_GET_LOCAL, (uint8_t)end_slot);
+			emit_byte(OP_GREATER);
 			int exit_jump = emit_jump(OP_JUMP_IF_FALSE);
 			emit_byte(OP_POP);
+
+			patch_jump(to_body);
 
 			consume(TOKEN_LEFT_BRACE,
 			        "expect '{' after for range.");
