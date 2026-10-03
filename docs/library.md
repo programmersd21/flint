@@ -256,6 +256,32 @@ const a = num(input("a: "))
 print(math.sqrt(a))
 ```
 
+## ord
+
+the byte value of a one-character string, as a number. the argument has to be
+exactly one byte long: an empty string and a two-character string are both
+runtime errors, because either one would be guessing at which byte was meant.
+
+```flint
+print(ord("A"))    # 65
+print(ord("a"))    # 97
+```
+
+## chr
+
+the inverse direction: a number from 0 to 255 becomes the one-character
+string holding that byte. anything outside the range is a runtime error, as
+is anything that is not a whole number.
+
+```flint
+print(chr(65))         # A
+print(chr(ord("z")))   # z
+```
+
+`ord` and `chr` round-trip: `chr(ord(s)) == s` for every one-byte string `s`.
+multibyte utf-8 is bytes here, not characters, so `ord` of a two-byte
+character fails rather than returning half of it. see [values.md](values.md).
+
 ## type
 
 the name of a value's type, as a string.
@@ -313,10 +339,11 @@ for `collections` which has `min` and `max`.
 
 ## internal math
 
-ten `__`-prefixed natives exist for a math library that is not in this
-repository yet. they are deliberately not part of the language: a leading
-underscore means "not for you", and nothing in the documentation or the
-examples uses them.
+ten `__`-prefixed natives exist underneath `lib/math.fl`. they are
+deliberately not part of the language surface: a leading underscore means
+"not for you", and programs are expected to use the `math` module, which
+wraps them. nothing in the documentation or the examples reaches for the
+bare natives directly.
 
 | native | |
 |---|---|
@@ -365,7 +392,17 @@ loader tells them apart. there is one module system, not two.
 | `math.floor` `ceil` `trunc` | |
 | `math.round(x)` | **half away from zero** |
 | `math.fmod` `math.remainder` `math.copysign` | |
+| `math.fma(a, b, c)` | `a*b+c` with one rounding, not two |
+| `math.ldexp(x, n)` | `x` times 2 to the `n`, exactly |
+| `math.hi32(x)` `math.lo32(x)` | the two halves of a double's bits |
 | `math.isnan` `math.isinf` `math.isfinite` | |
+| `math.math_pi` `math.math_tau` `math.math_e` | the explicit constants: same values, `math_` prefix |
+| `math.math_pi_2` `math.math_pi_4` `math.math_1_pi` `math.math_2_pi` | |
+| `math.math_ln2` `math.math_ln10` `math.math_log2e` `math.math_log10e` | |
+| `math.math_sqrt2` `math.math_sqrt1_2` | |
+| `math.math_deg2rad` `math.math_rad2deg` | |
+| `math.math_epsilon` `math.math_max` `math.math_min` `math.math_tiny` | double limits |
+| `math.math_inf` `math.math_nan` | |
 
 ### the two that surprise people
 
@@ -601,16 +638,18 @@ let xs = [3, 1, 4, 1, 5, 9]
 print(c.min(xs))               # 1
 print(c.max(xs))               # 9
 print(c.sum(xs))               # 23
+print(c.avg(xs))               # 3.8333333333333335
 print(c.reverse(xs))           # [9, 5, 1, 4, 1, 3]
-print(c.uniq(xs))              # [3, 1, 4, 5, 9]  (order preserved)
+print(c.unique(xs))            # [3, 1, 4, 5, 9]  (order preserved)
 print(c.contains(xs, 4))       # true
-print(c.flatten([[1,2],[3]]))  # [1, 2, 3]
-print(c.zip([1,2], ["a","b"])) # [[1, "a"], [2, "b"]]
+print(c.index_of(xs, 4))       # 2
+print(c.take(xs, 2))           # [3, 1]
+print(c.drop(xs, 2))           # [4, 1, 5, 9]
 ```
 
-`reverse` returns a new list; the original is unchanged. `uniq` preserves
-first occurrence. `zip` stops at the shorter list. `min`, `max`, `sum` require
-a non-empty list and operate on numbers.
+`reverse` returns a new list; the original is unchanged. `unique` preserves
+first occurrence. `min`, `max`, `sum` and `avg` require a non-empty list and
+operate on numbers.
 
 ## keys
 
@@ -719,3 +758,76 @@ max redirects is five. a transport failure -- dns, refused, timeout -- is
 reported with `ok: false`, `status: 0`, and the error message, not a runtime
 error. an unparseable url like `ftp://...` is a runtime error.
 
+
+## ansi
+
+```flint
+import ansi
+print(ansi.red("nope") + ansi.ANSI_RESET)
+```
+
+terminal escape codes, as plain strings. every constant is the bytes for one
+code, so they compose with `+` like anything else. nothing here touches the
+terminal: whether the other end interprets the bytes is up to it, and piping
+the output to a file writes the codes into the file.
+
+the names follow the code they wrap. `ANSI_RED` is the `31m` foreground,
+`ANSI_BG_BLUE` is the `44m` background, `ANSI_CURSOR_UP` moves one line, and
+the builders take numbers: `ANSI_fg256(9)`, `ANSI_RGB(255, 0, 128)`,
+`ANSI_up(5)`, `ANSI_goto(3, 1)`. the named wrappers put the code around a
+string and reset after it: `red`, `green`, `yellow`, `blue`, `magenta`,
+`cyan`, `white`, `gray`, `bold`, `dim`, `italic`, `underline`, `strike`.
+
+## pretty_print
+
+```flint
+import pretty_print as pretty
+pretty.pretty_print([1, [2, 3]])
+```
+
+a value rendered across lines, for debugging. `pretty_print(v)` prints,
+`pretty_output(v)` returns the string. nested lists and tables indent by two
+spaces per level.
+
+this is a debugging aid, not a serializer: strings print bare, and nothing
+parses the output back.
+
+## args
+
+```flint
+import args
+
+print(args.all())       # the whole argv list
+print(args.count())     # how many arguments the script was given
+print(args.get(0))      # the first one, or nil when there is none
+print(args.has("--x"))  # true when the flag is present
+print(args.value("--out"))  # the argument after the flag, or nil
+```
+
+the builtin `args()` returns the script's argument vector without the
+interpreter's own flags. this module wraps the questions a script actually
+asks so nobody rewrites the loop: how many, which one, is this flag there,
+what follows it. `get` answers `nil` past the end rather than failing,
+because a missing argument is a normal thing for a script to check for.
+
+## encoding
+
+```flint
+import encoding as e
+
+print(e.hex_encode("hi"))       # 6869
+print(e.hex_decode("6869"))     # hi
+print(e.base64_encode("hi"))    # aGk=
+print(e.base64_decode("aGk=")) # hi
+print(e.url_encode("a b&c"))    # a+b%26c
+print(e.url_decode("a+b%26c"))  # a b&c
+```
+
+the encodings a program meets talking to something that is not flint: a
+header, a checksum, a query string. all of them take and return strings,
+because that is what the wire carries. url encoding is the query-string
+form, where a space is `+`.
+
+none of these is a cipher. base64 is not encryption, and neither is hex.
+a malformed input is a runtime error naming the position, not a best
+effort: decoding `"zz"` as hex fails rather than returning half a byte.

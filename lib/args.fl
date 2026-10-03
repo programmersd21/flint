@@ -1,0 +1,58 @@
+# args -- the command line your script was called with.
+#
+#     import args
+#     print(args.count())
+#     print(args.get(0))
+#
+# the builtin `args()` returns the script's argv without the interpreter's
+# own arguments. this module wraps it so a script can ask the common
+# questions without re-writing the loop each time: how many arguments, and
+# whether one of them is a known flag.
+
+export fn all() {
+    return args()
+}
+
+export fn count() {
+    return len(args())
+}
+
+# get(i) returns the i-th argument, or nil when it does not exist. nil rather
+# than an error, because asking for an optional argument is a normal case and
+# the caller can branch on the result.
+export fn get(i) {
+    let xs = args()
+    if i < 0 or i >= len(xs) {
+        return nil
+    }
+    return xs[i]
+}
+
+# has(flag) says whether an argument equal to the flag appeared. the point is
+# that it is exact matching, not substring matching: "--verbose" does not
+# answer for "--ver".
+export fn has(flag) {
+    let xs = args()
+    let i = 0
+    while i < len(xs) {
+        if xs[i] == flag {
+            return true
+        }
+        i += 1
+    }
+    return false
+}
+
+# value(flag) returns the argument after flag, or nil if flag is absent or
+# last. `flint app.fl --config production.toml` -> "production.toml".
+export fn value(flag) {
+    let xs = args()
+    let i = 0
+    while i < len(xs) - 1 {
+        if xs[i] == flag {
+            return xs[i + 1]
+        }
+        i += 1
+    }
+    return nil
+}

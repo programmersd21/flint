@@ -1,0 +1,23 @@
+# pretty_print: a value rendered across lines, for debugging.
+#
+# `pretty_output` returns the string, `pretty_print` prints it. the test
+# pins both, including nesting and the empty cases. this is a debugging
+# aid, not a serializer: strings print bare, and nothing parses the output
+# back.
+
+import pretty_print as pretty
+
+print(pretty.pretty_output(42))
+print(pretty.pretty_output("hi"))
+print(pretty.pretty_output([]))
+print(pretty.pretty_output([1]))
+print(pretty.pretty_output([1, [2, 3], "x"]))
+print(pretty.pretty_output({}))
+print(pretty.pretty_output({a: 1}))
+print(pretty.pretty_output({a: [1, 2], b: {c: 3}}))
+
+# the printing form writes the same bytes
+pretty.pretty_print([7])
+
+# tables with several keys, in insertion order
+print(pretty.pretty_output({x: 1, y: 2}))

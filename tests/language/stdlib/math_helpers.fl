@@ -1,0 +1,38 @@
+# math: the float helpers and the extended constants.
+#
+# the thin libm wrappers (sqrt, sin, floor, ...) are covered by
+# tests/language/math.fl, which pins their behaviour at the edges. this file
+# covers what the merge added: fma, ldexp, the bit halves, and the math_*
+# constants.
+#
+# fma is one rounding, not two
+
+import math
+
+print(math.fma(2, 3, 4))
+print(math.fma(0.1, 0.2, 0.3))
+
+# ldexp scales by a power of two exactly
+print(math.ldexp(1.5, 2))
+print(math.ldexp(1.5, -1))
+print(math.ldexp(1, 0))
+
+# the two halves of a double's bits: 1.5 is 0x3FF8000000000000
+print(math.hi32(1.5))
+print(math.lo32(1.5))
+print(math.hi32(0))
+print(math.lo32(0))
+
+# the explicit constants, same values a double can actually hold
+print(math.math_pi)
+print(math.math_tau)
+print(math.math_e)
+print(math.math_sqrt2)
+print(math.math_deg2rad * 180)
+print(math.math_epsilon)
+print(math.math_max)
+print(math.math_min)
+
+# inf and nan
+print(math.math_inf)
+print(math.math_nan != math.math_nan)

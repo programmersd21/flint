@@ -64,6 +64,14 @@ for n in 1..5 { print(n) }    # 1 2 3 4
 for n in 0..0 { print(n) }    # nothing
 ```
 
+`a..b..s` steps the range by `s`. the default step is 1, and a negative step
+iterates backwards. zero is an error, an empty result is fine.
+
+```flint
+for n in 0..10..2 { print(n) }    # 0 2 4 6 8
+for n in 10..0..-5 { print(n) }   # 10 5
+```
+
 a range is a compile-time construct, not a value. there is no range type, you
 cannot store `1..5` in a variable, and `..` is not an operator, which is why
 `for n in (1..5)` is a syntax error. the parentheses have nothing for it to
