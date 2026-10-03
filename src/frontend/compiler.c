@@ -1928,8 +1928,7 @@ static void for_statement(void)
 			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
 			emit_bytes(OP_GET_LOCAL, (uint8_t)end_slot);
 			emit_byte(OP_GREATER);
-			int descending_exit =
-			        emit_jump(OP_JUMP_IF_FALSE);
+			int descending_exit = emit_jump(OP_JUMP_IF_FALSE);
 			emit_byte(OP_POP);
 			int to_body = emit_jump(OP_JUMP);
 
@@ -1940,8 +1939,7 @@ static void for_statement(void)
 			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
 			emit_bytes(OP_GET_LOCAL, (uint8_t)end_slot);
 			emit_byte(OP_LESS);
-			int ascending_exit =
-			        emit_jump(OP_JUMP_IF_FALSE);
+			int ascending_exit = emit_jump(OP_JUMP_IF_FALSE);
 			emit_byte(OP_POP);
 
 			patch_jump(to_body);
