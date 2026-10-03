@@ -219,6 +219,22 @@ typedef enum {
 	 * and the right side takes its place. Either path leaves one value.
 	 */
 	OP_JUMP_IF_NOT_NIL,
+	/*
+	 * Recoverable errors. See vm.h for the handler model.
+	 *
+	 * OP_TRY, u16: push a catch handler on the VM's handler stack and
+	 * continue. The offset is the jump past the try body to the catch
+	 * block, measured from the end of the instruction -- the same
+	 * encoding as OP_JUMP, so the compiler's emit_jump()/patch_jump()
+	 * emit it, and the verifier's jump-target check covers it.
+	 *
+	 * OP_POP_HANDLER: the try body finished normally; drop the handler.
+	 *
+	 * OP_THROW: pop the value above and raise it.
+	 */
+	OP_TRY,
+	OP_POP_HANDLER,
+	OP_THROW,
 } OpCode;
 
 typedef struct {

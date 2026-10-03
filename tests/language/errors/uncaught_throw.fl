@@ -1,0 +1,2 @@
+throw "uncaught"
+print("never")

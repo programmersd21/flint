@@ -3,7 +3,7 @@ broken/
 flint
 flint-debug
 flint-stress
-flint-goto
+flint-goto*
 build/
 *.o
 *.d

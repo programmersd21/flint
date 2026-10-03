@@ -349,7 +349,8 @@ static bool verify_chunk(
 		}
 
 		if (opcode == OP_JUMP || opcode == OP_JUMP_IF_FALSE ||
-		        opcode == OP_JUMP_IF_NOT_NIL || opcode == OP_LOOP) {
+		        opcode == OP_JUMP_IF_NOT_NIL || opcode == OP_LOOP ||
+		        opcode == OP_TRY) {
 			int delta = (int)((code[offset + 1] << 8) |
 			                  code[offset + 2]);
 			/*

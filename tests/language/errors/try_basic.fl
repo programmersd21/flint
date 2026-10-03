@@ -1,0 +1,6 @@
+try {
+    print("in try")
+} catch e {
+    print("nothappen")
+}
+print("after")

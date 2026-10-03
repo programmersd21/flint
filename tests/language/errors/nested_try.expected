@@ -1,0 +1,3 @@
+inner caught
+outer caught: rethrown
+done

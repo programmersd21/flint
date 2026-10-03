@@ -1,0 +1,11 @@
+for i in 0..3 {
+    try {
+        if i == 1 {
+            break
+        }
+        throw i
+    } catch e {
+        print("caught")
+    }
+}
+print("done")

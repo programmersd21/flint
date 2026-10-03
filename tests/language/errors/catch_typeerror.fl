@@ -1,0 +1,6 @@
+try {
+    throw TypeError("bad")
+} catch e {
+    print(e.type)
+    print(e.message)
+}

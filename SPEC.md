@@ -15,7 +15,7 @@ documents the current diagnostic output and its limits.
 and      as       break    const    continue else
 export   false    fn       for      if       import
 in       let      nil      not      or       print
-return   true     while
+return   true     while    try      catch    throw
 ```
 
 ### literals
@@ -55,7 +55,8 @@ importDecl     = "import" STRING terminator ;
 exportDecl     = "export" ( fnDecl | letDecl | constDecl ) ;
 
 statement      = exprStmt | printStmt | ifStmt | whileStmt | forStmt
-               | breakStmt | continueStmt | returnStmt | "{" block "}" ;
+               | breakStmt | continueStmt | returnStmt | tryStmt | throwStmt
+               | "{" block "}" ;
 
 printStmt      = "print" "(" arguments ")" terminator ;
 ifStmt         = "if" expression block ( "else" ( ifStmt | block ) )? ;
@@ -64,9 +65,23 @@ forStmt        = "for" IDENTIFIER "in" expression block ;
 returnStmt     = "return" expression? terminator ;
 breakStmt      = "break" terminator ;
 continueStmt   = "continue" terminator ;
+throwStmt      = "throw" expression terminator ;
+tryStmt        = "try" block "catch" ( IDENTIFIER )? block ;
 
 terminator     = ";" | newline | "}" | EOF ;
 ```
+
+A `try` block runs its body, and routes the first runtime error or `throw`ed
+value to the matching `catch` body, which binds the error to the optional
+identifier. When nothing catches the error, the script reports it and exits
+with code 70. Nested `try`s match innermost first. `break`, `continue` and
+`return` inside a `try` body retire its handler before leaving the block.
+
+An error is a table with `type` (a string naming the category) and `message`
+(a string) fields. The constructors `Error`, `TypeError`, `ValueError`,
+`IOError`, `NetworkError`, `TimeoutError`, `ProcessError`, `ModuleError` and
+`PackageError` build these tables. `throw` accepts any value, not just
+error tables.
 
 `for x in expr` iterates a list, or a range when `expr` contains `..`.
 ranges are half-open: `1..5` is 1, 2, 3, 4.
@@ -421,6 +436,11 @@ reports that rather than retrying a failure nothing has changed:
 ```
 error[E0501]: Module 'broken.fl' failed to load earlier in this run.
 ```
+
+a failure inside a module is delivered to the importing script's handlers:
+`try { import "broken.fl" } catch err { ... }` catches the module's error. an
+error that reaches the top level is reported against the file that raised it,
+not the file that imported it.
 
 ## diagnostics, v0.3
 

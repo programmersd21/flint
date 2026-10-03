@@ -110,6 +110,15 @@ typedef struct Compiler {
 	CompilerUpvalue upvalues[MAX_UPVALUES];
 
 	int scope_depth;
+
+	/*
+	 * How many try blocks are open in the function this compiler is
+	 * building. Each one emitted an OP_TRY/OP_POP_HANDLER pair, and
+	 * break/continue/return crossing one has to retire its handler
+	 * first, because the handler stack is dynamic while those jumps
+	 * are static.
+	 */
+	int try_depth;
 } Compiler;
 
 /*
@@ -126,6 +135,7 @@ typedef struct LoopContext {
 	int break_count;
 	int continue_jumps[256];
 	int continue_count;
+	int try_depth; /* try blocks open when this loop began */
 } LoopContext;
 
 /* how many diagnostics before we stop and summarise instead. a file with
@@ -170,6 +180,12 @@ typedef struct {
 	 * expression_statement() */
 	bool echo_repl_value;
 	bool left_value_on_stack;
+
+	/* how many try bodies this compile is inside. An import inside a
+	 * try may legitimately end up unused: the module can throw before
+	 * the binding is ever read, and reporting that as a dead import
+	 * would be wrong. */
+	int try_nesting;
 } CompilerState;
 
 static CompilerState state;
@@ -218,6 +234,9 @@ typedef struct {
 	int line;
 	uint32_t offset;
 	bool used;
+	/* inside a try body: the binding may legitimately go unused
+	 * because the module threw before it could be used */
+	bool in_try;
 } ImportEntry;
 
 #define FL_MAX_IMPORTS 64
@@ -602,6 +621,7 @@ static void init_compiler(Compiler *compiler, FunctionType type)
 	compiler->type = type;
 	compiler->local_count = 0;
 	compiler->scope_depth = 0;
+	compiler->try_depth = 0;
 	compiler->function = new_function(state.vm);
 	state.current = compiler;
 
@@ -1597,6 +1617,60 @@ static void emit_close_upvalues_to(int depth)
 	}
 }
 
+/*
+ * try { ... } catch err { ... }
+ *
+ * OP_TRY pushes a handler and the catch block doubles as the jump target
+ * for errors. OP_POP_HANDLER retires the handler when the body completes
+ * normally. The catch clause binds the error value as an ordinary local:
+ * when the VM unwinds to the handler it pushes the error value at exactly
+ * the stack depth the try block began, which is where the catch body's
+ * first local belongs. No binding, and an OP_POP discards it instead.
+ */
+static void try_statement(void)
+{
+	consume(TOKEN_LEFT_BRACE, "expect '{' after try.");
+
+	int jump = emit_jump(OP_TRY);
+	state.current->try_depth++;
+	state.try_nesting++;
+	begin_scope();
+	block();
+	state.try_nesting--;
+	end_scope();
+	state.current->try_depth--;
+	emit_byte(OP_POP_HANDLER);
+	int skip = emit_jump(OP_JUMP);
+
+	patch_jump(jump);
+
+	if (!match(TOKEN_CATCH)) {
+		error("expect 'catch' after try block.");
+		return;
+	}
+	begin_scope();
+	bool have_binding = match(TOKEN_IDENTIFIER);
+	Token name = state.parser.previous;
+	if (!have_binding)
+		emit_byte(OP_POP);
+	else {
+		add_local(name, false);
+		mark_initialized();
+	}
+	consume(TOKEN_LEFT_BRACE, "expect '{' after catch.");
+	block();
+	end_scope();
+	patch_jump(skip);
+}
+
+/* throw expr: raise the value to the innermost handler, or the top. */
+static void throw_statement(void)
+{
+	expression();
+	emit_byte(OP_THROW);
+	consume_terminator();
+}
+
 static void print_statement(void)
 {
 	consume(TOKEN_LEFT_PAREN, "expect '(' after 'print'.");
@@ -1657,6 +1731,7 @@ static void while_statement(void)
 {
 	LoopContext loop;
 	loop.enclosing = state.loop;
+	loop.try_depth = state.current->try_depth;
 	loop.scope_depth = state.current->scope_depth;
 	loop.start = current_chunk()->count;
 	loop.continue_target = loop.start; /* re-test the condition */
@@ -1762,6 +1837,7 @@ static void for_statement(void)
 
 			LoopContext loop;
 			loop.enclosing = state.loop;
+			loop.try_depth = state.current->try_depth;
 			loop.scope_depth = state.current->scope_depth;
 			loop.start = current_chunk()->count;
 			/* the increment is emitted below, so no single offset
@@ -1859,6 +1935,7 @@ static void for_statement(void)
 
 			LoopContext loop;
 			loop.enclosing = state.loop;
+			loop.try_depth = state.current->try_depth;
 			loop.scope_depth = state.current->scope_depth;
 			loop.start = current_chunk()->count;
 			loop.continue_target = -1;
@@ -1951,6 +2028,7 @@ static void for_statement(void)
 
 		LoopContext loop;
 		loop.enclosing = state.loop;
+		loop.try_depth = state.current->try_depth;
 		loop.scope_depth = state.current->scope_depth;
 		loop.start = current_chunk()->count;
 		loop.continue_target = -1;
@@ -2022,6 +2100,15 @@ static void break_statement(void)
 
 	emit_close_upvalues_to(state.loop->scope_depth);
 
+	/*
+	 * break jumps to the loop's end, so every try block opened
+	 * inside the loop since it began has to retire its handler.
+	 * Exactly the trys lexically between this break and the loop.
+	 */
+	for (int i = state.current->try_depth - state.loop->try_depth; i > 0;
+	        i--)
+		emit_byte(OP_POP_HANDLER);
+
 	/* the offsets are patched once the loop body is complete */
 	if (state.loop->break_count >= 256) {
 		error("too many break statements in loop.");
@@ -2045,6 +2132,12 @@ static void continue_statement(void)
 	}
 
 	emit_close_upvalues_to(state.loop->scope_depth);
+
+	/* retire the handlers of trys between here and the loop head */
+	for (int i = state.current->try_depth - state.loop->try_depth; i > 0;
+	        i--)
+		emit_byte(OP_POP_HANDLER);
+
 	if (state.loop->continue_target == -1) {
 		if (state.loop->continue_count >= 256) {
 			error("too many continue statements in loop.");
@@ -2063,6 +2156,10 @@ static void return_statement(void)
 	/* the top level is a function too, but it has no caller */
 	if (state.current->type == TYPE_SCRIPT)
 		error("can't return from top-level code.");
+
+	/* every try block open in this function is on its way out */
+	for (int i = 0; i < state.current->try_depth; i++)
+		emit_byte(OP_POP_HANDLER);
 
 	/* `return` with nothing after it is return nil */
 	if (check(TOKEN_SEMICOLON) || check(TOKEN_RIGHT_BRACE) ||
@@ -2122,6 +2219,10 @@ static void statement(void)
 		continue_statement();
 	} else if (match(TOKEN_RETURN)) {
 		return_statement();
+	} else if (match(TOKEN_TRY)) {
+		try_statement();
+	} else if (match(TOKEN_THROW)) {
+		throw_statement();
 	} else if (match(TOKEN_LEFT_BRACE)) {
 		/* a bare block is a scope */
 		begin_scope();
@@ -2450,6 +2551,7 @@ static void import_record(const char *name, int length, const Token *path)
 	imports[import_count].line = path->line;
 	imports[import_count].offset = path->offset;
 	imports[import_count].used = false;
+	imports[import_count].in_try = state.try_nesting > 0;
 	import_count++;
 }
 
@@ -2511,7 +2613,7 @@ static void import_check_unused(void)
 		}
 	}
 	for (size_t i = 0; i < import_count; i++) {
-		if (imports[i].used)
+		if (imports[i].used || imports[i].in_try)
 			continue;
 		Token at = {
 		        TOKEN_IDENTIFIER,

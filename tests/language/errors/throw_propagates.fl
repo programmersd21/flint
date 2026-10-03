@@ -1,0 +1,12 @@
+fn fail() {
+    throw "nope"
+}
+fn outer() {
+    fail()
+}
+try {
+    outer()
+} catch e {
+    print("caught: " + e)
+}
+print("done")

@@ -519,6 +519,54 @@ static Value type_native(VM *vm, int argc, Value *argv)
 	return STR_VAL(copy_string(vm, name, (int)strlen(name)));
 }
 
+/* Error(message) and friends: a table with `type` and `message`, the
+ * shape vm_runtime_error produces for caught-native errors */
+static Value error_make(VM *vm, int argc, Value *argv, const char *type)
+{
+	if (argc != 1 || !IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "%s() takes one string argument.", type);
+		return NIL_VAL;
+	}
+	return fl_error_value(vm, type, AS_CSTRING(argv[0]));
+}
+
+static Value error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "Error");
+}
+static Value type_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "TypeError");
+}
+static Value value_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "ValueError");
+}
+static Value io_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "IOError");
+}
+static Value network_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "NetworkError");
+}
+static Value timeout_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "TimeoutError");
+}
+static Value process_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "ProcessError");
+}
+static Value module_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "ModuleError");
+}
+static Value package_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "PackageError");
+}
+
 /*
  * import_file(path) -> table of the module's exports
  *
@@ -804,6 +852,10 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		table_set(vm, &vm->modules, key, FALSE_VAL);
 		vm_pop(vm);
 		free(path);
+		/* surface the module's error in the importing script, so
+		 * try/catch around an import catches module failures */
+		if (vm->has_pending)
+			vm_throw_value(vm, vm->pending_error);
 		return NIL_VAL;
 	}
 
@@ -904,6 +956,15 @@ static Value slice_native(VM *vm, int argc, Value *argv)
 void register_natives(VM *vm)
 {
 	vm_define_native(vm, "clock", clock_native, 0);
+	vm_define_native(vm, "Error", error_ctor, 1);
+	vm_define_native(vm, "TypeError", type_error_ctor, 1);
+	vm_define_native(vm, "ValueError", value_error_ctor, 1);
+	vm_define_native(vm, "IOError", io_error_ctor, 1);
+	vm_define_native(vm, "NetworkError", network_error_ctor, 1);
+	vm_define_native(vm, "TimeoutError", timeout_error_ctor, 1);
+	vm_define_native(vm, "ProcessError", process_error_ctor, 1);
+	vm_define_native(vm, "ModuleError", module_error_ctor, 1);
+	vm_define_native(vm, "PackageError", package_error_ctor, 1);
 	/* -1 for the arity because input() takes zero or one argument, and
 	 * a fixed-arity native cannot express that. the check is inside. */
 	vm_define_native(vm, "input", input_native, -1);
