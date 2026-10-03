@@ -178,6 +178,13 @@ Available constructors: `Error`, `TypeError`, `ValueError`, `IOError`,
 `PackageError`. Throwing a plain value (string, number, ...) also works;
 `catch` binds it directly.
 
+a runtime error picks its category from its message: an index failure is a
+`ValueError`, a type disagreement is a `TypeError`, a bad file operation is
+an `IOError`, and only the unclassified rest stay `Error`. json failures
+arrive as `ParseError`. the constructors above cover the categories a
+program raises itself; the runtime's own categories need no constructor
+because a program never builds them by hand.
+
 Rules:
 
 - an error no `catch` handles prints the message and trace, and the exit

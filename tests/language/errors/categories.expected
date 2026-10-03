@@ -7,8 +7,8 @@ TimeoutError
 ProcessError
 ModuleError
 PackageError
-Error
-Error
+ValueError
+TypeError
 Error
 NetworkError / connection reset
 TimeoutError / took too long

@@ -725,13 +725,19 @@ accept options tables: `url`, `method`, `body`, `headers` (a table),
 ```flint
 import http
 
-let res = http.get("https://api.example.com/data", {headers: {"User-Agent": "flint"}})
+let headers = {}
+headers["User-Agent"] = "flint"
+let res = http.get("https://api.example.com/data", {headers: headers})
 if res.ok {
     print(res.body)
 } else {
     print(res.error)
 }
 ```
+
+table literals only take identifier keys, so a header name with a dash is
+set through a computed key first, as above. the options table itself takes
+identifier keys only.
 
 the result is a table with:
 
@@ -795,14 +801,18 @@ parses the output back.
 ## args
 
 ```flint
-import args
+import args as argv
 
-print(args.all())       # the whole argv list
-print(args.count())     # how many arguments the script was given
-print(args.get(0))      # the first one, or nil when there is none
-print(args.has("--x"))  # true when the flag is present
-print(args.value("--out"))  # the argument after the flag, or nil
+print(argv.all())       # the whole argv list
+print(argv.count())     # how many arguments the script was given
+print(argv.get(0))      # the first one, or nil when there is none
+print(argv.has("--x"))  # true when the flag is present
+print(argv.value("--out"))  # the argument after the flag, or nil
 ```
+
+the alias is required, not style: a bare `import args` binds `args` in your
+globals and shadows the builtin `args()` the module itself calls. aliased,
+both names work.
 
 the builtin `args()` returns the script's argument vector without the
 interpreter's own flags. this module wraps the questions a script actually
