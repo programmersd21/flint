@@ -502,6 +502,19 @@ static Value num_native(VM *vm, int argc, Value *argv)
 	return NUMBER_VAL(result);
 }
 
+/* The zero-step check for `a..b..0`, raised from C so the message and the
+ * error shape come from the same place as every other runtime error. There is
+ * no compiler opcode for it: a range with a zero step would loop forever, and
+ * one call at the top of the loop is cheaper than a new opcode plus a verifier
+ * rule. */
+static Value range_step_error_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	(void)argv;
+	vm_runtime_error(vm, "a range step cannot be zero.");
+	return NIL_VAL;
+}
+
 /* the type name, as a string. type() is the only way to introspect. */
 static Value type_native(VM *vm, int argc, Value *argv)
 {
@@ -965,6 +978,8 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "ProcessError", process_error_ctor, 1);
 	vm_define_native(vm, "ModuleError", module_error_ctor, 1);
 	vm_define_native(vm, "PackageError", package_error_ctor, 1);
+	vm_define_native(
+	        vm, "__range_step_error", range_step_error_native, 0);
 	/* -1 for the arity because input() takes zero or one argument, and
 	 * a fixed-arity native cannot express that. the check is inside. */
 	vm_define_native(vm, "input", input_native, -1);
