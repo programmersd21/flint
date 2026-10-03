@@ -1,50 +1,74 @@
 # limits
 
-Things Flint does not do. These are language limits, not hidden switches.
+things flint does not do. these are language limits, not hidden switches.
+each one was checked against the source; if a limit below stops being true,
+the test suite should have a test proving it and this file should say so.
 
 ## numbers and types
 
-Every number is an IEEE 754 double. Integers above 2^53 lose precision. There
+every number is an IEEE 754 double. integers above 2^53 lose precision. there
 are no integer arithmetic rules waiting to be discovered later.
 
-There are no static types, generics, classes, or user-defined types. `as`
+there are no static types, generics, classes, or user-defined types. `as`
 checks one value at run time; it does not convert it or constrain later calls.
 
 ## control and data
 
-Ranges are syntax for `for`, not values. They cannot be stored, passed, or
-nested. Table keys are strings; tables cannot be iterated and have no delete
-operation. A missing field reads as `nil`, so a typo looks like an unset field.
+ranges are syntax for `for`, not values. they cannot be stored, passed, or
+nested. `a..b` is half-open, and `a..b..s` steps it; a zero step is an error.
 
-Strings are byte sequences. Indexing, iteration, length, and the string
-helpers count bytes. UTF-8 is left alone, which means a byte index can land
+table keys are strings. a missing field reads as `nil`, so a typo looks like
+an unset field. tables iterate in insertion order.
+
+strings are byte sequences. indexing, iteration, length, and the string
+helpers count bytes. utf-8 is left alone, which means a byte index can land
 inside a multibyte character.
 
-There is no exception handling. A runtime error prints a trace and exits with
-status 70. There is no error value for Flint code to inspect.
+## errors
+
+`try`/`catch`/`throw` recover from runtime errors, and an uncaught error
+prints a trace and exits with status 70. errors are `{type, message}` tables.
+there is no `finally`, no catch filters, and the error carries no stack-trace
+field of its own.
+
+## modules
+
+every module has its own environment. `export` decides which of a module's
+names an importer can reach; unexported names are private. a module runs
+once per process and is cached by resolved path. an import that fails binds
+nothing, and the failure is remembered so a later import reports it instead
+of retrying.
 
 ## runtime edges
 
-The REPL compiles one line at a time. It cannot keep an unfinished block open
-for the next line. It also has no line editing or history; the prompt is not
+the repl compiles one line at a time. it cannot keep an unfinished block open
+for the next line. it also has no line editing or history; the prompt is not
 secretly an editor.
 
-Modules share globals and have no namespaces. `export` is a marker, not a
-visibility rule. A failed module can leave globals behind even though the
-module itself is removed from the cache.
-
-String growth copies bytes. Repeated concatenation in a loop can therefore
-copy the growing prefix on every pass. Build a list of pieces and `join` it
+string growth copies bytes. repeated concatenation in a loop can therefore
+copy the growing prefix on every pass. build a list of pieces and `join` it
 when the string helpers fit the job.
 
-The call stack has 256 frames. Tail calls do not reuse a frame. The value
+the call stack has 256 frames. tail calls do not reuse a frame. the value
 stack is also fixed-size; deeply nested expressions and large local stacks
 can exhaust it.
 
-The VM uses NaN-boxed values and requires a 64-bit host with pointers that fit
-in 48 bits. The build is C11, but the value representation is not portable to
-every C11 target.
+the vm uses nan-boxed values and requires a 64-bit host with pointers that
+fit in 48 bits. the build is c11, but the value representation is not portable
+to every c11 target.
 
-`exec()` starts a program directly and passes arguments separately. Flint
-does not invoke a shell for it. File and environment functions expose the
-process's ordinary permissions; Flint adds no sandbox.
+`process.run` starts a program from an argument vector and never invokes a
+shell. file and environment functions expose the process's ordinary
+permissions; flint adds no sandbox.
+
+## toolchain
+
+the `flint` executable runs scripts, `-e` code, stdin and the repl, plus
+`flint sync` and the diagnostic flags. there are no `check`, `test`, `fmt`,
+`lint`, `build`, `debug`, `profile`, `doc`, `package`, `install` or `lsp`
+subcommands.
+
+there is no package manager, no registry and no lockfile. there are no
+threads, channels or locks. the `http` module is a blocking client with no
+tls. there is no cryptography beyond the non-cryptographic `random` module,
+which says so itself.

@@ -1,0 +1,36 @@
+# ansi: terminal escape codes, as plain strings.
+#
+# nothing here touches the terminal. every code is a string, so the test
+# asserts on the bytes, not on what a terminal would do with them. the point
+# is that the names map to the right sequences and the builders compose.
+
+import ansi
+
+# the two everything is built from
+print(len(ansi.ANSI_ESC))
+print(len(ansi.ANSI_CSI))
+
+# styles
+print(ansi.ANSI_RESET)
+print(ansi.ANSI_BOLD)
+print(ansi.ANSI_RED)
+print(ansi.ANSI_BG_BLUE)
+print(ansi.ANSI_BRIGHT_GREEN)
+
+# cursor and clearing
+print(ansi.ANSI_CURSOR_UP)
+print(ansi.ANSI_CURSOR_HIDE)
+print(ansi.ANSI_CLEAR_SCREEN)
+print(ansi.ANSI_CLEAR_LINE)
+
+# builders compose from numbers
+print(ansi.ANSI_fg256(9))
+print(ansi.ANSI_bg256(3))
+print(ansi.ANSI_RGB(255, 0, 128))
+print(ansi.ANSI_up(5))
+print(ansi.ANSI_goto(3, 1))
+
+# the named wrappers put the code around the string and reset after it
+print(ansi.red("x"))
+print(ansi.bold(ansi.blue("y")))
+print(ansi.gray("z"))

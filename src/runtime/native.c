@@ -136,6 +136,43 @@ static Value input_native(VM *vm, int argc, Value *argv)
 	return STR_VAL(line);
 }
 
+/* ord(s) -> number: the byte value at a one-character string (0-255). */
+static Value ord_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "argument to ord() must be a string.");
+		return NIL_VAL;
+	}
+	ObjString *s = AS_STRING(argv[0]);
+	if (s->length != 1) {
+		vm_runtime_error(
+		        vm, "argument to ord() must be a single character.");
+		return NIL_VAL;
+	}
+	return NUMBER_VAL((double)(unsigned char)s->chars[0]);
+}
+
+/* chr(n) -> string: a one-character string from a byte value 0-255. */
+static Value chr_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_NUMBER(argv[0]) ||
+	        (double)(int)AS_NUMBER(argv[0]) != AS_NUMBER(argv[0])) {
+		vm_runtime_error(
+		        vm, "argument to chr() must be a whole number.");
+		return NIL_VAL;
+	}
+	int n = (int)AS_NUMBER(argv[0]);
+	if (n < 0 || n > 255) {
+		vm_runtime_error(
+		        vm, "argument to chr() must be between 0 and 255.");
+		return NIL_VAL;
+	}
+	char c = (char)n;
+	return STR_VAL(new_string(vm, &c, 1));
+}
+
 /* strings and lists. byte length for strings, element count for lists. */
 static Value len_native(VM *vm, int argc, Value *argv)
 {
@@ -991,6 +1028,8 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "has", has_native, 2);
 	vm_define_native(vm, "delete", delete_native, 2);
 	vm_define_native(vm, "str", str_native, 1);
+	vm_define_native(vm, "ord", ord_native, 1);
+	vm_define_native(vm, "chr", chr_native, 1);
 	vm_define_native(vm, "num", num_native, 1);
 	vm_define_native(vm, "type", type_native, 1);
 	vm_define_native(vm, "__slice", slice_native, 3);

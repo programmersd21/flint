@@ -1,80 +1,25 @@
 # modules: a multi-file program.
 #
-# run it, from the directory that holds these files:
+# run it from anywhere; the imports resolve against this file, not against
+# the directory you happen to be standing in:
 #
-#     cd examples/modules && ../../flint main.fl
+#     ./flint examples/modules/main.fl
 #
-# the `cd` is not a detail. an import path is resolved against the *process*
-# working directory, not against the file doing the importing, so the same
-# script run from elsewhere will not find its modules. that is the sharpest
-# edge in the module system and it is not fixed. see ../../docs/modules.md
-#
-# the three files are:
+# the four files are:
 #
 #     shapes.fl   the data and the functions
 #     stats.fl    a second module, importing the first
-#     main.fl     the entry point, imports both
+#     limits.fl   a module exporting a const
+#     main.fl     this file: the entry point, imports the other three
 #
-# a module is just a file. there is no package manager, no namespace, no
-# `module` keyword and no `require`. importing a file runs it, and everything
-# it defines becomes a global that every other file can see.
+# every file each module defines that is marked `export`, reached through
+# the name the import binds. a module's unexported names are private: two
+# modules can each have a helper of the same name and neither sees the
+# other's.
 
-# ---------------------------------------------------------------- shapes.fl
-
-# the file this module provides. `export` is a convention for marking what
-# you meant to publish -- it is not access control, and an unexported name is
-# still reachable from an importing file.
-export fn area(shape) {
-    # a table is the record type. there are no classes and no structs.
-    if shape.kind == "rect" {
-        return shape.w * shape.h
-    }
-    if shape.kind == "circle" {
-        return 3.14159 * shape.r * shape.r
-    }
-    return 0
-}
-
-export fn describe(shape) {
-    return shape.kind + " with area " + str(area(shape))
-}
-
-# a private helper. nothing stops another file calling this, and that is fine;
-# the name is just not advertised.
-fn normalise(shape) {
-    if not shape.wide {
-        return false
-    }
-    return true
-}
-
-# ------------------------------------------------------------------ stats.fl
-
-# a module importing another module. paths are still working-directory
-# relative, so this is the same "shapes.fl" the main file uses.
-import "shapes.fl"
-
-# `area` is in scope from the import above. there is no prefix and no
-# qualification, because there is only one global table.
-export fn total_area(shapes) {
-    let total = 0
-    let i = 0
-    while i < len(shapes) {
-        total += area(shapes[i])
-        i += 1
-    }
-    return total
-}
-
-# ------------------------------------------------------------------- main.fl
-
-# two modules, each reached through its own name.
-#
-# before v0.6.0 these imports dumped describe, total_area and largest into
-# this file's globals, and any private helper the two modules had in common
-# would silently overwrite the other. now each name is its own.
 import "shapes.fl" as shapes_mod
-import "stats.fl"
+import "stats.fl" as stats
+import "limits.fl" as limits
 
 let shapes = [
     {kind: "rect", w: 3, h: 4},
@@ -91,20 +36,15 @@ print("total: " + str(stats.total_area(shapes)))
 let biggest = stats.largest(shapes)
 print("largest is a " + biggest.kind)
 
-# shapes.fl also has a private `normalise`. it is not in shapes_mod, and
-# reading a name a table does not have gives nil rather than an error.
-#
-# that is the whole of module privacy: two modules can each have a `scale` or
-# a `round` and neither can see or overwrite the other's. before v0.6.0 they
-# shared one global table, and whichever loaded second silently won.
-# print(shapes_mod.normalise(shapes[0]))   # nil: not exported
+# shapes.fl has a private `normalise`. it is not exported, so reading it
+# through the module gives nil rather than the function. that is the whole
+# of module privacy: two modules can each have a `scale` or a `round` and
+# neither can see or overwrite the other's.
+print(shapes_mod.normalise)
 
-# const works across the boundary. a const is a property of the binding in the
-# a module's exports are reached through its name, and the importer cannot
-# write to them at all -- they are not the importer's bindings to write.
-import "limits.fl" as limits
+# const works across the boundary: a const is a property of the binding in
+# the module that declared it, and the importer cannot write to a binding it
+# does not own.
 print("limit is " + str(limits.LIMIT))
 print("clamp(500) is " + str(limits.clamp(500)))
 # limits.LIMIT = 99   # error: cannot assign to constant 'LIMIT'
-#                     # (a table field, so: only tables have fields --
-#                     #  the const is protected inside limits.fl itself)

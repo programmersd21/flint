@@ -1,0 +1,13 @@
+# args: the script's command line, asking the common questions.
+#
+# this one only tests the no-arguments path, because the test runner invokes
+# the script with no arguments. with arguments it is the same map: get returns
+# the value and nil past the end.
+
+import args
+
+print(args.count())
+print(args.get(0))
+print(args.get(99))
+print(args.has("--verbose"))
+print(args.value("--config"))

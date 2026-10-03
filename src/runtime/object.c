@@ -246,7 +246,6 @@ ObjFunction *new_function(VM *vm)
 	function->name = NULL;
 	function->call_count = 0;
 	function->loop_count = 0;
-	function->jit_code = NULL;
 	chunk_init(&function->chunk);
 	return function;
 }

@@ -1,12 +1,14 @@
 # shapes.fl -- one module of the examples/modules program.
 #
 # a flint module is a file with `fn` and `let` in it. there is no header, no
-# declaration of what it provides, and no namespace. importing it runs it, and
-# everything it defines at the top level becomes a global.
+# declaration of what it provides, and no namespace. importing it runs it
+# once, and the names it marked `export` become reachable through the name the
+# import binds.
 #
-# `export` marks what you meant to publish. it is a convention, not a mechanism:
-# nothing is actually private, and main.fl can call `normalise` below. write it
-# so a reader knows which names are the interface.
+# `export` marks what you meant to publish. unexported names are private:
+# main.fl reads shapes_mod.describe but shapes_mod.normalise below is nil,
+# because normalise was never exported. write it so a reader knows which
+# names are the interface.
 
 # area() takes a table, because a table is the record type here. there are no
 # classes, no structs and no user-defined types at all.

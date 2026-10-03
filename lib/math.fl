@@ -5,8 +5,8 @@
 #
 # Every function here is a thin wrapper. The heavy lifting is in libm, reached
 # through the __ natives, and those stay internal: a user should never have to
-# know that __sqrt exists. This module is what turns eleven runtime
-# primitives into an API someone can hold in their head.
+# know that __sqrt exists. This module is what turns the runtime primitives
+# into an API someone can hold in their head.
 #
 # Everything returns a number, because that is the only numeric type flint
 # has. There is no integer division and no overflow, and the docs say so
@@ -88,3 +88,48 @@ export fn copysign(x, y) { return __copysign(x, y) }
 export fn isnan(x) { return x != x }
 export fn isinf(x) { return x == 1 / 0 or x == -1 / 0 }
 export fn isfinite(x) { return not isnan(x) and not isinf(x) }
+
+# fma is one rounding, not two: `fma(a, b, c)` computes a*b+c as if to
+# infinite precision and rounds once. the naive `a * b + c` rounds twice.
+export fn fma(a, b, c) { return __fma(a, b, c) }
+
+# ldexp scales by a power of two exactly: `ldexp(x, n)` is x * 2^n with no
+# intermediate rounding, which `x * pow(2, n)` cannot promise.
+export fn ldexp(x, n) { return __ldexp(x, n) }
+
+# the two halves of a double's bits. these are for inspecting a value, not
+# for arithmetic: `hi32` decides the exponent bin a frexp-style decomposition
+# would land in, and `lo32` is the rest.
+export fn hi32(x) { return __hi32(x) }
+export fn lo32(x) { return __lo32(x) }
+
+# --- extended constants. the short names above (pi, e, tau) are the ones a
+# program reaches for; these are the explicit ones, with the `math_` prefix so
+# they never collide with a local. same values a double can actually hold. ---
+
+export const math_inf = 1e308 * 10
+export const math_nan = math_inf - math_inf
+
+export const math_pi = 3.141592653589793
+export const math_tau = 6.283185307179586      # 2*pi
+export const math_pi_2 = 1.5707963267948966    # pi/2
+export const math_pi_4 = 0.7853981633974483    # pi/4
+export const math_1_pi = 0.3183098861837907    # 1/pi
+export const math_2_pi = 0.6366197723675814    # 2/pi
+
+export const math_e = 2.718281828459045
+export const math_ln2 = 0.6931471805599453
+export const math_ln10 = 2.302585092994046
+export const math_log2e = 1.4426950408889634   # 1/ln2
+export const math_log10e = 0.4342944819032518  # 1/ln10
+
+export const math_sqrt2 = 1.4142135623730951
+export const math_sqrt1_2 = 0.7071067811865476 # 1/sqrt2
+
+export const math_deg2rad = 0.017453292519943295  # pi/180
+export const math_rad2deg = 57.29577951308232     # 180/pi
+
+export const math_epsilon = 2.220446049250313e-16  # gap between 1 and the next double
+export const math_max = 1.7976931348623157e308     # largest finite double
+export const math_min = 2.2250738585072014e-308    # smallest normal double
+export const math_tiny = 5e-324                    # smallest subnormal double

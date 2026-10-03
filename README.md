@@ -33,9 +33,9 @@ the implementation is small enough to read.
 
 that's intentional. large codebases have enough fans already.
 
-## install
+## installation
 
-to build in place:
+to build from source:
 
 ```sh
 git clone https://github.com/programmersd21/flint
@@ -45,35 +45,39 @@ make release
 
 the binary is `./flint`.
 
-to install, so `flint` is on your PATH:
+to install flint to your path:
 
 ```sh
 make install
 ```
 
-which puts the binary in `~/.local/bin` and the standard library in
-`~/.flint/stdlib`. `PREFIX`, `BINDIR`, `LIBDIR` and `DESTDIR` all override
-that, for packaging:
+by default, this installs the binary to `~/.local/bin` and the standard library to `~/.flint/stdlib`.
+
+for packaging, override the installation paths:
 
 ```sh
 make install PREFIX=/usr/local LIBDIR=/usr/local/share/flint/lib
 ```
 
-there is nothing to uninstall beyond `make uninstall` -- no runtime, no shared
-libraries, no configuration, no build directory left behind. the whole thing is
-one binary and nine `.fl` files.
+to uninstall:
+
+```sh
+make uninstall
+```
+
+flint requires no runtime dependencies beyond libc and libm. the installation consists of one binary and fourteen `.fl` files.
+
+### standard library lookup
 
 flint searches for its standard library in this order:
 
-```text
-$FLINT_STDLIB                  an explicit override, wins over everything
-<executable>/lib               beside the binary
-~/.flint/stdlib                where `make install` puts it
-```
+1. `$FLINT_STDLIB`, an explicit override.
+2. `<executable>/lib`, beside the binary.
+3. `~/.flint/stdlib`, the default installation directory.
 
-the third entry is what `make install` relies on, because a binary on PATH
-has no `lib/` beside it. if you move the binary somewhere without `lib/` next
-to it, either keep `~/.flint/stdlib` or set `FLINT_STDLIB`.
+the third location is necessary because a binary on `PATH` does not necessarily have a `lib/` directory beside it.
+
+if you move the binary somewhere without an adjacent `lib/` directory, keep the standard library in `~/.flint/stdlib` or set `FLINT_STDLIB`.
 
 ## example
 
@@ -95,66 +99,85 @@ print(c())
 print(c())
 ```
 
+output:
+
 ```text
 1
 2
 ```
 
-modules are just files, and each one has its own namespace:
+### modules
+
+modules are files, each with its own namespace.
+
+`shapes.fl`:
 
 ```flint
-# shapes.fl
-let tax = 0.2                     # private to this file
+let tax = 0.2
 
-export fn taxed(amount) {         # public
+export fn taxed(amount) {
     return amount * (1 + tax)
 }
 ```
 
+`main.fl`:
+
 ```flint
-# main.fl
 import "shapes.fl"
 
-print(shapes.taxed(10))          # 12
-print(shapes.tax)                 # nil -- a private name is not there
+print(shapes.taxed(10))
+print(shapes.tax)
 ```
 
-two modules can both have a private `tax` and neither can see or overwrite
-the other's, which was not true before 0.6.0.
+output:
+
+```text
+12
+nil
+```
+
+`tax` is private to `shapes.fl`. only exported names are accessible through the module namespace.
+
+two modules can define the same private name without exposing or overwriting each other's values.
 
 ## standard library
 
-| module        | purpose                      |
-| ------------- | ---------------------------- |
-| `math`        | math functions and constants |
-| `random`      | random numbers and shuffling |
-| `time`        | clocks and time utilities    |
-| `fs`          | files and directories        |
-| `path`        | path manipulation            |
-| `collections` | collection helpers           |
-| `json`        | parsing and serialization    |
-| `os`          | the machine flint is on      |
-| `process`     | spawn programs, capture output |
-| `http`        | HTTP client requests         |
+| module        | purpose                                |
+| :------------ | :------------------------------------- |
+| `math`        | math functions and constants           |
+| `random`      | random numbers and shuffling           |
+| `time`        | clocks and time utilities              |
+| `fs`          | files and directories                  |
+| `path`        | path manipulation                      |
+| `collections` | collection helpers                     |
+| `json`        | parsing and serialization              |
+| `os`          | information about the host system      |
+| `process`     | spawning programs and capturing output |
+| `http`        | http client requests                   |
+| `args`        | script arguments and flags             |
+| `encoding`    | hex, base64 and url encoding           |
+| `ansi`        | terminal escape codes                  |
+| `pretty_print`| multi-line value rendering             |
 
-the library is plain flint code where possible.
+the library is written in flint wherever possible.
 
 ## updating the standard library
 
 no package manager. no registry. no twelve-layer dependency tree to print a number.
 
-`flint sync` downloads the library from the repository and installs it into
-`~/.flint/stdlib`, where `make install` puts it. each file is compiled before
-it is installed, so a truncated download or a 404 leaves the old files alone.
-`--dry-run` shows what would change, and `--ref=v0.7.0` pins to a release
-tag instead of `main`:
+`flint sync` downloads the standard library from the repository and installs it into `~/.flint/stdlib`.
+
+each file is compiled before installation. a failed download, truncated response or 404 leaves the existing files untouched.
+
+use `--dry-run` to preview changes or `--ref` to select a release tag instead of `main`:
 
 ```sh
 flint sync --dry-run
 flint sync
+flint sync --ref=v0.7.0
 ```
 
-## vm
+## virtual machine
 
 ```text
 source
@@ -174,28 +197,28 @@ stack vm
 
 the parser emits bytecode directly.
 
-values fit in 64 bits. closures capture locals. memory is managed by a mark-and-sweep collector.
+values fit in 64 bits. closures capture locals. memory is managed by a mark-and-sweep garbage collector.
 
 there is no giant intermediate representation sitting around because apparently compilers enjoy paperwork.
 
 ## performance
 
-the default interpreter uses a portable C11 dispatch loop.
+the default interpreter uses a portable c11 dispatch loop.
 
-for compilers that support computed goto:
+on compilers that support computed goto, build the alternative interpreter:
 
 ```sh
 make flint-goto
 ```
 
-benchmark both:
+benchmark both implementations:
 
 ```sh
 make bench
 make bench-goto
 ```
 
-results are kept in [`bench/RESULTS.md`](bench/RESULTS.md).
+results are documented in [`bench/RESULTS.md`](bench/RESULTS.md).
 
 measurements are preferred over benchmark folklore. the cpu has already suffered enough.
 
@@ -212,18 +235,19 @@ diagnostics include source locations and stable error codes.
 
 the verifier checks generated bytecode before execution, including opcodes, operands, indices and jump targets.
 
-because executing invalid bytecode and hoping for the best is not a runtime strategy.
+executing invalid bytecode and hoping for the best is not a runtime strategy.
 
 ## development
+
+run the main checks:
 
 ```sh
 make check
 make stress
 ```
 
-`make check` performs a clean release build and runs the test suites.
-
-`make stress` runs with aggressive garbage collection under ASan and UBSan.
+* `make check` performs a clean release build and runs the test suites.
+* `make stress` runs with aggressive garbage collection under asan and ubsan.
 
 other useful targets:
 
@@ -242,17 +266,17 @@ if `make stress` finds something, congratulations. the garbage collector has opi
 
 ## documentation
 
-* [`docs/language.md`](docs/language.md) | language reference
-* [`docs/syntax.md`](docs/syntax.md) | syntax and expressions
-* [`docs/functions.md`](docs/functions.md) | functions and closures
-* [`docs/data.md`](docs/data.md) | strings, lists and tables
-* [`docs/modules.md`](docs/modules.md) | modules
-* [`docs/library.md`](docs/library.md) | standard library
-* [`docs/diagnostics.md`](docs/diagnostics.md) | diagnostics
-* [`docs/internals.md`](docs/internals.md) | vm internals
-* [`ARCHITECTURE.md`](ARCHITECTURE.md) | architecture
-* [`SPEC.md`](SPEC.md) | language specification
-* [`examples/`](examples) | examples
+* [`docs/language.md`](docs/language.md) - language reference
+* [`docs/syntax.md`](docs/syntax.md) - syntax and expressions
+* [`docs/functions.md`](docs/functions.md) - functions and closures
+* [`docs/data.md`](docs/data.md) - strings, lists and tables
+* [`docs/modules.md`](docs/modules.md) - modules
+* [`docs/library.md`](docs/library.md) - standard library
+* [`docs/diagnostics.md`](docs/diagnostics.md) - diagnostics
+* [`docs/internals.md`](docs/internals.md) - vm internals
+* [`ARCHITECTURE.md`](ARCHITECTURE.md) - architecture
+* [`SPEC.md`](SPEC.md) - language specification
+* [`examples/`](examples/) - examples
 
 ## contributing
 
@@ -260,7 +284,7 @@ keep changes focused.
 
 if you find a bug, add a test.
 
-before opening a pull request:
+before opening a pull request, run:
 
 ```sh
 make check
@@ -271,6 +295,10 @@ see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 if a patch adds a dependency, explain why c could not do the job.
 
+## banner
+
+![flint banner](assets/banner.png)
+
 ## license
 
-MIT. see [`LICENSE`](LICENSE).
+flint is licensed under the mit license. see [`LICENSE`](LICENSE).
