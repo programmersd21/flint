@@ -1892,40 +1892,56 @@ static void for_statement(void)
 			int end_slot = state.current->local_count - 2;
 			int step_slot = state.current->local_count - 1;
 
+			if (has_step) {
+				/* a zero step never reaches the end, so
+				 * it is refused before the loop rather
+				 * than hanging the program inside it. */
+				emit_bytes(OP_GET_LOCAL, (uint8_t)step_slot);
+				emit_constant(NUMBER_VAL(0));
+				emit_byte(OP_EQUAL);
+				int ok = emit_jump(OP_JUMP_IF_FALSE);
+				emit_byte(OP_POP);
+				ObjString *err_str = copy_string(state.vm,
+				        "a range step cannot be zero.",
+				        28);
+				emit_constant(STR_VAL(err_str));
+				emit_byte(OP_THROW);
+				patch_jump(ok);
+				emit_byte(OP_POP);
+			}
+
 			/*
 			 * condition: step >= 0 ? var < end : var > end
 			 *
-			 * The sign is tested once per iteration rather than
-			 * once per loop, because the step can be a variable
-			 * and only its value at loop entry decides which
-			 * direction the whole loop runs in. Hoisting that test
-			 * out of the loop is what keeps this one loop instead
-			 * of two, and a zero step is refused at run time
-			 * rather than looping forever.
+			 * step < 0 means descending (var > end), otherwise
+			 * ascending (var < end). The check is per-iteration
+			 * because step can be a variable.
 			 */
 			emit_bytes(OP_GET_LOCAL, (uint8_t)step_slot);
 			emit_constant(NUMBER_VAL(0));
-			emit_byte(OP_LESS_EQUAL);
-
-			int up_jump = emit_jump(OP_JUMP_IF_FALSE);
-			emit_byte(OP_POP);
-
-			/* ascending */
-			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
-			emit_bytes(OP_GET_LOCAL, (uint8_t)end_slot);
 			emit_byte(OP_LESS);
-			int ascending_exit = emit_jump(OP_JUMP_IF_FALSE);
+
+			int descending = emit_jump(OP_JUMP_IF_FALSE);
 			emit_byte(OP_POP);
-			int to_body = emit_jump(OP_JUMP);
 
-			patch_jump(up_jump);
-			emit_byte(OP_POP); /* the step >= 0 test */
-
-			/* descending */
+			/* step < 0 -> descending: check var > end */
 			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
 			emit_bytes(OP_GET_LOCAL, (uint8_t)end_slot);
 			emit_byte(OP_GREATER);
-			int exit_jump = emit_jump(OP_JUMP_IF_FALSE);
+			int descending_exit =
+			        emit_jump(OP_JUMP_IF_FALSE);
+			emit_byte(OP_POP);
+			int to_body = emit_jump(OP_JUMP);
+
+			patch_jump(descending);
+			emit_byte(OP_POP);
+
+			/* step >= 0 -> ascending: check var < end */
+			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
+			emit_bytes(OP_GET_LOCAL, (uint8_t)end_slot);
+			emit_byte(OP_LESS);
+			int ascending_exit =
+			        emit_jump(OP_JUMP_IF_FALSE);
 			emit_byte(OP_POP);
 
 			patch_jump(to_body);
@@ -1939,15 +1955,16 @@ static void for_statement(void)
 			for (int i = 0; i < loop.continue_count; i++)
 				patch_jump(loop.continue_jumps[i]);
 
-			/* increment: var = var + 1 */
+			/* increment: var = var + step */
 			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
-			emit_constant(NUMBER_VAL(1));
+			emit_bytes(OP_GET_LOCAL, (uint8_t)step_slot);
 			emit_byte(OP_ADD);
 			emit_bytes(OP_SET_LOCAL, (uint8_t)var_slot);
 			emit_byte(OP_POP);
 
 			emit_loop(loop.start);
-			patch_jump(exit_jump);
+			patch_jump(ascending_exit);
+			patch_jump(descending_exit);
 			emit_byte(OP_POP);
 
 			for (int i = 0; i < loop.break_count; i++)
