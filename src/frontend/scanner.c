@@ -188,6 +188,8 @@ static TokenType identifier_type(void)
 					}
 				}
 				break;
+			case 'a':
+				return check_keyword(2, 3, "tch", TOKEN_CATCH);
 			}
 		}
 		break;
@@ -246,6 +248,26 @@ static TokenType identifier_type(void)
 	case 'r':
 		return check_keyword(1, 5, "eturn", TOKEN_RETURN);
 	case 't':
+		if (scanner.current - scanner.start > 1) {
+			switch (scanner.start[1]) {
+			case 'h':
+				return check_keyword(2, 3, "row", TOKEN_THROW);
+			case 'r':
+				if (scanner.current - scanner.start > 2) {
+					switch (scanner.start[2]) {
+					case 'u':
+						return check_keyword(1,
+						        3,
+						        "rue",
+						        TOKEN_TRUE);
+					case 'y':
+						return check_keyword(
+						        2, 1, "y", TOKEN_TRY);
+					}
+				}
+				break;
+			}
+		}
 		return check_keyword(1, 3, "rue", TOKEN_TRUE);
 	case 'w':
 		return check_keyword(1, 4, "hile", TOKEN_WHILE);

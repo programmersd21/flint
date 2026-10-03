@@ -274,6 +274,10 @@ static void mark_roots(VM *vm)
 			mark_table(vm, vm->globals_envs[i]);
 	}
 
+	/* a trapped error between unwind and consumption must stay alive */
+	if (vm->has_pending)
+		mark_value(vm, vm->pending_error);
+
 	/*
 	 * functions being compiled right now. They are not on the stack and
 	 * not in any table, so without this a collection in the middle of a

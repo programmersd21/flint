@@ -19,6 +19,19 @@ typedef enum {
 } InterpretResult;
 
 /*
+ * One catch handler, pushed by OP_TRY. `frame` is the index of the frame
+ * that owns the try block, `ip` the catch block's first instruction, and
+ * `stack` the value-stack depth to restore to. Restoring to that depth
+ * is what discards the try body's partial results; the error value is
+ * then pushed at that depth, where the catch body's binding local sits.
+ */
+typedef struct {
+	int frame;
+	uint8_t *ip;
+	Value *stack;
+} CatchHandler;
+
+/*
  * How much to say.
  *
  * FL_WARN_DEFAULT is the only mode that reports anything today: flint emits
@@ -153,6 +166,38 @@ struct VM {
 	ObjUpvalue *open_upvalues; /* sorted by descending stack address */
 	Obj *objects; /* every live object, for sweeping */
 
+	/*
+	 * The dynamic catch stack. Inner trys push on top, so the innermost
+	 * is always handlers[--handler_count]. Handlers are dropped when a
+	 * frame they belong to exits (OP_RETURN, unwind), so their lifetime
+	 * never spans a frame that returned.
+	 */
+	CatchHandler handlers[512];
+	int handler_count;
+
+	/* how many vm_interpret_function() calls are on the C stack.
+	 * Only the outermost one prints a pending error, so a nested
+	 * module run does not print before the rethrow can be caught */
+	int run_count;
+
+	/* set by vm_throw_value when an error was routed to a handler;
+	 * the dispatch loop turns it back into resuming at the handler's
+	 * catch block, instead of returning to the caller */
+	bool pending_catch;
+
+	/*
+	 * An error that escaped every handler in the current run.
+	 * vm_runtime_error captures the rendered diagnostic and trace here
+	 * instead of printing immediately, so a module error can be caught
+	 * by a try in the importing script -- and only printed when it
+	 * finally escapes everything. pending_error roots the value across
+	 * the unwind.
+	 */
+	bool has_pending;
+	Value pending_error;
+	char *pending_diag;
+	char *pending_trace;
+
 	size_t bytes_allocated;
 	size_t next_gc;
 
@@ -219,6 +264,18 @@ Value vm_pop(VM *vm);
 
 /* prints the message and a stack trace, then unwinds the stack. */
 void vm_runtime_error(VM *vm, const char *format, ...);
+
+/*
+ * Raise a script-level value. If a catch handler owns it, the VM state
+ * is restored to that handler and pending_catch is set; otherwise the
+ * rendered diagnostic and trace are stashed and the stack unwinds to
+ * the base of the current run.
+ */
+void vm_throw_value(VM *vm, Value value);
+
+/* build a {type, message} error table. used by vm_runtime_error and the
+ * Error(...) constructor builtins. */
+Value fl_error_value(VM *vm, const char *type, const char *message);
 
 /*
  * Validate a script value as an index into something `count` long.

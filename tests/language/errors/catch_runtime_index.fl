@@ -1,0 +1,7 @@
+try {
+    let xs = [1, 2]
+    print(xs[10])
+} catch e {
+    print("caught: " + e.message)
+}
+print("done")

@@ -107,11 +107,11 @@ int chunk_add_constant(VM *vm, Chunk *chunk, Value value)
 
 bool chunk_opcode_valid(uint8_t opcode)
 {
-	/* OP_JUMP_IF_NOT_NIL is the last member.
+	/* OP_THROW is the last member.
 	 * Update this when adding opcodes -- and note that getting it wrong
 	 * makes every opcode above the true end read as invalid, which is
 	 * what happened once already. */
-	return opcode <= OP_JUMP_IF_NOT_NIL;
+	return opcode <= OP_THROW;
 }
 
 int chunk_instruction_size(uint8_t opcode)
@@ -173,7 +173,13 @@ int chunk_instruction_size(uint8_t opcode)
 	case OP_JUMP_IF_FALSE:
 	case OP_JUMP_IF_NOT_NIL:
 	case OP_LOOP:
+	case OP_TRY:
 		return 3;
+
+	/* one byte: nothing to fetch */
+	case OP_POP_HANDLER:
+	case OP_THROW:
+		return 1;
 
 	/*
 	 * Four bytes: a 24-bit constant index, or a u8 index for the short

@@ -233,6 +233,12 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return jump_instruction("OP_JUMP_IF_FALSE", 1, chunk, offset);
 	case OP_JUMP_IF_NOT_NIL:
 		return jump_instruction("OP_JUMP_IF_NOT_NIL", 1, chunk, offset);
+	case OP_TRY:
+		return jump_instruction("OP_TRY", 1, chunk, offset);
+	case OP_POP_HANDLER:
+		return simple_instruction("OP_POP_HANDLER", offset);
+	case OP_THROW:
+		return simple_instruction("OP_THROW", offset);
 	case OP_LOOP:
 		return jump_instruction("OP_LOOP", -1, chunk, offset);
 	case OP_CALL:

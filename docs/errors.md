@@ -68,9 +68,8 @@ $ echo $?
 the trace is printed innermost first, one line per frame, with the source line
 and the function name. a frame with no name is the top-level script.
 
-a runtime error stops the script. there is no `try`, no `catch`, and no error
-value. the one exception is a module that fails to import, which reports and
-lets the importer continue. see [modules.md](modules.md).
+a runtime error stops the script unless it is inside a `try` block, in which
+case it is delivered to the nearest `catch`.
 
 ## structured formats
 
@@ -153,14 +152,49 @@ its output.
 | 70 | the program failed at run time |
 | 74 | the file could not be read |
 
+## recoverable errors: try/catch/throw
+
+A `try` block catches runtime errors and explicitly thrown values at the
+nearest enclosing `catch`:
+
+```flint
+try {
+    let x = [1, 2][10]
+} catch err {
+    print(err.message)   # "list index 10 out of bounds (len 2)."
+}
+```
+
+Errors produced by the runtime and values thrown with `throw` both reach
+`catch`. A caught error is a table with `type` and `message` fields:
+
+```flint
+throw Error("file not found")
+throw TypeError("expected a number")
+```
+
+Available constructors: `Error`, `TypeError`, `ValueError`, `IOError`,
+`NetworkError`, `TimeoutError`, `ProcessError`, `ModuleError`,
+`PackageError`. Throwing a plain value (string, number, ...) also works;
+`catch` binds it directly.
+
+Rules:
+
+- an error no `catch` handles prints the message and trace, and the exit
+  code is 70
+- `try` blocks nest; `break`/`continue`/`return` out of a `try` body drop
+  their handlers
+- a `try` body's locals do not leak into the `catch` body
+- a `try` in an importing script catches errors thrown while importing
+  another module
+
 ## what there is not
 
 the default format shows no source excerpt or caret. Human and JSON formats
 include source locations; the runtime currently maps an error to its executing
 line. See [diagnostics.md](diagnostics.md) for the span limits and supported
-fixes. There is no error value, so Flint code cannot inspect a failure.
+fixes.
 
-that is a deliberate floor. an error type would mean an error class, a
-`try`/`catch`, and a guarantee about unwinding that the runtime does not
-currently make. adding them is a real design task, and until then the
-interpreter exits rather than returning a failure to handle.
+there is no `finally`, no typed catch filters, and no stack-trace field on the
+error table. the runtime reports one script-level trace when an error finally
+escapes.
