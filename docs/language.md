@@ -45,7 +45,8 @@ This is where a C programmer's first `if (count)` port usually goes wrong.
 Operators, from loose to tight:
 
 ```text
-= -= *= /= =
+= += -= *= /=
+??
 or
 and
 == !=
@@ -126,14 +127,16 @@ Output:
 
 `while` repeats while its condition is truthy. `for x in list` visits values.
 `for n in start..end` visits numbers from `start` up to, but not including,
-`end`. `break` leaves the innermost loop; `continue` starts its next
+`end`; `start..end..step` steps by `step`, and a negative step runs
+backwards. `break` leaves the innermost loop; `continue` starts its next
 iteration. Ranges exist only in this `for` form. They are not values.
 
 ## modules and input
 
 `import "path.fl"` runs a file in the same VM. Relative paths use the
-importing file's directory. Globals are shared; `export` does not make a name
-private or enforce visibility. Successful imports run once per VM.
+importing file's directory. Every module has its own namespace: `export`
+marks the names an importer can reach, and unexported names stay private.
+Successful imports run once per VM.
 
 `input()` reads a line and returns a string, or `nil` at end of file.
 `input(prompt)` writes the prompt without a newline first. Empty input is `""`;

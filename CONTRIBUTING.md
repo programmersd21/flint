@@ -41,8 +41,9 @@ See [docs/limits.md](docs/limits.md) for language limits and
 error, because `..` is not an operator and the parser has nothing to attach it
 to inside a grouping. A clean error, not a crash.
 
-**There is no way to delete a table key.** Setting a field writes; there is no
-`delete` syntax. `OP_SET_FIELD` in `src/runtime/vm.c` is where one would go.
+**There is no delete operator.** Removing a key is the `delete(t, k)`
+builtin, not syntax. `OP_SET_FIELD` in `src/runtime/vm.c` is where an
+operator form would go, if one is ever wanted.
 
 **The repl is line at a time.** Each line is compiled and run as a fresh
 script, so state carries over only through globals, and an unclosed block on
