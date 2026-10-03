@@ -1,6 +1,6 @@
-# Flint 1.0.0 Packages & Toolchain
+# Flint 0.8.0 Packages & Toolchain
 
-Flint 1.0.0 features integrated project management and toolchain commands.
+Flint 0.8.0 features integrated project management and toolchain commands.
 
 ## Package Manifest (`flint.toml`)
 ```toml

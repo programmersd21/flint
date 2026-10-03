@@ -1,6 +1,6 @@
-# flint language specification 1.0.0
+# flint language specification 0.8.0
 
-version 1.0.0. this is the authoritative grammar and semantics specification.
+version 0.8.0. this is the authoritative grammar and semantics specification.
 
 [docs/language.md](docs/language.md) is a prose version of this for people who
 want to read it rather than implement it. [docs/diagnostics.md](docs/diagnostics.md)

@@ -1912,8 +1912,8 @@ static void for_statement(void)
 				 */
 				int fn = identifier_constant_from(
 				        "__range_step_error", 18);
-				emit_indexed(OP_GET_GLOBAL,
-				        OP_GET_GLOBAL_LONG, fn);
+				emit_indexed(
+				        OP_GET_GLOBAL, OP_GET_GLOBAL_LONG, fn);
 				emit_bytes(OP_CALL, 0);
 				emit_byte(OP_POP);
 				patch_jump(ok);

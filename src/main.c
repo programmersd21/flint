@@ -1253,12 +1253,12 @@ int main(int argc, char *argv[])
 			if (arg + 1 < argc &&
 			        (strcmp(argv[arg + 1], "--verbose") == 0 ||
 			                strcmp(argv[arg + 1], "-v") == 0)) {
-				printf("  language version: 1.0.0\n");
-				printf("  runtime version: 1.0.0\n");
-				printf("  package format version: 1.0.0\n");
-				printf("  bytecode version: 1.0.0\n");
+				printf("  language version: 0.8.0\n");
+				printf("  runtime version: 0.8.0\n");
+				printf("  package format version: 0.8.0\n");
+				printf("  bytecode version: 0.8.0\n");
 				printf("  native ABI version: 1\n");
-				printf("  lockfile version: 1.0.0\n");
+				printf("  lockfile version: 0.8.0\n");
 			}
 			return 0;
 		}
