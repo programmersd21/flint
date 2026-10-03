@@ -1,0 +1,15 @@
+# The uncaught version of recurse_uncaught() from nested_scope.fl.
+#
+# A frame with no handler passes the error through to the caller, and the top
+# level reports it against the frame that raised it. The trace names every
+# frame it unwound, innermost first.
+
+fn recurse_uncaught(n) {
+	if n == 0 {
+		throw "bottom"
+	}
+	return recurse_uncaught(n - 1)
+}
+
+recurse_uncaught(3)
+print("never printed")

@@ -1,0 +1,10 @@
+# A module whose top level calls a function that throws.
+#
+# The error arrives through a real call frame inside the module, so the
+# importer's handler sees an unwind that crosses that frame.
+
+export fn go() {
+	throw ValueError("module function said no")
+}
+
+go()

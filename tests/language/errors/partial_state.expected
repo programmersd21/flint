@@ -1,0 +1,5 @@
+set before the error
+caught: list index 9 out of bounds (len 2).
+[0, 1, 2, 3, 4]
+7
+handler ran

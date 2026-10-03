@@ -1,0 +1,28 @@
+# A module whose import failure is caught locally.
+#
+# The failure below is caught by the try at the bottom of this file, so this
+# module loads successfully. An import is not special to the error system: it is
+# just another statement that can throw.
+#
+# The import of throwing_mod.fl happens *inside* the try, so it is not also
+# reported as an unused import: a module that throws never binds anything, so
+# there is nothing the name could have been used for.
+
+export let ok = true
+let caught = "nothing was caught"
+
+try {
+	import "throwing_mod.fl" as failed
+} catch e {
+	# the binding `failed` does not exist, because the import failed. that
+	# is the point: the module's names are not half-bound.
+	caught = e.message
+}
+
+export fn caught_message() {
+	return caught
+}
+
+export fn describe() {
+	return "loaded"
+}

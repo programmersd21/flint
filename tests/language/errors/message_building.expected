@@ -1,0 +1,10 @@
+1,2,3
+TypeError: expected a list, got string
+expected a list, got number
+operands must be two numbers or two strings.
+list index 3 out of bounds (len 2).
+string index 10 out of bounds (len 3).
+an index problem
+arithmetic on the wrong types
+no error
+no error

@@ -1,0 +1,48 @@
+# Errors raised by the standard library, and by natives.
+#
+# A runtime error from a C builtin is a value like any other, so the same
+# catch handles a wrong argument, a missing file and a failed parse. What the
+# library does not do is hand back an error code: a builtin that can fail either
+# raises or succeeds, and there is no third answer.
+
+# a file that does not exist. the path is absolute so the test does not depend
+# on the working directory.
+try {
+	read_file("/nonexistent-directory-for-tests/no-such-file")
+} catch e {
+	print("caught a missing file")
+}
+
+# json parsing, and the same call succeeding
+try {
+	json.parse("{not json}")
+} catch e {
+	print("caught: " + e.message)
+}
+let parsed = json.parse("{\"a\": 1}")
+print(parsed.a)
+
+# an error value is an ordinary table: `type` and `message` are data rather
+# than text, so an error can be passed, stored and inspected.
+fn describe(f) {
+	try {
+		f()
+	} catch e {
+		return e.type + ": " + e.message
+	}
+	return "no error"
+}
+
+print(describe(fn() { throw TypeError("t") }))
+print(describe(fn() { return 1 }))
+
+# a rethrow: catch one error, raise another from the handler
+try {
+	try {
+		throw IOError("first")
+	} catch e {
+		throw ValueError("second: " + e.message)
+	}
+} catch e {
+	print("caught: " + e.message)
+}

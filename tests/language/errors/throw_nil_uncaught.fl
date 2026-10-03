@@ -1,0 +1,7 @@
+# An uncaught error that is nil.
+#
+# The awkward case, and the one worth a test: every not-caught path has to end
+# in a printed message, and "nothing" is the value most likely to print as
+# nothing at all.
+
+throw nil

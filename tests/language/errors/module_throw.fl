@@ -1,0 +1,71 @@
+# Errors inside imported modules.
+#
+# A module's failure is a value like any other, so a try in the importing
+# script can catch it. Before 1.0 a failing import only printed and returned
+# nil, which meant the script carried on with a binding it could not use and
+# the failure surfaced later, somewhere unrelated.
+
+import "good_mod.fl" as good
+print(good.value)
+
+# caught here, and the importing script carries on
+try {
+	import "throwing_mod.fl" as failing
+	print("import returned")
+} catch e {
+	print("caught: " + e.type)
+	print("message: " + e.message)
+}
+
+print("importing script still running")
+
+# a module that throws from inside a function, called at its top level
+try {
+	import "throwing_fn_mod.fl" as f
+} catch e {
+	print("caught: " + e.message)
+}
+
+# a module whose failure is not a throw at all: a bad index at top level
+try {
+	import "throwing_index_mod.fl" as idx
+} catch e {
+	print("caught: " + e.message)
+}
+
+# a module that calls a closure which throws, two frames deep
+try {
+	import "throwing_closure_mod.fl" as c
+} catch e {
+	print("caught: " + e.message)
+}
+
+# a module that catches its own import failure still loads
+import "catching_mod.fl" as mid
+print(mid.ok)
+print(mid.describe())
+print(mid.caught_message())
+
+# a module that does not catch its own import failure takes the importer's
+# handler with it
+try {
+	import "uncatching_mod.fl" as bad
+} catch e {
+	print("caught: " + e.message)
+}
+
+# a failed module is remembered as failed, so importing it again reports that
+# rather than re-running it
+try {
+	import "throwing_mod.fl" as again
+} catch e {
+	print("second import: " + e.message)
+}
+
+# ...while a module that succeeded still imports normally, and its cached
+# exports are the same table
+import "good_mod.fl" as good2
+print(good2.value)
+print(good2.double(21))
+
+print("done")

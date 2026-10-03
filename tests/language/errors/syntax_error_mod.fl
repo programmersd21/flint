@@ -1,0 +1,3 @@
+# A module that does not parse. See module_compile_error.fl.
+
+export let broken = (1 +

@@ -1,0 +1,36 @@
+# An error inside a module the standard library ships.
+#
+# The stdlib is written in Flint and imported like anything else, so a bug in a
+# library module is an ordinary error at the call site: catchable, with the
+# library's file named in the trace when it is not caught.
+
+import "failing_lib.fl" as lib
+
+print(lib.working())
+
+# a library function that fails with a category of its own
+try {
+	lib.bad()
+} catch e {
+	print(e.type + ": " + e.message)
+}
+
+# a library function that raises a plain string, which is what an older
+# library would do. catch binds it whatever it is.
+try {
+	lib.legacy()
+} catch e {
+	print(e.type + ": " + e)
+}
+
+# and one that works, so the failures above are the module's doing and not the
+# import's
+print(lib.working())
+
+# a library function that fails by mistake rather than on purpose: an
+# out-of-range index is still an error the caller can handle
+try {
+	lib.oops()
+} catch e {
+	print(e.type + ": " + e.message)
+}

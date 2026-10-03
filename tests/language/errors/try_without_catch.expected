@@ -1,0 +1,3 @@
+[line 12] Error at '}': expect 'catch' after try block.
+
+error: could not compile due to 1 error

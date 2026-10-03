@@ -1,0 +1,8 @@
+undefined variable 'mkdir'.
+[line 48] in script
+flint
+1
+parse failed: invalid json: expected a string at offset 1
+parse failed: invalid json: expected ',' or ']' at offset 5
+1
+none

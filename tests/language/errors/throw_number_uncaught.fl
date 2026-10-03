@@ -1,0 +1,7 @@
+# An uncaught error that is not an error table.
+#
+# `throw` takes any value. When nothing catches it, the report names the type
+# the runtime knows it by, because "thrown value: number" is more use than
+# printing 42 and hoping the reader knows where it came from.
+
+throw 42

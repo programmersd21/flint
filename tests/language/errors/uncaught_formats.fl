@@ -1,0 +1,21 @@
+# errors with the structured diagnostic formats
+#
+# --error-format changes how an error is printed, not whether it is caught.
+# An uncaught error in human format names the file, the line and the reason;
+# json format is the same facts in a shape a tool can read; short format is
+# one line. Caught errors print nothing at all in any format, because a caught
+# error is a value and values do not print themselves.
+#
+# The expectations here are the legacy format's, which is the default. The
+# other two are exercised by tests/diagnostics.sh, which asserts on their
+# structure rather than pinning every byte.
+
+# caught: nothing on stderr, nothing on stdout
+try {
+	throw Error("swallowed")
+} catch e {
+	print(e.message)
+}
+
+# uncaught: the message, then a trace, then exit code 70
+throw Error("this one is not caught")

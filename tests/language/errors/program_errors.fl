@@ -1,0 +1,86 @@
+# Errors from the file system and json, from a process's own point of view.
+#
+# stdlib_errors.fl is the library's point of view: which failures exist. This
+# one is the calling program's: what a program should do about them, which is
+# mostly "decide, don't ignore".
+#
+# The difference matters. A library that swallowed its own failures could not
+# be written on top of a program that wants to handle them, so every failure
+# here is raised, and every one of them is caught by something.
+
+import fs
+import json
+
+# --- a config file that may not be there ---
+#
+# the shape almost every program with a config file wants: a default when there
+# is no file, an error when the file is there and wrong.
+
+fn defaults() {
+	return {host: "localhost", port: 8080}
+}
+
+fn load_config(path) {
+	try {
+		let text = fs.read(path)
+		return json.parse(text)
+	} catch e {
+		# a missing file is normal; a malformed one is not. the message is
+		# the only way to tell them apart without a separate exists()
+		# call, which would be a race anyway.
+		if contains(e.message, "could not open") {
+			return defaults()
+		}
+		throw Error("bad config at " + path + ": " + e.message)
+	}
+}
+
+let dir = "flint_config_test"
+fs.mkdir(dir)
+let path = dir + "/config.json"
+
+# no file yet: the defaults
+print(load_config(path).host)
+print(load_config(path).port)
+
+# a good file: what it says
+fs.write(path, "{\"host\": \"example.com\", \"port\": 443}")
+print(load_config(path).host)
+print(load_config(path).port)
+
+# a bad file: an error that names the path
+fs.write(path, "{not json")
+try {
+	load_config(path)
+} catch e {
+	print("caught: " + e.message)
+}
+
+fs.remove(path)
+fs.remove(dir)
+
+# --- writing, and checking that it worked ---
+#
+# a program that would rather lose the write than the old file checks the
+# write, and carries on only if it worked.
+
+fn save(path, value) {
+	let text = json.stringify(value)
+	try {
+		fs.write(path, text)
+		return true
+	} catch e {
+		print("could not save: " + e.message)
+		return false
+	}
+}
+
+fs.mkdir(dir)
+print(save(dir + "/out.json", {a: 1}))
+print(save(dir + "/nope/out.json", {a: 1}))
+print(fs.exists(dir + "/out.json"))
+
+fs.remove(dir + "/out.json")
+fs.remove(dir)
+
+print("done")

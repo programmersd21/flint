@@ -1,0 +1,38 @@
+# A module whose state is written from its own functions.
+#
+# Imported by module_global_write.fl and read_ok_write_broken.fl.
+
+let count = 0
+let label = "not yet started"
+
+const CEILING = 1000
+
+export let exported_counter = 0
+
+export fn increment() {
+	count += 1
+	label = "ran " + str(count) + " times"
+	return count
+}
+
+export fn increment_private() {
+	return count
+}
+
+export fn value() {
+	return count
+}
+
+export fn describe() {
+	return label
+}
+
+export fn bump_const() {
+	CEILING = 5
+	return CEILING
+}
+
+export fn bump_exported() {
+	exported_counter += 1
+	return exported_counter
+}

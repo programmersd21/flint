@@ -1,0 +1,9 @@
+# Popping an empty list, uncaught.
+#
+# Its own file because pop() on an empty list is a common enough mistake to be
+# worth a test on its own, and a script stops at its first error.
+
+let empty = []
+print(len(empty))
+print(pop(empty))
+print("never printed")

@@ -1,0 +1,21 @@
+# A module that reads and writes its own private global.
+#
+# Imported by read_ok_write_broken.fl. The read and the write are in the same
+# function, which is what made the bug look impossible: if reading the name
+# worked, writing it could not fail with "undefined variable".
+#
+# That is exactly what happened. The read path resolved the environment
+# through the closure, so it found the name; the write path resolved the
+# running module's environment, which after the import returned was the
+# importer's, and the name was not in it.
+
+let n = 41
+
+export fn get() {
+	return n
+}
+
+export fn bump() {
+	n += 1
+	return n
+}

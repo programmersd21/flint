@@ -1,0 +1,8 @@
+caught: argument to len() must be a string or list.
+caught: can only call functions.
+caught: argument to keys() must be a table.
+caught: expected 2 arguments but got 1.
+caught: expected 2 arguments but got 3.
+caught: first argument to push() must be a list.
+caught: argument to pop() must be a list.
+caught: cannot pop from an empty list.

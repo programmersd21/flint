@@ -1,0 +1,8 @@
+# A module whose top level fails with a runtime error rather than a throw.
+#
+# The importer's catch sees the same kind of value either way, which is the
+# point: a library that indexes out of range by accident is catchable like one
+# that raises deliberately.
+
+let xs = [1, 2, 3]
+print(xs[99])

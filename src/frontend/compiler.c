@@ -1423,7 +1423,17 @@ static void list_literal(bool can_assign)
 		do {
 			expression();
 			count++;
-		} while (match(TOKEN_COMMA));
+			/*
+			 * A trailing comma is allowed: `[1, 2,]` is a
+			 * two-element list. A literal written across
+			 * lines almost always ends in a comma, and
+			 * rejecting that made the shape people actually
+			 * type the one shape that did not parse. The
+			 * `]` is what ends the list either way, so the
+			 * loop condition is the comma *and* not the
+			 * closer.
+			 */
+		} while (match(TOKEN_COMMA) && !check(TOKEN_RIGHT_BRACKET));
 	}
 	consume(TOKEN_RIGHT_BRACKET, "expect ']' after list.");
 	if (count > 255)
@@ -1498,7 +1508,9 @@ static void table_literal(bool can_assign)
 			expression();
 			emit_indexed(
 			        OP_SET_FIELD_TOP, OP_SET_FIELD_TOP_LONG, name);
-		} while (match(TOKEN_COMMA));
+			/* trailing comma, for the same reason as a list:
+			 * see list_literal() */
+		} while (match(TOKEN_COMMA) && !check(TOKEN_RIGHT_BRACE));
 	}
 	consume(TOKEN_RIGHT_BRACE, "expect '}' after table literal.");
 }
@@ -2159,16 +2171,22 @@ static void return_statement(void)
 	if (state.current->type == TYPE_SCRIPT)
 		error("can't return from top-level code.");
 
-	/* every try block open in this function is on its way out */
-	for (int i = 0; i < state.current->try_depth; i++)
-		emit_byte(OP_POP_HANDLER);
-
-	/* `return` with nothing after it is return nil */
+	/*
+	 * The return value is computed first, then the handlers are
+	 * retired. The other order looks equivalent and is not: an error
+	 * raised while computing the value has to reach a handler in this
+	 * function, and a handler already popped is a handler that is
+	 * gone. `try { return [][1] } catch e {}` has to catch.
+	 */
 	if (check(TOKEN_SEMICOLON) || check(TOKEN_RIGHT_BRACE) ||
 	        state.parser.current.newline_before || check(TOKEN_EOF)) {
+		for (int i = 0; i < state.current->try_depth; i++)
+			emit_byte(OP_POP_HANDLER);
 		emit_return();
 	} else {
 		expression();
+		for (int i = 0; i < state.current->try_depth; i++)
+			emit_byte(OP_POP_HANDLER);
 		emit_byte(OP_RETURN);
 	}
 	consume_terminator();

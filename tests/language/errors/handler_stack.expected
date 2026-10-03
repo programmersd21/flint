@@ -1,0 +1,12 @@
+level 3 caught: from the deepest
+level 2 local: level two
+level 1 still here: level one
+outer still here: outer local
+inner caught: leaving the block
+inside is not in scope here
+callee caught: callee's own error
+no error
+callee caught: callee's own error
+caller: list index 9 out of bounds (len 1).
+caught at depth 0
+5
