@@ -262,7 +262,7 @@ arrives as plain text. a line can be any length; the buffer grows.
 a non-string prompt and a non-zero-or-one argument count are runtime errors,
 reported the ordinary way.
 
-## the standard library, v0.3
+## the standard library
 
 seven functions before v0.3, and sixteen more since. all of them are ordinary
 values: there is no namespace, a builtin is a global holding a native, and a
@@ -455,7 +455,7 @@ a failure inside a module is delivered to the importing script's handlers:
 error that reaches the top level is reported against the file that raised it,
 not the file that imported it.
 
-## diagnostics, v0.3
+## diagnostics
 
 errors carry a stable code, a source span, and a severity. the default
 output is unchanged, so scripts that compare stderr keep working.

@@ -67,6 +67,16 @@ print(xs[0])
 print(len(xs))
 ```
 
+a trailing comma is allowed, so a literal split across lines does not need
+special-casing for its last element:
+
+```flint
+let xs = [
+    1,
+    2,
+]
+```
+
 ### building and reading
 
 `push()` appends and returns the item. `pop()` removes the last and returns it.
@@ -172,6 +182,15 @@ let t = {name: "flint", year: 2026}
 print(t.name)
 t.year = 2027
 print(t.year)
+```
+
+like lists, a trailing comma is allowed:
+
+```flint
+let t = {
+    name: "flint",
+    year: 2026,
+}
 ```
 
 a key that was never set reads as `nil`, which is not an error. that is a
