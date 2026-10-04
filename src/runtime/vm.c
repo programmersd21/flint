@@ -286,44 +286,70 @@ static const char *undefined_name(const char *message)
 	return name;
 }
 
-void vm_runtime_error(VM *vm, const char *format, ...)
+static char *build_trace(VM *vm)
 {
-	va_list args;
-	va_start(args, format);
-	va_list count_args;
 	/*
-	 * va_copy, because a va_list may be walked once.
-	 *
-	 * clang-analyzer-valist reports 'uninitialized value' on the
-	 * vsnprintf below and has for years. The sequence is the one C99
-	 * prescribes for using the arguments twice: va_start, then va_copy
-	 * into a second list, use both, va_end both. gcc -Wformat=2 agrees
-	 * that this is well formed.
-	 *
-	 * The annotation is here because the alternative -- restructuring to
-	 * avoid the copy -- means either a fixed-size buffer with a truncation
-	 * that can produce a wrong diagnostic, or formatting twice and
-	 * hoping the two agree. Neither is better than one annotated line.
+	 * "[line %d] in name()\n" lines, innermost first. Only the frames
+	 * this script owns: the importing script's frames are below
+	 * base_frame and are not this error's business.
 	 */
-	/* NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized) */
-	va_copy(count_args, args);
-	/* NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized) */
-	int length = vsnprintf(NULL, 0, format, count_args);
-	va_end(count_args);
-	char fallback[2048];
-	char *message = fallback;
-	if (length >= 0) {
-		message = malloc((size_t)length + 1);
-		if (message == NULL)
-			message = fallback;
+	size_t cap = 1024;
+	char *buf = malloc(cap);
+	if (buf == NULL)
+		return NULL;
+	size_t len = 0;
+	for (int i = vm->frame_count - 1; i >= vm->base_frame; i--) {
+		CallFrame *frame = &vm->frames[i];
+		ObjFunction *function = frame->closure->function;
+		size_t instruction =
+		        (size_t)(frame->ip - function->chunk.code - 1);
+		int line = function->chunk.lines[instruction];
+		char line_buf[256];
+		int n;
+		if (function->name == NULL)
+			n = snprintf(line_buf,
+			        sizeof(line_buf),
+			        "[line %d] in script\n",
+			        line);
+		else
+			n = snprintf(line_buf,
+			        sizeof(line_buf),
+			        "[line %d] in %s()\n",
+			        line,
+			        function->name->chars);
+		if (n <= 0)
+			continue;
+		if (len + (size_t)n >= cap) {
+			size_t need = cap;
+			while (need < len + (size_t)n + 1)
+				need *= 2;
+			char *grown = realloc(buf, need);
+			if (grown == NULL) {
+				free(buf);
+				return NULL;
+			}
+			buf = grown;
+			cap = need;
+		}
+		memcpy(buf + len, line_buf, (size_t)n);
+		len += (size_t)n;
 	}
-	vsnprintf(message,
-	        message == fallback ? sizeof(fallback) : (size_t)length + 1,
-	        format,
-	        args);
-	va_end(args);
+	buf[len] = '\0';
+	return buf;
+}
+
+/* render the diagnostic for message into a malloc'd string */
+static char *render_diag(VM *vm, const char *message)
+{
+	char *rendered = NULL;
 	if (vm->diag_format == FL_DIAG_LEGACY) {
-		fprintf(stderr, "%s\n", message);
+		size_t n = strlen(message);
+		rendered = malloc(n + 2);
+		if (rendered != NULL) {
+			memcpy(rendered, message, n);
+			rendered[n] = '\n';
+			rendered[n + 1] = '\0';
+		}
 	} else {
 		FlSource source;
 		FlSource *source_ptr = NULL;
@@ -505,48 +531,313 @@ void vm_runtime_error(VM *vm, const char *format, ...)
 		        .help = help,
 		        .help_count = help_count,
 		};
-		fl_diag_emit(stderr,
-		        &diag,
-		        source_ptr,
-		        vm->diag_format,
-		        vm->diag_color);
+		FILE *tmp = tmpfile();
+		if (tmp != NULL) {
+			fl_diag_emit(tmp,
+			        &diag,
+			        source_ptr,
+			        vm->diag_format,
+			        vm->diag_color);
+			fflush(tmp);
+			long size = ftell(tmp);
+			if (size >= 0 && fseek(tmp, 0L, SEEK_SET) == 0) {
+				rendered = malloc((size_t)size + 1);
+				if (rendered != NULL) {
+					size_t nread = fread(
+					        rendered, 1, (size_t)size, tmp);
+					rendered[nread] = '\0';
+				}
+			}
+			fclose(tmp);
+		}
+		if (rendered == NULL) {
+			/* no temp file, or the read failed: the bare message
+			 * still names the failure */
+			rendered = malloc(strlen(message) + 2);
+			if (rendered != NULL)
+				snprintf(rendered,
+				        strlen(message) + 2,
+				        "%s\n",
+				        message);
+		}
 		if (source_ptr != NULL)
 			fl_source_free(&source);
 		free((void *)missing_name);
 	}
+	return rendered;
+}
+
+static void clear_pending(VM *vm)
+{
+	free(vm->pending_diag);
+	free(vm->pending_trace);
+	vm->pending_diag = NULL;
+	vm->pending_trace = NULL;
+	vm->has_pending = false;
+	vm->pending_error = NIL_VAL;
+}
+
+/* innermost catch handler that belongs to the current run, or none */
+static bool raise_to_handler(VM *vm, Value value)
+{
+	for (int i = vm->handler_count - 1; i >= 0; i--) {
+		CatchHandler h = vm->handlers[i];
+		/* outer-run handlers (from an importing script) are skipped:
+		   they are what makes module errors catchable across the
+		   import boundary, after import_file rethrows them */
+		if (h.frame < vm->base_frame)
+			continue;
+		vm->handler_count = i;
+		close_upvalues(vm, h.stack);
+		vm->frame_count = h.frame + 1;
+		vm->stack_top = h.stack;
+		vm_push(vm, value);
+		vm->frames[h.frame].ip = h.ip;
+		vm->pending_catch = true;
+		clear_pending(vm);
+		return true;
+	}
+	return false;
+}
+
+static void capture_pending(VM *vm, Value value)
+{
+	const char *message = NULL;
+	char msg_buf[1024];
+	if (IS_STRING(value)) {
+		message = AS_CSTRING(value);
+	} else if (IS_FLINT_TABLE(value)) {
+		ObjTable *t = AS_FLINT_TABLE(value);
+		for (int i = 0; i < t->count; i++) {
+			ObjString *k = t->keys[i];
+			if (k != NULL && k->length == 7 &&
+			        memcmp(k->chars, "message", 7) == 0 &&
+			        IS_STRING(t->values[i])) {
+				message = AS_CSTRING(t->values[i]);
+				break;
+			}
+		}
+	}
+	if (message == NULL) {
+		snprintf(msg_buf,
+		        sizeof(msg_buf),
+		        "thrown value: %s",
+		        flint_type_name(value));
+		message = msg_buf;
+	}
+	if (vm->has_pending)
+		return; /* deepest error wins */
+	vm->has_pending = true;
+	vm->pending_error = value;
+	vm->pending_diag = render_diag(vm, message);
+	vm->pending_trace = build_trace(vm);
+}
+
+void vm_throw_value(VM *vm, Value value)
+{
+	if (raise_to_handler(vm, value))
+		return;
+	capture_pending(vm, value);
+	unwind_to(vm, vm->base_frame, vm->base_top);
+	/* handlers owned by frames that just went away */
+	while (vm->handler_count > 0 &&
+	        vm->handlers[vm->handler_count - 1].frame >= vm->base_frame)
+		vm->handler_count--;
+}
+
+/* print only an error that finally escaped every handler. the stash
+ * holds the frames of the deepest failing run */
+static void report_pending(VM *vm)
+{
+	if (!vm->has_pending)
+		return;
+	if (vm->pending_diag != NULL)
+		fwrite(vm->pending_diag, 1, strlen(vm->pending_diag), stderr);
+	if (vm->pending_trace != NULL &&
+	        (vm->diag_format == FL_DIAG_LEGACY ||
+	                vm->diag_format == FL_DIAG_HUMAN))
+		fwrite(vm->pending_trace, 1, strlen(vm->pending_trace), stderr);
+	clear_pending(vm);
+}
+
+/*
+ * Classify a failure message into one of the documented error types, so
+ * `catch e { e.type }` is useful: a type mismatch is TypeError, a bad
+ * value is ValueError, an indigestible document is ParseError, a network
+ * transport failure is NetworkError, a process failure is ProcessError,
+ * a module problem is ModuleError, a file system problem is IOError, and
+ * everything else is a plain Error.
+ *
+ * Match is by the literal prefix the VM and the natives emit, which is why
+ * these are patterns over strings and not a second argument to every caller:
+ * the classification stays in one place rather than in sixty call sites.
+ */
+static const char *error_type_for(const char *message)
+{
+	/* json and parsing */
+	if (strstr(message, "invalid json:") == message ||
+	        strstr(message, "json:") == message)
+		return "ParseError";
+
+	/* network */
+	if (strstr(message, "http error:") == message ||
+	        strstr(message, "transport failure") != NULL ||
+	        strstr(message, "could not resolve") != NULL ||
+	        strstr(message, "URL must start") != NULL)
+		return "NetworkError";
+
+	/* processes */
+	if (strstr(message, "process.run") == message ||
+	        strstr(message, "cannot fork") != NULL ||
+	        strstr(message, "cannot exec") != NULL ||
+	        strstr(message, "process exited") != NULL)
+		return "ProcessError";
+
+	/* modules */
+	if (strstr(message, "cannot resolve module path") == message ||
+	        strstr(message, "import cycle:") == message ||
+	        strstr(message, "module '") == message ||
+	        strstr(message, "could not open module file") != NULL ||
+	        strstr(message, "could not seek in") != NULL ||
+	        strstr(message, "could not size") != NULL ||
+	        strstr(message, "could not rewind") != NULL ||
+	        strstr(message, "could not read") != NULL ||
+	        strstr(message, "out of memory loading") != NULL ||
+	        strstr(message, "imports failed") != NULL ||
+	        strstr(message, "expected %d arguments but got"))
+		return "ModuleError";
+
+	/* files and operating-system boundaries */
+	if (strstr(message, "cannot read") != NULL ||
+	        strstr(message, "cannot write") != NULL ||
+	        strstr(message, "cannot remove") != NULL ||
+	        strstr(message, "cannot mkdir") != NULL ||
+	        strstr(message, "cannot rename") != NULL ||
+	        strstr(message, "cannot move") != NULL ||
+	        strstr(message, "cannot chdir") != NULL ||
+	        strstr(message, "cannot getcwd") != NULL ||
+	        strstr(message, "cannot stat") != NULL ||
+	        strstr(message, "could not open") != NULL ||
+	        strstr(message, "could not seek") != NULL ||
+	        strstr(message, "could not size") != NULL ||
+	        strstr(message, "could not rewind") != NULL ||
+	        strstr(message, "is too large") != NULL ||
+	        strstr(message, "could not list") != NULL ||
+	        strstr(message, "could not create") != NULL)
+		return "IOError";
+
+	if (strstr(message, "out of memory") != NULL)
+		return "Error";
+
+	/* a type name disagreement */
+	if (strstr(message, "must be") != NULL ||
+	        strstr(message, "only tables have fields") != NULL ||
+	        strstr(message, "can only call functions") != NULL ||
+	        strstr(message, "operands must be") != NULL ||
+	        strstr(message, "expected type '") != NULL ||
+	        strstr(message, "argument to") != NULL ||
+	        strstr(message, "first argument to") != NULL ||
+	        (strstr(message, "cannot redefine constant") == NULL &&
+	                strstr(message, "cannot assign to constant") != NULL))
+		return "TypeError";
+
+	/* a value problem: numbers that do not convert, bounds that are
+	 * whole numbers, empty lists, indices that run past the end */
+	if (strstr(message, "cannot convert") != NULL ||
+	        strstr(message, "out of bounds") != NULL ||
+	        strstr(message, "cannot pop from an empty list") != NULL ||
+	        strstr(message, "must be a whole number") != NULL ||
+	        strstr(message, "must be a finite number") != NULL ||
+	        strstr(message, "is an empty") != NULL ||
+	        strstr(message, "a range step cannot be zero") != NULL ||
+	        strstr(message, "slice bounds must be whole numbers") != NULL)
+		return "ValueError";
+
+	return "Error";
+}
+
+Value fl_error_value(VM *vm, const char *type, const char *message)
+{
+	ObjTable *t = new_flint_table(vm);
+	vm_push(vm, OBJ_VAL(t));
+	ObjString *ktype = copy_string(vm, "type", 4);
+	vm_push(vm, STR_VAL(ktype));
+	ObjString *vtype = copy_string(vm, type, (int)strlen(type));
+	vm_push(vm, STR_VAL(vtype));
+	if (t->count == t->capacity) {
+		int old = t->capacity;
+		t->capacity = old > 0 ? old * 2 : 8;
+		t->keys =
+		        GROW_ARRAY(vm, ObjString *, t->keys, old, t->capacity);
+		t->values = GROW_ARRAY(vm, Value, t->values, old, t->capacity);
+	}
+	t->keys[t->count] = ktype;
+	t->values[t->count] = STR_VAL(vtype);
+	t->count++;
+	vm_pop(vm);
+	vm_pop(vm);
+	ObjString *kmsg = copy_string(vm, "message", 7);
+	vm_push(vm, STR_VAL(kmsg));
+	ObjString *vmsg = new_string(vm, message, (int)strlen(message));
+	vm_push(vm, STR_VAL(vmsg));
+	if (t->count == t->capacity) {
+		int old = t->capacity;
+		t->capacity = old * 2;
+		t->keys =
+		        GROW_ARRAY(vm, ObjString *, t->keys, old, t->capacity);
+		t->values = GROW_ARRAY(vm, Value, t->values, old, t->capacity);
+	}
+	t->keys[t->count] = kmsg;
+	t->values[t->count] = STR_VAL(vmsg);
+	t->count++;
+	vm_pop(vm);
+	vm_pop(vm);
+	vm_pop(vm);
+	return OBJ_VAL(t);
+}
+
+void vm_runtime_error(VM *vm, const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	va_list count_args;
+	/*
+	 * va_copy, because a va_list may be walked once.
+	 *
+	 * clang-analyzer-valist reports 'uninitialized value' on the
+	 * vsnprintf below and has for years. The sequence is the one C99
+	 * prescribes for using the arguments twice: va_start, then va_copy
+	 * into a second list, use both, va_end both. gcc -Wformat=2 agrees
+	 * that this is well formed.
+	 *
+	 * The annotation is here because the alternative -- restructuring to
+	 * avoid the copy -- means either a fixed-size buffer with a truncation
+	 * that can produce a wrong diagnostic, or formatting twice and
+	 * hoping the two agree. Neither is better than one annotated line.
+	 */
+	/* NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized) */
+	va_copy(count_args, args);
+	/* NOLINTNEXTLINE(clang-analyzer-valist.Uninitialized) */
+	if (format == NULL)
+		format = "unknown error";
+	int length = vsnprintf(NULL, 0, format, count_args);
+	va_end(count_args);
+	char fallback[2048];
+	char *message = fallback;
+	if (length >= 0) {
+		message = malloc((size_t)length + 1);
+		if (message == NULL)
+			message = fallback;
+	}
+	vsnprintf(message,
+	        message == fallback ? sizeof(fallback) : (size_t)length + 1,
+	        format,
+	        args);
+	va_end(args);
+	Value err = fl_error_value(vm, error_type_for(message), message);
 	if (message != fallback)
 		free(message);
-
-	/*
-	 * Only the frames this script owns. The importing script's frames
-	 * are below base_frame and are not this error's business; printing
-	 * them would attribute a module's failure to a line in the importer
-	 * that ran long before it.
-	 */
-	for (int i = vm->frame_count - 1;
-	        i >= vm->base_frame &&
-	        (vm->diag_format == FL_DIAG_LEGACY ||
-	                vm->diag_format == FL_DIAG_HUMAN);
-	        i--) {
-		CallFrame *frame = &vm->frames[i];
-		ObjFunction *function = frame->closure->function;
-		size_t instruction = frame->ip - function->chunk.code - 1;
-		int line = function->chunk.lines[instruction];
-
-		fprintf(stderr, "[line %d] in ", line);
-		if (function->name == NULL)
-			fprintf(stderr, "script\n");
-		else
-			fprintf(stderr, "%s()\n", function->name->chars);
-	}
-
-	/*
-	 * Unwind to where this script started, and no further. The importing
-	 * script's run() is still on the C stack and will resume as soon as
-	 * this returns, holding a pointer to its own frame and expecting its
-	 * stack exactly as it was.
-	 */
-	unwind_to(vm, vm->base_frame, vm->base_top);
+	vm_throw_value(vm, err);
 }
 
 /*
@@ -647,6 +938,13 @@ void vm_init(VM *vm)
 	vm->stack_top = vm->stack;
 	vm->frame_count = 0;
 	vm->open_upvalues = NULL;
+	vm->handler_count = 0;
+	vm->run_count = 0;
+	vm->pending_catch = false;
+	vm->has_pending = false;
+	vm->pending_error = NIL_VAL;
+	vm->pending_diag = NULL;
+	vm->pending_trace = NULL;
 	vm->base_frame = 0;
 	vm->source_text = NULL;
 	vm->source_name = "<source>";
@@ -757,6 +1055,10 @@ void vm_free(VM *vm)
 	 * leaked every other, which LeakSanitizer reported as a 48-byte leak
 	 * for a three-module test.
 	 */
+	free(vm->pending_diag);
+	free(vm->pending_trace);
+	vm->pending_diag = NULL;
+	vm->pending_trace = NULL;
 	for (int i = 0; i < vm->globals_capacity; i++) {
 		if (vm->globals_envs[i] == NULL)
 			continue;
@@ -907,6 +1209,11 @@ static bool call_value(VM *vm, Value callee, int arg_count)
 			}
 			Value result = native->function(
 			        vm, arg_count, vm->stack_top - arg_count);
+			/* a caught error replaced the stack before the native could
+			 * return a meaningful value; an uncaught one unwound inside
+			 * vm_throw_value and must not be "adjusted" either */
+			if (vm->pending_catch || vm->has_pending)
+				return true;
 			/* drop callee and args, then leave the result */
 			vm->stack_top -= arg_count + 1;
 			vm_push(vm, result);
@@ -1062,11 +1369,29 @@ static InterpretResult run(VM *vm, int base_frame)
  * constructor as an argument, which is how one macro produces both NUMBER_VAL
  * results and BOOL_VAL results.
  */
+/*
+ * Every error site in the dispatch loop funnels through here.
+ *
+ * When a handler caught the error, vm_throw_value has already restored the
+ * VM to the handler's frame and pushed the error value: clear the flag and
+ * resume dispatch there. Otherwise the error escaped, the stack is already
+ * unwound to the base of this run, and the only thing left is to leave.
+ */
+#define RESUME_OR_RETURN_RUNTIME_ERROR()                                       \
+	do {                                                                   \
+		if (vm->pending_catch) {                                       \
+			vm->pending_catch = false;                             \
+			frame = &vm->frames[vm->frame_count - 1];              \
+			goto dispatch_resume;                                  \
+		}                                                              \
+		return INTERPRET_RUNTIME_ERROR;                                \
+	} while (false)
+
 #define BINARY_OP(value_type, op)                                              \
 	do {                                                                   \
 		if (!IS_NUMBER(peek(vm, 0)) || !IS_NUMBER(peek(vm, 1))) {      \
 			vm_runtime_error(vm, "operands must be numbers.");     \
-			return INTERPRET_RUNTIME_ERROR;                        \
+			RESUME_OR_RETURN_RUNTIME_ERROR();                      \
 		}                                                              \
 		double b = AS_NUMBER(vm_pop(vm));                              \
 		double a = AS_NUMBER(vm_pop(vm));                              \
@@ -1096,6 +1421,7 @@ static InterpretResult run(VM *vm, int base_frame)
 		                frame->closure->function->chunk.code));
 #endif
 
+dispatch_resume:;
 		uint8_t instruction = READ_BYTE();
 		/*
 		 * No `break` inside a loop in any handler below. The
@@ -1186,7 +1512,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				vm_runtime_error(vm,
 				        "undefined variable '%s'.",
 				        name->chars);
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			vm_push(vm, value);
 			break;
@@ -1216,7 +1542,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				vm_runtime_error(vm,
 				        "cannot redefine constant '%s'.",
 				        name->chars);
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 
 			table_set(vm, env, name, peek(vm, 0));
@@ -1257,7 +1583,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				vm_runtime_error(vm,
 				        "cannot redefine constant '%s'.",
 				        name->chars);
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			table_define_const(vm, vm->globals, name, peek(vm, 0));
 			vm_pop(vm);
@@ -1305,7 +1631,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				vm_runtime_error(vm,
 				        "cannot redefine constant '%s'.",
 				        name->chars);
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			table_define_exported(
 			        vm, vm->globals, name, peek(vm, 0), true);
@@ -1328,21 +1654,34 @@ static InterpretResult run(VM *vm, int base_frame)
 			 * unknown name would create it and the error below
 			 * would report "undefined" for a name that exists.
 			 */
-			if (table_is_const(vm->globals, name)) {
+			/*
+			 * The same environment the read path uses: the closure's
+			 * own module when it has one, and the running module
+			 * otherwise. Using only vm->globals here meant a module
+			 * function that assigned to its own private global
+			 * failed with "undefined variable" as soon as it was
+			 * called from outside the module's import -- the read
+			 * path found the name through closure->module and the
+			 * write path did not.
+			 */
+			Table *env = frame->closure->module != NULL
+			                     ? frame->closure->module
+			                     : vm->globals;
+			if (table_is_const(env, name)) {
 				vm_runtime_error(vm,
 				        "cannot assign to constant '%s'.",
 				        name->chars);
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 
-			if (table_set(vm, vm->globals, name, peek(vm, 0))) {
+			if (table_set(vm, env, name, peek(vm, 0))) {
 				/* assigning to something that was not declared
 				 * just created it. undo that and complain. */
-				table_delete(vm->globals, name);
+				table_delete(env, name);
 				vm_runtime_error(vm,
 				        "undefined variable '%s'.",
 				        name->chars);
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			break;
 		}
@@ -1422,7 +1761,7 @@ static InterpretResult run(VM *vm, int base_frame)
 					        flint_type_name_of(want),
 					        flint_type_name(value));
 				}
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			break;
 		}
@@ -1452,7 +1791,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				 * which is both wrong and unhelpful.
 				 */
 				if (!concatenate(vm))
-					return INTERPRET_RUNTIME_ERROR;
+					RESUME_OR_RETURN_RUNTIME_ERROR();
 			} else if (IS_NUMBER(peek(vm, 0)) &&
 			           IS_NUMBER(peek(vm, 1))) {
 				double b = AS_NUMBER(vm_pop(vm));
@@ -1462,7 +1801,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				vm_runtime_error(vm,
 				        "operands must be two numbers or two "
 				        "strings.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			break;
 		}
@@ -1481,7 +1820,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			        !IS_NUMBER(peek(vm, 1))) {
 				vm_runtime_error(
 				        vm, "operands must be numbers.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			double b = AS_NUMBER(vm_pop(vm));
 			double a = AS_NUMBER(vm_pop(vm));
@@ -1495,7 +1834,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			if (!IS_NUMBER(peek(vm, 0))) {
 				vm_runtime_error(
 				        vm, "operand must be a number.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			vm_push(vm, NUMBER_VAL(-AS_NUMBER(vm_pop(vm))));
 			break;
@@ -1546,7 +1885,13 @@ static InterpretResult run(VM *vm, int base_frame)
 		case OP_CALL: {
 			int arg_count = READ_BYTE();
 			if (!call_value(vm, peek(vm, arg_count), arg_count))
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
+
+			if (vm->pending_catch) {
+				vm->pending_catch = false;
+				frame = &vm->frames[vm->frame_count - 1];
+				continue;
+			}
 
 			/*
 			 * A native can report a runtime error without
@@ -1562,7 +1907,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			 * script is over and so are we.
 			 */
 			if (vm->frame_count <= base_frame)
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 
 			/* the frame changed: either a new frame, or a native
 			 * that returned and popped one */
@@ -1602,12 +1947,42 @@ static InterpretResult run(VM *vm, int base_frame)
 			vm_pop(vm);
 			break;
 		}
+		case OP_POP_HANDLER: {
+			if (vm->handler_count > 0)
+				vm->handler_count--;
+			break;
+		}
+		case OP_TRY: {
+			uint16_t offset = READ_SHORT();
+			if (vm->handler_count == 512) {
+				vm_runtime_error(
+				        vm, "too many nested try blocks.");
+				RESUME_OR_RETURN_RUNTIME_ERROR();
+			}
+			CatchHandler h;
+			h.frame = vm->frame_count - 1;
+			h.ip = frame->ip + offset;
+			h.stack = vm->stack_top;
+			vm->handlers[vm->handler_count++] = h;
+			break;
+		}
+		case OP_THROW: {
+			Value thrown = vm_pop(vm);
+			vm_throw_value(vm, thrown);
+			RESUME_OR_RETURN_RUNTIME_ERROR();
+			break;
+		}
 		case OP_RETURN: {
 			/* save the result before unwinding: closing upvalues
 			 * moves stack values into the heap */
 			Value result = vm_pop(vm);
 			close_upvalues(vm, frame->slots);
 			vm->frame_count--;
+			/* handlers owned by the returning frame are dead */
+			while (vm->handler_count > 0 &&
+			        vm->handlers[vm->handler_count - 1].frame >=
+			                vm->frame_count)
+				vm->handler_count--;
 			if (vm->frame_count == base_frame) {
 				/* the frame this run() started with, and there
 				 * is no caller inside this run() to return to.
@@ -1650,7 +2025,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			 * The error is `len`'s error for the same reason.
 			 */
 			Value target = peek(vm, 0);
-			int length;
+			int length = 0;
 			if (IS_LIST(target)) {
 				length = AS_LIST(target)->count;
 			} else if (IS_STRING(target)) {
@@ -1659,7 +2034,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				vm_runtime_error(vm,
 				        "argument to len() must be a string or "
 				        "list.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			vm->stack_top[-1] = NUMBER_VAL((double)length);
 			break;
@@ -1679,7 +2054,7 @@ static InterpretResult run(VM *vm, int base_frame)
 			if (!IS_FLINT_TABLE(target)) {
 				vm_runtime_error(vm,
 				        "argument to len() must be a table.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			vm->stack_top[-1] = NUMBER_VAL(
 			        (double)AS_FLINT_TABLE(target)->count);
@@ -1710,13 +2085,13 @@ static InterpretResult run(VM *vm, int base_frame)
 				vm_runtime_error(vm,
 				        "can only index tables by position "
 				        "during iteration.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			ObjTable *t = AS_FLINT_TABLE(target);
 			int idx;
 			if (!vm_value_to_index(
 			            vm, index_val, t->count, &idx, "table"))
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			if (instruction == OP_TABLE_KEY)
 				vm_push(vm, STR_VAL(t->keys[idx]));
 			else
@@ -1771,7 +2146,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				            list->count,
 				            &idx,
 				            "list"))
-					return INTERPRET_RUNTIME_ERROR;
+					RESUME_OR_RETURN_RUNTIME_ERROR();
 				vm_push(vm, list->items[idx]);
 			} else if (IS_STRING(target)) {
 				/* indexing a string yields a one-byte string, not a
@@ -1783,7 +2158,7 @@ static InterpretResult run(VM *vm, int base_frame)
 				            str->length,
 				            &idx,
 				            "string"))
-					return INTERPRET_RUNTIME_ERROR;
+					RESUME_OR_RETURN_RUNTIME_ERROR();
 				/* the byte goes into a C local before copy_string(),
 				 * which can collect. `str` is rooted and will not be
 				 * freed, but reading through a pointer the collector
@@ -1813,7 +2188,7 @@ static InterpretResult run(VM *vm, int base_frame)
 					vm_runtime_error(vm,
 					        "table index must be a "
 					        "string.");
-					return INTERPRET_RUNTIME_ERROR;
+					RESUME_OR_RETURN_RUNTIME_ERROR();
 				}
 				ObjString *key = AS_STRING(index_val);
 				Value found = NIL_VAL;
@@ -1829,7 +2204,7 @@ index_found:;
 				vm_runtime_error(vm,
 				        "can only index lists, strings and "
 				        "tables.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			break;
 		}
@@ -1855,7 +2230,7 @@ index_found:;
 					vm_runtime_error(vm,
 					        "table index must be a "
 					        "string.");
-					return INTERPRET_RUNTIME_ERROR;
+					RESUME_OR_RETURN_RUNTIME_ERROR();
 				}
 				ObjString *key = AS_STRING(index_val);
 				bool found = false;
@@ -1895,7 +2270,7 @@ set_index_found:;
 				vm_runtime_error(vm,
 				        "can only index-assign to lists and "
 				        "tables.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			ObjList *list = AS_LIST(target);
 			int idx;
@@ -1905,7 +2280,7 @@ set_index_found:;
 			 * neither. */
 			if (!vm_value_to_index(
 			            vm, index_val, list->count, &idx, "list"))
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			list->items[idx] = val;
 			vm_push(vm, val); /* assignment yields the value */
 			break;
@@ -1943,7 +2318,7 @@ field_done:;
 			} else {
 				vm_runtime_error(
 				        vm, "only tables have fields.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			break;
 		}
@@ -1990,7 +2365,7 @@ field_set_done:;
 			} else {
 				vm_runtime_error(
 				        vm, "only tables have fields.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 			break;
 		}
@@ -2017,7 +2392,7 @@ field_set_done:;
 			if (!IS_FLINT_TABLE(target)) {
 				vm_runtime_error(
 				        vm, "only tables have fields.");
-				return INTERPRET_RUNTIME_ERROR;
+				RESUME_OR_RETURN_RUNTIME_ERROR();
 			}
 
 			ObjTable *t = AS_FLINT_TABLE(target);
@@ -2217,6 +2592,7 @@ InterpretResult vm_interpret_function(
 	 */
 	int saved_base = vm->base_frame;
 	int base_frame = vm->frame_count;
+	vm->run_count++;
 
 	/*
 	 * The stack top on entry, before this script pushes anything, and the
@@ -2255,6 +2631,9 @@ InterpretResult vm_interpret_function(
 		vm->base_frame = saved_base;
 		vm->source_text = saved_text;
 		vm->source_name = saved_name;
+		vm->run_count--;
+		if (vm->run_count == 0 && vm->has_pending)
+			report_pending(vm);
 		return INTERPRET_RUNTIME_ERROR;
 	}
 
@@ -2287,6 +2666,10 @@ InterpretResult vm_interpret_function(
 	vm->base_frame = saved_base;
 	vm->source_text = saved_text;
 	vm->source_name = saved_name;
+	vm->run_count--;
+	if (result == INTERPRET_RUNTIME_ERROR && vm->run_count == 0 &&
+	        vm->has_pending)
+		report_pending(vm);
 
 	return result;
 }

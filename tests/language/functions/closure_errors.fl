@@ -122,14 +122,17 @@ print(both(5))
 
 # --- closures in the importing script, across a module that fails ---
 
-# mod_closing.fl throws at top level. The import fails, this script keeps
-# going, and every closure below must still track its variable.
+# mod_closing.fl throws at top level. The import fails and the error reaches
+# this script, so a try catches it; the script keeps going, and every closure
+# below must still track its variable.
 #
-# `as _` because the binding is deliberately unused: the module fails, so
-# there is nothing to use, and the import exists for its failure. Without
-# the explicit opt-out the unused-import check would -- correctly --
-# complain.
-import "../modules/mod_closing.fl" as _
+# Before 1.0 a failing import only printed and returned nil, so the binding
+# existed and went unused. Now the failure is a value like any other, and the
+# try below is what keeps the rest of the script running.
+try {
+	import "../modules/mod_closing.fl" as _
+} catch _ignored {
+}
 
 fn survivor() {
 	let hits = 0

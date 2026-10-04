@@ -1,0 +1,8 @@
+# Builtin failures, uncaught.
+#
+# The caught versions are in builtin_throw.fl. Each one here ends the script,
+# so each is its own file: a script stops at its first error, and a test can
+# only assert on one of them at a time.
+
+len(7)
+print("never printed")

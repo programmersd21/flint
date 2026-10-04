@@ -3,11 +3,11 @@
 # the point of this file is one line: a const exported from a module is
 # read-only for every file that imports it.
 #
-# `export const LIMIT = 100` marks the binding constant in the shared global
-# table. main.fl imports it and can read it, and any attempt to assign to it
-# there is refused at run time. it cannot be refused at compile time, because
-# when main.fl was compiled the import had not happened yet and nothing in the
-# source said whether LIMIT would be const.
+# `export const LIMIT = 100` marks the binding constant in the module that
+# declared it. main.fl imports it and can read it, and any attempt to assign
+# to it there is refused at run time. it cannot be refused at compile time,
+# because when main.fl was compiled the import had not happened yet and
+# nothing in the source said whether LIMIT would be const.
 
 export const LIMIT = 100
 

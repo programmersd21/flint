@@ -1,0 +1,16 @@
+# A module whose top level calls a closure that throws.
+#
+# Two frames deep, and the throwing frame is a closure rather than a named
+# function: unwinding has to close its upvalues on the way past, or the
+# closure the module built before failing would come back dangling.
+
+export fn build() {
+	let count = 0
+	return fn() {
+		count += 1
+		throw IOError("module closure failed on call " + str(count))
+	}
+}
+
+let c = build()
+c()

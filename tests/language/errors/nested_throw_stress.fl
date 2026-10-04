@@ -1,0 +1,78 @@
+# An error raised while building the very error being handled.
+#
+# The awkward case for a mark-and-sweep collector: the error value is created
+# on the stack, the handler is chosen, and unwinding moves values around. If
+# the stash that holds a caught-then-rethrown error were not a root, the
+# second catch would read freed memory. This is the test that would catch that,
+# and the stress build is the one that makes it likely.
+
+fn build_err(i) {
+	return IOError("built at " + str(i))
+}
+
+let caught_twice = 0
+
+for i in 0..100 {
+	try {
+		throw build_err(i)
+	} catch e {
+		# rethrow the same value, immediately, with an error made in
+		# between: the allocation can collect, so both values have to
+		# survive it
+		try {
+			let filler = build_err(i + 1000)
+			filler.message
+			throw e
+		} catch e2 {
+			if e2.message == e.message {
+				caught_twice += 1
+			}
+		}
+	}
+}
+print(caught_twice)
+
+# the same value through several handlers, with garbage between each
+let deep_caught = 0
+try {
+	throw Error("travelling")
+} catch a {
+	try {
+		throw a
+	} catch b {
+		try {
+			throw b
+		} catch c {
+			try {
+				let xs = [1, 2, 3]
+				xs[0]
+				throw c
+			} catch d {
+				deep_caught += 1
+				print(d.message)
+				print(d.type)
+			}
+		}
+	}
+}
+print(deep_caught)
+
+# an error caught after the value stack has been churned hard, so the stash is
+# not sitting where it started
+let churned = 0
+for round in 0..50 {
+	let junk = []
+	let k = 0
+	while k < 40 {
+		push(junk, "string " + str(k) + " " + str(round))
+		k += 1
+	}
+	try {
+		throw ValueError("round " + str(round))
+	} catch e {
+		if contains(e.message, "round") {
+			churned += 1
+		}
+	}
+}
+print(churned)

@@ -1,0 +1,240 @@
+# encoding -- base64, hex, and url escaping.
+#
+#     import encoding
+#     print(encoding.base64_encode("hello"))    # aGVsbG8=
+#     print(encoding.hex_encode("hi"))          # 6869
+#     print(encoding.url_encode("a b&c"))       # a+b%26c
+#
+# these are the encodings that show up when a program talks to something
+# that is not flint: a header, a checksum, a query string. all of them take
+# and return strings, because that is what the wire carries, and none of
+# them is a cipher. base64 is not encryption, and neither is hex.
+
+# --- hex ---
+#
+# two characters per byte, lowercase, the way digests are usually written.
+# empty in, empty out.
+
+const HEX_DIGITS = "0123456789abcdef"
+
+export fn hex_encode(bytes) {
+    let out = ""
+    let i = 0
+    while i < len(bytes) {
+        let b = ord(bytes[i])
+        out += __slice(HEX_DIGITS, __trunc(b / 16), __trunc(b / 16) + 1)
+        out += __slice(HEX_DIGITS, __trunc(b % 16), __trunc(b % 16) + 1)
+        i += 1
+    }
+    return out
+}
+
+# an odd length or a non-hex character is an error rather than a partial
+# result, because a silently truncated digest is the kind of bug that is
+# found much later.
+export fn hex_decode(text) {
+    if len(text) % 2 != 0 {
+        throw ValueError("hex input must have an even number of characters.")
+    }
+    let out = ""
+    let i = 0
+    while i < len(text) {
+        let hi = hex_value(text[i])
+        let lo = hex_value(text[i + 1])
+        if hi < 0 or lo < 0 {
+            throw ValueError("hex input contains a non-hex character.")
+        }
+        out += chr(hi * 16 + lo)
+        i += 2
+    }
+    return out
+}
+
+fn hex_value(c) {
+    let n = ord(c)
+    if n >= 48 and n <= 57 {
+        return n - 48
+    }
+    if n >= 97 and n <= 102 {
+        return n - 87
+    }
+    if n >= 65 and n <= 70 {
+        return n - 55
+    }
+    return -1
+}
+
+# --- base64 ---
+#
+# standard alphabet, with padding. 3 bytes in, 4 characters out.
+
+const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+export fn base64_encode(bytes) {
+    let out = ""
+    let i = 0
+    while i + 2 < len(bytes) {
+        let n = ord(bytes[i]) * 65536 + ord(bytes[i + 1]) * 256
+                + ord(bytes[i + 2])
+        out += __slice(B64, __trunc(n / 262144), __trunc(n / 262144) + 1)
+        out += __slice(B64, __trunc(n / 4096) % 64, __trunc(n / 4096) % 64 + 1)
+        out += __slice(B64, __trunc(n / 64) % 64, __trunc(n / 64) % 64 + 1)
+        out += __slice(B64, n % 64, n % 64 + 1)
+        i += 3
+    }
+    let left = len(bytes) - i
+    if left == 1 {
+        let n = ord(bytes[i]) * 16
+        out += __slice(B64, __trunc(n / 64), __trunc(n / 64) + 1)
+        out += __slice(B64, n % 64, n % 64 + 1)
+        out += "=="
+    } else if left == 2 {
+        let n = ord(bytes[i]) * 1024 + ord(bytes[i + 1]) * 4
+        out += __slice(B64, __trunc(n / 4096), __trunc(n / 4096) + 1)
+        out += __slice(B64, __trunc(n / 64) % 64, __trunc(n / 64) % 64 + 1)
+        out += __slice(B64, n % 64, n % 64 + 1)
+        out += "="
+    }
+    return out
+}
+
+export fn base64_decode(text) {
+    # four input characters are twenty-four bits, three bytes. anything that
+    # is not a full group is the tail: two or three characters for one or two
+    # bytes.
+    let out = ""
+    let i = 0
+    while i < len(text) {
+        let digits = []
+        while i < len(text) and text[i] != "=" and len(digits) < 4 {
+            let v = b64_value(text[i])
+            if v < 0 {
+                throw ValueError("base64 input contains an invalid character.")
+            }
+            push(digits, v)
+            i += 1
+        }
+        # skip padding
+        while i < len(text) and text[i] == "=" {
+            i += 1
+        }
+        let n = len(digits)
+        if n == 0 {
+            # ran off the end skipping padding
+            continue
+        }
+        let v0 = digits[0]
+        let v1 = 0
+        let v2 = 0
+        let v3 = 0
+        if n > 1 {
+            v1 = digits[1]
+        }
+        if n > 2 {
+            v2 = digits[2]
+        }
+        if n > 3 {
+            v3 = digits[3]
+        }
+        let packed = v0 * 262144 + v1 * 4096 + v2 * 64 + v3
+        out += chr(__trunc(packed / 65536) % 256)
+        if n > 2 {
+            out += chr(__trunc(packed / 256) % 256)
+        }
+        if n > 3 {
+            out += chr(packed % 256)
+        }
+    }
+    return out
+}
+
+fn b64_value(c) {
+    let n = ord(c)
+    if n >= 65 and n <= 90 {
+        return n - 65
+    }
+    if n >= 97 and n <= 122 {
+        return n - 71
+    }
+    if n >= 48 and n <= 57 {
+        return n + 4
+    }
+    if c == "+" {
+        return 62
+    }
+    if c == "/" {
+        return 63
+    }
+    return -1
+}
+
+# --- url escaping ---
+#
+# percent-encoding, the form a query string uses. unreserved characters are
+# A-Z a-z 0-9 - _ . ~ ; everything else becomes %xx, and a space becomes +.
+#
+#     print(encoding.url_encode("a b&c"))    # a+b%26c
+
+export fn url_encode(text) {
+    let out = ""
+    let i = 0
+    while i < len(text) {
+        let c = text[i]
+        if is_unreserved(c) {
+            out += c
+        } else if c == " " {
+            out += "+"
+        } else {
+            let n = ord(c)
+            out += "%" + __slice(HEX_DIGITS, __trunc(n / 16), __trunc(n / 16) + 1)
+                   + __slice(HEX_DIGITS, __trunc(n % 16), __trunc(n % 16) + 1)
+        }
+        i += 1
+    }
+    return out
+}
+
+# the inverse. a % that is not followed by two hex digits is an error
+# rather than a literal percent, because guessing there is how a path
+# traversal slips through.
+
+export fn url_decode(text) {
+    let out = ""
+    let i = 0
+    while i < len(text) {
+        let c = text[i]
+        if c == "+" {
+            out += " "
+            i += 1
+        } else if c == "%" {
+            if i + 2 >= len(text) {
+                throw ValueError("url input ends with an incomplete escape.")
+            }
+            let hi = hex_value(text[i + 1])
+            let lo = hex_value(text[i + 2])
+            if hi < 0 or lo < 0 {
+                throw ValueError("url input has an invalid percent escape.")
+            }
+            out += chr(hi * 16 + lo)
+            i += 3
+        } else {
+            out += c
+            i += 1
+        }
+    }
+    return out
+}
+
+fn is_unreserved(c) {
+    let n = ord(c)
+    if n >= 97 and n <= 122 {
+        return true
+    }
+    if n >= 65 and n <= 90 {
+        return true
+    }
+    if n >= 48 and n <= 57 {
+        return true
+    }
+    return c == "-" or c == "_" or c == "." or c == "~"
+}

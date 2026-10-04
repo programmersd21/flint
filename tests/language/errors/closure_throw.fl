@@ -1,0 +1,98 @@
+# Errors inside closures and under GC pressure.
+#
+# A closure's captured variables live in upvalues, which point into the value
+# stack while the defining frame is alive and are moved to the heap when it
+# returns. Unwinding closes them on the way through, so a closure caught in the
+# middle of an unwind has to keep seeing the right value afterwards.
+
+fn make_failing() {
+	let calls = 0
+	return fn() {
+		calls += 1
+		if calls == 1 {
+			throw "first call fails"
+		}
+		return calls
+	}
+}
+
+let f = make_failing()
+try {
+	f()
+} catch e {
+	print("caught: " + e)
+}
+
+# the closure survived the unwind, and its counter kept counting
+print(f())
+print(f())
+
+# --- a closure that catches its own error ---
+
+fn make_catcher() {
+	let caught = 0
+	return fn(x) {
+		try {
+			return [1, 2][x]
+		} catch e {
+			caught += 1
+			return -1
+		}
+	}
+}
+
+let c = make_catcher()
+print(c(0))
+print(c(9))
+print(c(1))
+print(c(9))
+
+# --- errors while the collector is busy ---
+#
+# The stress build (make stress) collects on every allocation, so this file is
+# what proves an error value, a handler and the stack are all still consistent
+# when a collection runs in the middle of unwinding.
+
+fn build_garbage(n) {
+	let out = []
+	let i = 0
+	while i < n {
+		let captured = i
+		push(out, fn() { return captured })
+		push(out, "filler string " + str(i))
+		i += 1
+	}
+	return out
+}
+
+let kept = build_garbage(64)
+
+for i in 0..200 {
+	try {
+		if i % 7 == 0 {
+			throw Error("synthetic failure " + str(i))
+		}
+		let xs = build_garbage(8)
+		print(xs[0]())
+	} catch e {
+		if i % 7 == 0 {
+			print("caught " + e.message)
+		}
+	}
+}
+
+# the closures built before any of that still work
+print(kept[0]())
+print(kept[126]())
+
+# and the error value itself survives a collection
+try {
+	throw ValueError("still here")
+} catch e {
+	for i in 0..100 {
+		let junk = build_garbage(4)
+		junk[0]()
+	}
+	print(e.type)
+	print(e.message)
+}

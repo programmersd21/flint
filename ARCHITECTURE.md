@@ -19,9 +19,16 @@ boxed:      [ 1111 1111 1111 1000 ][ tag:3 ][ payload:48 ]
 | 2 | false |
 | 3 | true |
 | 4 | heap pointer to `Obj` |
+| 5 | heap pointer to `ObjString` |
 
 a 64-bit virtual address uses at most 48 bits, so it fits in the payload. this
 is the only reason flint requires a 64-bit host.
+
+tag 5 exists so a string test is a mask-and-compare with no pointer chase:
+every string primitive and every `OP_ADD` starts with one. two equal strings
+can now be two different objects (runtime strings are not interned), so
+equality for that tag compares contents, not bits. see the strings section
+in internals for why interning stopped at literals.
 
 arithmetic that produces a NaN gets canonicalized to
 `0x7FF8000000000000` before boxing. a NaN with an arbitrary payload could
@@ -171,9 +178,28 @@ about the result differs by scheme: one parse path, one table shape.
 promise: a fetched module is verified by compiling it before it replaces the
 old one. A 404 or a half-downloaded file never becomes a broken library.
 
+## errors
+
+`try` compiles to `OP_TRY` with a jump offset to its `catch` block, and the
+catch binding is an ordinary local: unwinding pushes the error value at the
+stack depth the `try` began at, which is exactly the slot the binding
+occupies. `OP_POP_HANDLER` retires the handler when the body completes
+normally; `break`, `continue` and `return` emit one for every `try` they
+cross, tracked per function in `try_depth`.
+
+the handler stack is dynamic and the jumps are static, so those two have to
+agree by construction. `OP_RETURN` additionally drops every handler owned
+by the returning frame, which covers the paths the compiler cannot see.
+
+an error that escapes every handler is rendered once and stashed, not
+printed: `pending_error` roots the value across the unwind, and the outermost
+run prints it. that delay is what makes a module failure catchable by the
+importing script. `OP_THROW` raises any value; a runtime error raises a
+`{type, message}` table built by `fl_error_value()`.
+
 ## deferred features
 
-two designs were evaluated and deliberately not shipped.
+one design was evaluated and deliberately not shipped.
 
 `defer` needs per-frame cleanup stacks, scope tracking, and -- hardest -- an
 error policy for a deferred action that itself fails. "run the rest anyway"
@@ -184,12 +210,6 @@ there are currently no resource handles in the language that need cleanup:
 only whole-file `read`/`write` exist, no `open`/`close`. a cleanup construct
 with nothing to clean up is scope creep with a good name. when file handles
 land, this design is the starting point.
-
-destructuring shipped instead, because it is parser work over existing
-opcodes: `let {a, b} = t` compiles to a hidden table local plus one
-load-and-bind per name, with locals pre-filled so every slot holds a value
-below a top that only moves up. no VM changes, no new opcodes, no new failure
-modes.
 
 ## bytecode verification
 
@@ -299,9 +319,19 @@ one value. it runs on the C stack inside the caller's frame, and if it calls
 `vm_interpret()` the whole thing reenters: that is how `import` works.
 
 a native that fails reports through `vm_runtime_error()` and returns, exactly
-like one that succeeded. `OP_CALL` therefore checks the frame count after a
-native returns, because `vm_runtime_error()` has already unwound everything
-and the loop would otherwise keep executing with no frames at all.
+like one that succeeded. what happens next depends on whether anything
+catches the error. `vm_throw_value()` first walks the handler stack for a
+`try` that owns it: if one is found the frames above it are discarded, the
+stack is restored to the depth the `try` began at, the error value is pushed
+there, and the handler's frame resumes at its catch block. only when no
+handler applies does the error unwind to the base of the run and return
+`INTERPRET_RUNTIME_ERROR`.
+
+`OP_CALL` therefore checks two things after a native returns. `pending_catch`
+means a handler already restored the stack, so the callee and its arguments
+must not be dropped a second time. otherwise, if the frame count is at or
+below the base, the stack was unwound from under the call and the run is
+over.
 
 ## object types
 

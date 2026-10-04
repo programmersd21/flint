@@ -26,14 +26,14 @@ from the repository root:
 ./flint examples/math.fl
 ./flint examples/closures.fl
 ./flint examples/data.fl
-printf 'Ada\nsecond\n\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\nafter\nlast' | ./flint examples/input.fl
+printf 'Ada\nsecond\n\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n21' | ./flint examples/input.fl
 ```
 
-the module example is the exception because its imports are relative to the
-importing file. Run it from its directory so the example paths stay short.
+the module example has no such constraint: imports resolve against the
+importing file, so it runs from anywhere.
 
 ```sh
-cd examples/modules && ../../flint main.fl
+./flint examples/modules/main.fl
 ```
 
 see [../docs/modules.md](../docs/modules.md) for the path and cache rules.

@@ -1,0 +1,12 @@
+# A try with no catch is a compile error.
+#
+# A try whose error nothing handles is a try that cannot do anything useful:
+# the error would stop the script whether or not the block were there. Flint
+# requires the catch, so the mistake is at compile time rather than a silent
+# no-op at run time.
+#
+# `try` with a `catch` that has no binding is fine: see nested_scope.fl.
+
+try {
+	print("never printed")
+}

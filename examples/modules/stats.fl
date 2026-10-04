@@ -1,42 +1,37 @@
-# stats.fl -- a module that imports another module.
+# stats.fl: a module that imports another module.
 #
-# the import at the top is why stats.fl can call area() without defining it.
-# there is one global table for the whole program, so importing shapes.fl here
-# puts every name shapes.fl defines into scope for this file, exactly as it
-# would for any other file.
-#
-# the path is working-directory relative, so it is the same "shapes.fl" the
-# main file imports, not a path relative to this file. see main.fl.
+# the import at the top is why this file can call shapes.area() without
+# defining it. the import binds the module's exports under one name, and every
+# call goes through that name. there is no bare `area` in scope here: the two
+# modules keep their own names, so a helper in one can never overwrite a
+# helper of the same name in the other.
 
-import "shapes.fl"
+import "shapes.fl" as shapes
 
-# total_area() is the module's interface. everything else here is an
-# implementation detail, though again there is nothing enforcing that.
-export fn total_area(shapes) {
+# total_area() is this module's interface. everything else here is an
+# implementation detail.
+export fn total_area(items) {
     let total = 0
     let i = 0
-    while i < len(shapes) {
-        # `area` is not defined in this file. it came in with the import, and
-        # it works on the tables the caller passed because the function and the
-        # data agree on shape without either of them saying so.
-        total += area(shapes[i])
+    while i < len(items) {
+        total += shapes.area(items[i])
         i += 1
     }
     return total
 }
 
-export fn largest(shapes) {
+export fn largest(items) {
     let best = nil
     let best_area = 0
     let i = 0
-    while i < len(shapes) {
-        let a = area(shapes[i])
+    while i < len(items) {
+        let a = shapes.area(items[i])
         # `a > best_area` rather than `if a`. zero is truthy in flint, so
         # testing the number directly would take the branch on the first
         # iteration whatever the areas were. see docs/values.md
         if a > best_area {
             best_area = a
-            best = shapes[i]
+            best = items[i]
         }
         i += 1
     }

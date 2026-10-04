@@ -1,0 +1,72 @@
+# What an error value is, exactly.
+#
+# It is a table with `type` and `message`. Not a class, not an inheritance
+# hierarchy, not an opaque handle: two fields, which is enough to branch on
+# and to print, and enough that a script can build one when a library needs to
+# fail in a way the caller cares about.
+
+let e = Error("something went wrong")
+print(type(e))
+print(e.type)
+print(e.message)
+
+# a table is a table: an error can be stored, passed and read like any other
+# value
+fn rethrow(err) {
+	throw err
+}
+
+try {
+	rethrow(e)
+} catch caught {
+	print(caught.message)
+	print(caught.type)
+}
+
+# the constructors are ordinary functions, so they can be called, passed and
+# stored in a list. there is no reflection on a function value: a function
+# does not carry its name, and the list below is named by hand for that reason.
+let makers = [Error, TypeError, ValueError, IOError, NetworkError,
+	TimeoutError, ProcessError, ModuleError, PackageError]
+let names = ["Error", "TypeError", "ValueError", "IOError", "NetworkError",
+	"TimeoutError", "ProcessError", "ModuleError", "PackageError"]
+
+let i = 0
+while i < len(makers) {
+	let err = makers[i]("made by " + names[i])
+	if err.type != names[i] {
+		print("mismatch: " + err.type)
+	}
+	print(err.type)
+	i += 1
+}
+
+# an error thrown as something else entirely is caught just the same. catch
+# binds the value, not a table.
+try {
+	throw 42
+} catch n {
+	print(type(n))
+	print(n)
+}
+
+try {
+	throw [1, 2, 3]
+} catch list {
+	print(len(list))
+}
+
+try {
+	throw nil
+} catch nothing {
+	print("caught nil: " + str(nothing == nil))
+}
+
+try {
+	throw true
+} catch flag {
+	print("caught bool: " + str(flag))
+}
+
+# an uncaught non-table error still reports, naming its type. see
+# throw_number_uncaught.fl

@@ -1,0 +1,6 @@
+try {
+    throw "boom"
+} catch e {
+    print("caught: " + e)
+}
+print("done")

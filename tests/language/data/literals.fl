@@ -1,0 +1,59 @@
+# Literals: lists, tables, and the shapes each one accepts.
+#
+# The trailing-comma cases at the bottom are the interesting ones. A literal
+# written across several lines almost always ends with a comma, because that is
+# what you type when you are adding the next entry and stopped halfway through
+# thinking about it. Rejecting that made the shape people actually write the
+# one shape that did not parse, so a trailing comma is now allowed in both.
+
+let xs = [1, 2, 3]
+print(xs[0])
+print(len(xs))
+
+let empty_list = []
+print(len(empty_list))
+
+let nested = [[1, 2], [3, 4]]
+print(nested[1][0])
+
+let t = {a: 1, b: 2}
+print(t.a)
+print(t.b)
+print(t.c)
+
+let empty_table = {}
+print(len(empty_table))
+
+# a table holding collections, which is what configuration data looks like
+let config = {
+	name: "flint",
+	ports: [8080, 8081],
+	limits: {memory: 256, time: 30},
+}
+print(config.name)
+print(config.ports[1])
+print(config.limits.time)
+
+# trailing commas, multi-line
+let trailing_list = [
+	1,
+	2,
+]
+print(len(trailing_list))
+print(trailing_list[1])
+
+let trailing_table = {
+	a: 1,
+	b: 2,
+}
+print(trailing_table.a)
+print(trailing_table.b)
+
+# ...and single-line
+print(len([1, 2,]))
+print({a: 1,}.a)
+
+# a list of one element with a trailing comma is still one element, and an
+# empty list is still empty
+print(len([7,]))
+print(len([]))

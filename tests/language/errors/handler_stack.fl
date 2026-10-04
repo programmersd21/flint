@@ -1,0 +1,112 @@
+# An error value crossing a handler stack boundary.
+#
+# A handler's slot is where its binding lives, so an error caught by an outer
+# try has to sit above the locals the inner try's block had. When the inner
+# block had locals, the outer catch must not see them, and must not be given a
+# slot that clobbers them.
+
+fn three_deep() {
+	let outer = "outer local"
+	try {
+		let level1 = "level one"
+		try {
+			let level2 = "level two"
+			try {
+				throw "from the deepest"
+			} catch e {
+				print("level 3 caught: " + e)
+				print("level 2 local: " + level2)
+			}
+		} catch e {
+			print("level 2 should not see this")
+		}
+		print("level 1 still here: " + level1)
+		print("outer still here: " + outer)
+	} catch e {
+		print("outer should not see this either")
+	}
+}
+
+three_deep()
+
+# a local of the try body is not visible in the catch body. reading it there is
+# an ordinary undefined-variable error, so the catch has to be one level up.
+fn scope_of_try_locals() {
+	try {
+		try {
+			let inside = 1
+			throw "leaving the block"
+		} catch e {
+			print("inner caught: " + e)
+			print("inside is not in scope here")
+		}
+	} catch e2 {
+		print("outer caught: " + e2)
+	}
+}
+
+scope_of_try_locals()
+
+# the handler stack is per-invocation: a try in a called function is popped
+# when that function returns, even though the frame it was in is gone
+fn handler_in_callee(should_fail) {
+	try {
+		if should_fail {
+			throw "callee's own error"
+		}
+		return "no error"
+	} catch e {
+		return "callee caught: " + e
+	}
+}
+
+print(handler_in_callee(true))
+print(handler_in_callee(false))
+
+# a try in the caller cannot catch an error the callee already handled, which
+# is the property that makes "recover locally" work
+fn recovers() {
+	try {
+		return handler_in_callee(true)
+	} catch e {
+		return "caller saw: " + e
+	}
+}
+
+print(recovers())
+
+# and a callee that does not handle leaves the error to the caller
+fn does_not_recover() {
+	return [1][9]
+}
+
+try {
+	does_not_recover()
+} catch e {
+	print("caller: " + e.message)
+}
+
+# ten frames deep, each with a handler, only the innermost one catching
+fn chain(n) {
+	try {
+		if n == 0 {
+			throw "bottom"
+		}
+		return chain(n - 1)
+	} catch e {
+		return "caught at depth " + str(n)
+	}
+}
+
+print(chain(8))
+
+# a handler that is entered, left, and entered again in the same frame
+let reentries = 0
+for i in 0..5 {
+	try {
+		throw "attempt " + str(i)
+	} catch e {
+		reentries += 1
+	}
+}
+print(reentries)

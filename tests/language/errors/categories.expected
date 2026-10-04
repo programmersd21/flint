@@ -1,0 +1,14 @@
+Error
+TypeError
+ValueError
+IOError
+NetworkError
+TimeoutError
+ProcessError
+ModuleError
+PackageError
+ValueError
+TypeError
+Error
+NetworkError / connection reset
+TimeoutError / took too long

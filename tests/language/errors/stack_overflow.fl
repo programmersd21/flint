@@ -1,0 +1,31 @@
+# Stack overflow is an error like any other.
+#
+# A recursive function with no base case has to fail the way every other
+# runtime error does: with a message, and catchable. Before it had to stop the
+# process, because the check that noticed the frame limit had no way to route
+# an error back up through the C stack.
+
+fn forever(n) {
+	return 1 + forever(n + 1)
+}
+
+try {
+	forever(0)
+} catch e {
+	print("caught: " + e.message)
+}
+
+print("still running")
+
+# the same, through several frames rather than one
+fn a(n) { return b(n) }
+fn b(n) { return c(n) }
+fn c(n) { return 1 + a(n) }
+
+try {
+	a(0)
+} catch e {
+	print("caught: " + e.message)
+}
+
+print("done")

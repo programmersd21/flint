@@ -1,0 +1,37 @@
+# Errors from a module that is written like a library.
+#
+# failing_lib.fl raises three different kinds of failure on purpose: a
+# categorised error, a bare string, and a runtime error raised by mistake. All
+# three reach the caller's catch, because an error is an error whatever its
+# origin.
+
+import "failing_lib.fl" as lib
+
+print(lib.working())
+
+# a library function that fails with a category of its own
+try {
+	lib.bad()
+} catch e {
+	print(e.type + ": " + e.message)
+}
+
+# a library function that raises a plain string, which is what an older
+# library would do. catch binds it whatever it is.
+try {
+	lib.legacy()
+} catch e {
+	print(e.type + ": " + e)
+}
+
+# a library function that fails by mistake rather than on purpose: an
+# out-of-range index is still an error the caller can handle
+try {
+	lib.oops()
+} catch e {
+	print(e.type + ": " + e.message)
+}
+
+# and one that works, so the failures above are the module's doing and not the
+# import's
+print(lib.working())

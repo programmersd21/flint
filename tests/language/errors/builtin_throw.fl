@@ -1,0 +1,63 @@
+# Errors from builtins that are not the stdlib.
+#
+# len() on a number, calling a number, keys() on a list: each is a runtime
+# error, and each is a value a try can catch. These need no import, so this
+# file is a self-contained statement about the builtin layer.
+
+try {
+	len(7)
+} catch e {
+	print("caught: " + e.message)
+}
+
+let not_a_fn = 5
+try {
+	not_a_fn(1)
+} catch e {
+	print("caught: " + e.message)
+}
+
+try {
+	keys([1, 2, 3])
+} catch e {
+	print("caught: " + e.message)
+}
+
+# the arity check is an error too
+fn two_args(a, b) {
+	return a + b
+}
+try {
+	two_args(1)
+} catch e {
+	print("caught: " + e.message)
+}
+
+try {
+	two_args(1, 2, 3)
+} catch e {
+	print("caught: " + e.message)
+}
+
+# a method on the wrong kind of value
+try {
+	push(5, 1)
+} catch e {
+	print("caught: " + e.message)
+}
+
+try {
+	pop(7)
+} catch e {
+	print("caught: " + e.message)
+}
+
+# popping an empty list, which fails rather than returning nil
+try {
+	pop([])
+} catch e {
+	print("caught: " + e.message)
+}
+
+# and the same calls without a try still fail: return_uncaught.fl shows one of
+# them, and an uncaught error in every other shape is in builtin_uncaught.fl

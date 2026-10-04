@@ -1,0 +1,112 @@
+# Errors raised from inside a loop, and a loop unwound by an error.
+#
+# break and continue out of a try block have to retire its handler, and they
+# have to leave the loop's own locals alone. The second half of this file is
+# about the other direction: an error escaping a try that is inside a loop has
+# to leave the loop, not be caught by the next iteration's handler.
+
+let caught = 0
+let ran = 0
+
+for i in 0..10 {
+	try {
+		if i == 3 {
+			break
+		}
+		if i == 5 {
+			continue
+		}
+		ran += 1
+	} catch e {
+		caught += 1
+	}
+}
+
+print(ran)
+print(caught)
+
+# a while loop, where continue jumps back to the condition
+let n = 0
+while n < 5 {
+	try {
+		n += 1
+		if n == 2 {
+			continue
+		}
+		if n == 4 {
+			break
+		}
+	} catch e {
+		print("never")
+	}
+}
+print(n)
+
+# nested loops, one try in the inner one
+let total = 0
+for i in 0..3 {
+	try {
+		for j in 0..3 {
+			if j == 2 {
+				break
+			}
+			total += 1
+		}
+	} catch e {
+		total += 100
+	}
+}
+print(total)
+
+# an error thrown three frames deep inside a loop inside a try
+fn deep(x) {
+	if x {
+		throw "deep"
+	}
+	return 0
+}
+
+let hits = 0
+for i in 0..4 {
+	try {
+		print(deep(i == 2))
+	} catch e {
+		hits += 1
+	}
+}
+print(hits)
+
+# a handler from a previous iteration must not catch a later error: each
+# iteration pushes and pops its own
+let crossed = 0
+for i in 0..3 {
+	try {
+		if i == 1 {
+			throw "in iteration " + str(i)
+		}
+	} catch e {
+		crossed += 1
+	}
+	if i == 2 {
+		try {
+			throw "not caught by iteration 0"
+		} catch e2 {
+			crossed += 10
+		}
+	}
+}
+print(crossed)
+
+# a range loop with step
+let stepped = 0
+for i in 0..10 {
+	try {
+		if i == 5 {
+			throw "at five"
+		}
+		stepped += 1
+	} catch e {
+		stepped += 100
+	}
+}
+print(stepped)

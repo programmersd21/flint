@@ -1,7 +1,6 @@
-# flint language spec
+# flint language specification 0.8.0
 
-version 0.5. this is the grammar and the semantics. the implementation is not
-always right; when they disagree, file a bug.
+version 0.8.0. this is the authoritative grammar and semantics specification.
 
 [docs/language.md](docs/language.md) is a prose version of this for people who
 want to read it rather than implement it. [docs/diagnostics.md](docs/diagnostics.md)
@@ -15,7 +14,7 @@ documents the current diagnostic output and its limits.
 and      as       break    const    continue else
 export   false    fn       for      if       import
 in       let      nil      not      or       print
-return   true     while
+return   true     while    try      catch    throw
 ```
 
 ### literals
@@ -51,11 +50,13 @@ declaration    = fnDecl | letDecl | constDecl | importDecl | exportDecl | statem
 letDecl        = "let" IDENTIFIER ( "=" expression )? terminator ;
 constDecl      = "const" IDENTIFIER "=" expression terminator ;
 fnDecl         = "fn" IDENTIFIER "(" parameters? ")" "{" block "}" ;
-importDecl     = "import" STRING terminator ;
+fnExpr         = "fn" "(" parameters? ")" "{" block "}" ;
+importDecl     = "import" (STRING | IDENTIFIER) ("as" IDENTIFIER)? terminator ;
 exportDecl     = "export" ( fnDecl | letDecl | constDecl ) ;
 
 statement      = exprStmt | printStmt | ifStmt | whileStmt | forStmt
-               | breakStmt | continueStmt | returnStmt | "{" block "}" ;
+               | breakStmt | continueStmt | returnStmt | tryStmt | throwStmt
+               | "{" block "}" ;
 
 printStmt      = "print" "(" arguments ")" terminator ;
 ifStmt         = "if" expression block ( "else" ( ifStmt | block ) )? ;
@@ -64,12 +65,41 @@ forStmt        = "for" IDENTIFIER "in" expression block ;
 returnStmt     = "return" expression? terminator ;
 breakStmt      = "break" terminator ;
 continueStmt   = "continue" terminator ;
+throwStmt      = "throw" expression terminator ;
+tryStmt        = "try" block "catch" ( IDENTIFIER )? block ;
 
 terminator     = ";" | newline | "}" | EOF ;
 ```
 
-`for x in expr` iterates a list, or a range when `expr` contains `..`.
-ranges are half-open: `1..5` is 1, 2, 3, 4.
+A `try` block runs its body, and routes the first runtime error or `throw`ed
+value to the matching `catch` body, which binds the error to the optional
+identifier. When nothing catches the error, the script reports it and exits
+with code 70. Nested `try`s match innermost first. `break`, `continue` and
+`return` inside a `try` body retire its handler before leaving the block.
+
+An error is a table with `type` (a string naming the category) and `message`
+(a string) fields. The constructors `Error`, `TypeError`, `ValueError`,
+`IOError`, `NetworkError`, `TimeoutError`, `ProcessError`, `ModuleError` and
+`PackageError` build these tables. `throw` accepts any value, not just
+error tables.
+
+A runtime error raised by the VM or by a builtin is classified by its
+message into the same category names, so `catch e { e.type }` distinguishes
+a type disagreement from a bad value from a failed file operation. The
+classification is a table of message prefixes in `src/runtime/vm.c`
+(`error_type_for`), not a second argument on every error call. A runtime
+category therefore needs no constructor: a program never builds one by
+hand. A runtime error picks its category from its message -- an
+index failure is a `ValueError`, a type disagreement a `TypeError` -- so
+caught runtime errors carry the same shape as thrown ones.
+
+`for x in expr` iterates a list, a string (one byte per step), or a range
+when `expr` contains `..`. ranges are half-open: `1..5` is 1, 2, 3, 4.
+`a..b..s` steps by `s`: `0..10..2` is 0, 2, 4, 6, 8, and a negative step
+iterates backwards. a zero step is an error; an empty result is not.
+
+tables iterate only in two-variable form: `for k, v in t` walks entries in
+insertion order. a single variable over a table is a runtime error.
 
 ### expression precedence
 
@@ -87,10 +117,15 @@ loosest to tightest:
 10. type assertion: `as`
 11. unary: `!`, `not`, `-`
 12. call, subscript, field: `()`, `[]`, `.`
-13. primary: literals, identifiers, grouping, list, table
+13. primary: literals, identifiers, grouping, list, table, function literal
 
 `<=` is not `!(>)`. `NaN` is unordered, so the two forms differ on NaN and the
 compiler emits a separate opcode for each.
+
+A function literal (`fnExpr` above) is a primary expression: `fn(x) { return x }`
+evaluates to a closure, and the same rules for parameters, returns, closures and
+naming apply as for a declared function. An unnamed function reports itself as
+`<anonymous>` in a stack trace.
 
 ### type assertions
 
@@ -213,7 +248,8 @@ in a dozen passes, so the check is not theoretical.
 ### tables
 
 `{ key: value }` is a table literal. `t.key` reads it, `t.key = v` writes it.
-reading a key that was never set gives `nil`. there is no delete syntax.
+reading a key that was never set gives `nil`. there is no delete operator;
+use the `delete(t, k)` builtin.
 
 a table literal works in any expression position. it keeps itself on the
 stack between pairs rather than in a hidden local, which is what lets
@@ -236,7 +272,7 @@ arrives as plain text. a line can be any length; the buffer grows.
 a non-string prompt and a non-zero-or-one argument count are runtime errors,
 reported the ordinary way.
 
-## the standard library, v0.3
+## the standard library
 
 seven functions before v0.3, and sixteen more since. all of them are ordinary
 values: there is no namespace, a builtin is a global holding a native, and a
@@ -255,6 +291,8 @@ script can pass one to another.
 | `has(t, k)` | whether the table holds the key, by content |
 | `delete(t, k)` | remove the key, true when something was removed |
 | `str(val)` | string form of a scalar. containers give `<object>` |
+| `ord(s)` | byte value of a one-character string |
+| `chr(n)` | one-character string for a byte value 0..255 |
 | `type(val)` | one of the seven type names |
 | `input([prompt])` | one line from stdin, `nil` at end of file |
 | `clock()` | process cpu time in seconds |
@@ -294,11 +332,11 @@ competitive rather than three times slower.
 
 ### internal maths
 
-ten names beginning `__` exist for a math library that is not in this
-repository. `__floor` `__sqrt` `__fma` `__ldexp` `__logb` `__fabs`
-`__copysign` `__hi32` `__lo32` `__from_bits`. the leading underscore marks
-them as not part of the language, and a script has no business calling
-them.
+ten names beginning `__` exist underneath `lib/math.fl`. `__floor` `__sqrt`
+`__fma` `__ldexp` `__logb` `__fabs` `__copysign` `__hi32` `__lo32`
+`__from_bits`. the leading underscore marks them as not part of the
+language: programs use the `math` module, which wraps them, and a script
+has no business calling them directly.
 
 `exec` calls `execvp` and never a shell. there is no path from this API to
 `/bin/sh`, so a filename containing a space, a semicolon or a `$(...)` is an
@@ -422,7 +460,12 @@ reports that rather than retrying a failure nothing has changed:
 error[E0501]: Module 'broken.fl' failed to load earlier in this run.
 ```
 
-## diagnostics, v0.3
+a failure inside a module is delivered to the importing script's handlers:
+`try { import "broken.fl" } catch err { ... }` catches the module's error. an
+error that reaches the top level is reported against the file that raised it,
+not the file that imported it.
+
+## diagnostics
 
 errors carry a stable code, a source span, and a severity. the default
 output is unchanged, so scripts that compare stderr keep working.

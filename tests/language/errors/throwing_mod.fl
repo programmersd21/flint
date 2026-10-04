@@ -1,0 +1,9 @@
+# A module that throws at top level.
+#
+# Imported by module_throw.fl inside a try, so the importing script catches the
+# failure and carries on. The export below is never reached by that import; the
+# good_mod.fl import in the same test is the control.
+
+export let value = 42
+
+throw ModuleError("this module refuses to load")

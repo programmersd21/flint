@@ -1,0 +1,103 @@
+# An error whose message is built from the values around it.
+#
+# The message is a string like any other, so everything that builds one works
+# on it. This is the shape every real error message has: the failed value, the
+# expected shape, and often a suggestion.
+
+fn describe_list(xs) {
+	if type(xs) != "list" {
+		throw TypeError("expected a list, got " + type(xs))
+	}
+	let out = []
+	let i = 0
+	while i < len(xs) {
+		push(out, str(xs[i]))
+		i += 1
+	}
+	return join(out, ",")
+}
+
+print(describe_list([1, 2, 3]))
+
+try {
+	describe_list("not a list")
+} catch e {
+	print(e.type + ": " + e.message)
+}
+
+try {
+	describe_list(7)
+} catch e {
+	print(e.message)
+}
+
+# the runtime's own messages, which are built the same way
+fn add() {
+	return "a" + 1
+}
+
+try {
+	add()
+} catch e {
+	print(e.message)
+}
+
+fn bad_field() {
+	let t = {}
+	return t.missing
+}
+
+try {
+	bad_field()
+} catch e {
+	print(e.message)
+}
+
+fn bad_index() {
+	return [1, 2][3]
+}
+
+try {
+	bad_index()
+} catch e {
+	print(e.message)
+}
+
+fn bad_str_index() {
+	return "abc"[10]
+}
+
+try {
+	bad_str_index()
+} catch e {
+	print(e.message)
+}
+
+# the message is ordinary text, so a program can classify it the way the
+# diagnostics do
+fn classify(e) {
+	if contains(e.message, "index") {
+		return "an index problem"
+	}
+	if contains(e.message, "operands") {
+		return "arithmetic on the wrong types"
+	}
+	if contains(e.message, "only tables") {
+		return "field access on the wrong type"
+	}
+	return "something else"
+}
+
+fn each(f) {
+	try {
+		f()
+		return "no error"
+	} catch e {
+		return classify(e)
+	}
+}
+
+print(each(fn() { return [1][5] }))
+print(each(fn() { return 1 + "x" }))
+print(each(fn() { return bad_field() }))
+print(each(fn() { return 1 }))

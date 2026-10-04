@@ -1,0 +1,23 @@
+# A module whose functions fail in the three ways a library function can.
+#
+# Imported by lib_error.fl. Each failure is a different kind on purpose: a
+# categorised error, a bare string, and a runtime error raised by mistake. All
+# three reach the caller's catch.
+
+export fn working() {
+	return "the library is fine"
+}
+
+export fn bad() {
+	throw NetworkError("the network said no")
+}
+
+export fn legacy() {
+	throw "a bare string, the way a library fails before error types"
+}
+
+export fn oops() {
+	# no throw here at all: this one is a mistake, and it still reaches the
+	# caller's catch with the same shape
+	return [1, 2][99]
+}

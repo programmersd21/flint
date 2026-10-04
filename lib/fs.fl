@@ -24,8 +24,11 @@ export fn mkdir(p) {
     return __mkdir(p)
 }
 
-# false when it was not there, which is a fact about the filesystem and not a
-# reason to stop a script. unlink(2) has the same property.
+# remove(path) removes a file, and a directory when it is empty. false when it
+# was not there, which is a fact about the filesystem and not a reason to stop
+# a script. unlink+rmdir semantics: an empty directory is removed, a
+# non-empty one is not, and either way no error is raised for "there it was
+# not".
 export fn remove(p) {
     return __remove(p)
 }

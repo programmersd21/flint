@@ -1705,7 +1705,16 @@ static Value remove_native(VM *vm, int argc, Value *argv)
 		vm_runtime_error(vm, "Argument to remove() must be a string.");
 		return NIL_VAL;
 	}
-	return unlink(AS_CSTRING(argv[0])) == 0 ? TRUE_VAL : FALSE_VAL;
+	const char *path = AS_CSTRING(argv[0]);
+	if (unlink(path) == 0)
+		return TRUE_VAL;
+	/* a directory is not a file, so unlink refused it. try rmdir for the
+	 * same name, which is what a script wants when it calls remove() on
+	 * a directory it just made. */
+	struct stat st;
+	if (stat(path, &st) == 0 && S_ISDIR(st.st_mode))
+		return rmdir(path) == 0 ? TRUE_VAL : FALSE_VAL;
+	return FALSE_VAL;
 }
 
 /* mkdir(path) -> bool. one level. recursive creation is a decision, and

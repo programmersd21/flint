@@ -1,0 +1,8 @@
+# A module file with no extension.
+#
+# Quoted imports name a file exactly as written, so this file loads as
+# "plainmod" with nothing appended. It exists for binding_noext.fl.
+
+export fn double(n) {
+	return n * 2
+}

@@ -1,0 +1,82 @@
+# Nesting, shadowing and the scope rules around handlers.
+#
+# A handler is popped when its block ends, whether it ended normally or by
+# returning, so a try two calls deep cannot catch an error raised after the
+# inner call returned.
+
+# a handler is per-invocation, not per-function: two calls in sequence, each
+# with its own try, do not see each other's handlers
+fn twice(f) {
+	f()
+	f()
+}
+
+let seen = 0
+twice(fn() {
+	try {
+		seen += 1
+	} catch e {
+	}
+})
+print(seen)
+
+# recursion with a try in every frame: the innermost handler catches first
+fn recurse(n) {
+	try {
+		if n == 0 {
+			throw "bottom"
+		}
+		return recurse(n - 1)
+	} catch e {
+		return "caught at depth " + str(n)
+	}
+}
+print(recurse(3))
+
+# the catch binding is a local of the catch body and does not leak
+try {
+	throw "leaky"
+} catch e {
+	print(e)
+}
+print("after the try")
+
+# a catch without a binding discards the error
+try {
+	throw "discarded"
+} catch {
+	print("caught something")
+}
+
+# the binding can shadow an outer name without disturbing it
+let e = "outer e"
+try {
+	throw "inner e"
+} catch e {
+	print("catch binding: " + e)
+}
+print("outer: " + e)
+
+# ...and a try body's locals never leak into the catch body, in either
+# direction
+let inside = "visible outside"
+try {
+	print("visible inside: " + inside)
+	throw "done"
+} catch err {
+	print("visible inside the catch: " + inside)
+	print("caught: " + err)
+}
+
+# a block scope inside a try is independent of the catch
+try {
+	{
+		let block_local = "block only"
+		print(block_local)
+	}
+	throw "after the block"
+} catch e {
+	print("caught: " + e)
+}
+
+# the uncaught version of the recursion above is recursion_uncaught.fl

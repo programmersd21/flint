@@ -1,0 +1,10 @@
+flint
+1
+parse failed: invalid json: expected a string at offset 1
+1
+none
+caught: json: cannot stringify a function
+caught a missing file
+TypeError: t
+no error
+caught: second: first

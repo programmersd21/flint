@@ -1,0 +1,28 @@
+1
+2
+3
+caught: over the limit
+4
+1
+caught: the second one always fails
+2
+caught: even 0
+1
+caught: even 2
+3
+ok 1
+error list index 0 out of bounds (len 0).
+ok 3
+0
+1
+2
+caught: three
+4
+caught: module failed after counting to 100
+100
+count is 100
+3
+2
+1
+0
+all done

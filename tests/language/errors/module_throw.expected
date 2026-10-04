@@ -1,0 +1,13 @@
+only tables have fields.
+[line 62] in script
+42
+caught: ModuleError
+message: this module refuses to load
+importing script still running
+caught: module function said no
+caught: list index 99 out of bounds (len 3).
+caught: module closure failed on call 1
+true
+loaded
+module 'throwing_mod.fl' failed to load earlier in this run.
+caught: module 'throwing_mod.fl' failed to load earlier in this run.

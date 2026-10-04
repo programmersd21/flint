@@ -1,0 +1,48 @@
+# encoding: hex and base64 and url escaping.
+#
+# these are the three encodings a program needs when it stops talking to
+# itself: digests, tokens, and query strings. the test asserts exact outputs,
+# which also pins the byte order and padding, because a base64 encoder that is
+# only mostly right is worse than no encoder.
+
+import encoding
+
+print(encoding.hex_encode("hello"))
+print(encoding.hex_decode("68656c6c6f"))
+print(encoding.base64_encode("hello"))
+print(encoding.base64_decode("aGVsbG8="))
+print(encoding.hex_encode(""))
+print(encoding.base64_encode(""))
+print(encoding.url_encode("a b&c"))
+print(encoding.url_decode("a+b%26c"))
+
+# odd-length hex is rejected rather than silently halving the length
+try {
+    encoding.hex_decode("abc")
+} catch e {
+    print("caught: " + e.message)
+}
+
+# invalid characters are rejected too, not passed through
+try {
+    encoding.hex_decode("zz")
+} catch e {
+    print("caught: " + e.message)
+}
+
+try {
+    encoding.base64_decode("****")
+} catch e {
+    print("caught: " + e.message)
+}
+
+try {
+    encoding.url_decode("%2")
+} catch e {
+    print("caught: " + e.message)
+}
+
+# round trips
+print(encoding.url_decode(encoding.url_encode("a+b c%d")))
+print(encoding.hex_decode(encoding.hex_encode("xyzzy")))
+print(encoding.base64_decode(encoding.base64_encode("round trip")))

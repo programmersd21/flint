@@ -1,0 +1,17 @@
+# args: the script's command line, asking the common questions.
+#
+# this one only tests the no-arguments path, because the test runner invokes
+# the script with no arguments. with arguments it is the same map: get returns
+# the value and nil past the end.
+#
+# the alias is required: a bare `import args` would bind `args` in this
+# script's globals and shadow the builtin `args()` the module calls. see
+# lib/args.fl.
+
+import args as argv
+
+print(argv.count())
+print(argv.get(0))
+print(argv.get(99))
+print(argv.has("--verbose"))
+print(argv.value("--config"))

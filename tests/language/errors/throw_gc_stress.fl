@@ -1,0 +1,47 @@
+# Errors while the collector is busy.
+#
+# The stress build (make stress) collects on every allocation, so this file is
+# what proves an error value, a handler and the stack are all still consistent
+# when a collection runs in the middle of unwinding. The closure-heavy version
+# is closure_throw.fl; this one is the same idea with plain data.
+
+fn build_garbage(n) {
+	let out = []
+	let i = 0
+	while i < n {
+		push(out, [i, str(i), {k: i}])
+		i += 1
+	}
+	return out
+}
+
+let kept = build_garbage(64)
+
+for i in 0..200 {
+	try {
+		if i % 7 == 0 {
+			throw Error("synthetic failure " + str(i))
+		}
+		let xs = build_garbage(8)
+		print(xs[0][0])
+	} catch e {
+		if i % 7 == 0 {
+			print("caught " + e.message)
+		}
+	}
+}
+
+print(kept[0][0])
+print(kept[63][0])
+
+# the error table survives a collection of everything around it
+try {
+	throw ValueError("still here")
+} catch e {
+	for i in 0..100 {
+		let junk = build_garbage(4)
+		junk[0][0]
+	}
+	print(e.type)
+	print(e.message)
+}

@@ -1,0 +1,62 @@
+# environment
+  cpu        12th Gen Intel(R) Core(TM) i5-1235U
+  kernel     Linux-7.2.8-2-cachyos-x86_64-with-glibc2.44
+  machine    x86_64
+  compiler   cc (GCC) 16.2.1 20260810
+  python     3.14.7
+  flint      Flint v0.7.0-2-g1de9615-dirty
+
+case              median      best   checksum
+----------------------------------------------------
+arith              1.32s     1.31s   400000000000000
+arith_add        926.6ms   905.4ms   199999990000000
+arith_div        247.0ms   239.2ms   16002164.035301253
+arith_mod        163.6ms   155.4ms   8999994
+arith_mul         89.9ms    87.3ms   7.389041319626742
+call_direct      131.2ms   126.3ms   2000001000000
+call_native      101.2ms    96.7ms   5888890
+call_nested      168.2ms   163.0ms   812500
+calls            173.7ms   167.1ms   3000000
+closure_call     104.6ms    97.3ms   2000001
+closures         115.0ms   108.8ms   2000000
+coalesce         390.3ms   373.8ms   6249995000000
+compare          316.1ms   301.5ms   0
+expr              0.67ms    0.53ms   
+fib               20.1ms    17.1ms   196418
+float            152.8ms   147.2ms   15.491338344866602
+hello             0.58ms    0.47ms   hello, world
+json_parse_big    8.52ms    6.11ms   4000
+json_parse_small    0.63ms    0.54ms   5
+json_roundtrip    8.39ms    6.15ms   23994000
+json_write_big    21.8ms    20.3ms   1174084
+json_write_small    0.77ms    0.62ms   38
+list_build        50.1ms    48.1ms   1000000
+list_index        57.2ms    55.4ms   124999750000
+list_iter         32.8ms    31.1ms   89999700000
+lists            119.4ms   111.7ms   1499998500000
+mem_alloc         65.8ms    63.3ms   124999750000
+mem_retain       161.8ms   154.6ms   300000
+range_loop       174.4ms   166.1ms   12499997500000
+startup           0.69ms    0.56ms   
+str_ascii         22.4ms    16.0ms   16000000
+str_concat        23.2ms    18.5ms   20000
+str_concat_small    56.4ms    51.8ms   200000
+str_equal        130.3ms   118.8ms   2000000
+str_find          30.0ms    28.3ms   300000
+str_find_miss    122.5ms   115.2ms   0
+str_fmt           41.2ms    37.7ms   2859685
+str_ident         24.1ms    21.7ms   11000000
+str_join          5.03ms    3.46ms   249999
+str_long_equal    23.0ms    21.8ms   200000
+str_prefix        70.9ms    65.8ms   1000000
+str_replace       2.63ms    2.03ms   100000
+str_split         3.98ms    2.86ms   20000
+str_temp          34.0ms    32.2ms   1888890
+str_unequal       93.6ms    84.4ms   0
+str_utf8          41.9ms    39.6ms   24500000
+strings           89.0ms    82.9ms   2088889
+table_access     496.7ms   468.1ms   10000
+table_build       27.7ms    25.3ms   200000
+table_field      112.1ms   106.7ms   15000000
+table_iter       461.9ms   451.0ms   199990000
+tinyfn            0.77ms    0.64ms   1000

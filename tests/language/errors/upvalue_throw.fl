@@ -1,0 +1,73 @@
+# An error raised from a closure, out of a frame that has already returned.
+#
+# The upvalue case, which is the one GC-stress builds exist for: the closure
+# outlives the frame, its captured variables have been moved to the heap, and
+# an error raised inside it has to unwind through a frame that no longer has
+# the closure on its stack.
+
+fn make_raiser(name) {
+	let calls = 0
+	return fn() {
+		calls += 1
+		if calls < 3 {
+			throw "not yet"
+		}
+		return name + " ok after " + str(calls)
+	}
+}
+
+let r = make_raiser("thing")
+
+# the closure is alive, its frame is not, and an error still routes correctly
+try {
+	print(r())
+} catch e {
+	print("caught: " + e)
+}
+try {
+	print(r())
+} catch e {
+	print("caught: " + e)
+}
+print(r())
+
+# many such closures, many failures, interleaved with allocation so the
+# collector has reasons to move things
+let raisers = []
+let i = 0
+while i < 10 {
+	let captured = i
+	push(raisers, make_raiser("raiser " + str(captured)))
+	i += 1
+}
+
+let caught_count = 0
+for r2 in raisers {
+	for attempt in 0..3 {
+		try {
+			print(r2())
+		} catch e {
+			caught_count += 1
+		}
+	}
+}
+print(caught_count)
+
+# a closure that throws while its captured variable is being written
+fn writer() {
+	let value = 0
+	let setter = fn(x) {
+		value = x
+		throw "wrote " + str(x)
+	}
+	let getter = fn() { return value }
+	return [setter, getter]
+}
+
+let w = writer()
+try {
+	w[0](42)
+} catch e {
+	print("caught: " + e)
+}
+print(w[1]())

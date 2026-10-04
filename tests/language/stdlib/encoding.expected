@@ -1,0 +1,15 @@
+68656c6c6f
+hello
+aGVsbG8=
+hello
+
+
+a+b%26c
+a b&c
+caught: hex input must have an even number of characters.
+caught: hex input contains a non-hex character.
+caught: base64 input contains an invalid character.
+caught: url input ends with an incomplete escape.
+a+b c%d
+xyzzy
+round trip

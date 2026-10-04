@@ -1,0 +1,5 @@
+[line 3] Error at end: expect expression.
+
+error: could not compile due to 1 error
+only tables have fields.
+[line 9] in script

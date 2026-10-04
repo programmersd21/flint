@@ -110,6 +110,15 @@ typedef struct Compiler {
 	CompilerUpvalue upvalues[MAX_UPVALUES];
 
 	int scope_depth;
+
+	/*
+	 * How many try blocks are open in the function this compiler is
+	 * building. Each one emitted an OP_TRY/OP_POP_HANDLER pair, and
+	 * break/continue/return crossing one has to retire its handler
+	 * first, because the handler stack is dynamic while those jumps
+	 * are static.
+	 */
+	int try_depth;
 } Compiler;
 
 /*
@@ -126,6 +135,7 @@ typedef struct LoopContext {
 	int break_count;
 	int continue_jumps[256];
 	int continue_count;
+	int try_depth; /* try blocks open when this loop began */
 } LoopContext;
 
 /* how many diagnostics before we stop and summarise instead. a file with
@@ -170,6 +180,12 @@ typedef struct {
 	 * expression_statement() */
 	bool echo_repl_value;
 	bool left_value_on_stack;
+
+	/* how many try bodies this compile is inside. An import inside a
+	 * try may legitimately end up unused: the module can throw before
+	 * the binding is ever read, and reporting that as a dead import
+	 * would be wrong. */
+	int try_nesting;
 } CompilerState;
 
 static CompilerState state;
@@ -218,6 +234,9 @@ typedef struct {
 	int line;
 	uint32_t offset;
 	bool used;
+	/* inside a try body: the binding may legitimately go unused
+	 * because the module threw before it could be used */
+	bool in_try;
 } ImportEntry;
 
 #define FL_MAX_IMPORTS 64
@@ -602,6 +621,7 @@ static void init_compiler(Compiler *compiler, FunctionType type)
 	compiler->type = type;
 	compiler->local_count = 0;
 	compiler->scope_depth = 0;
+	compiler->try_depth = 0;
 	compiler->function = new_function(state.vm);
 	state.current = compiler;
 
@@ -954,6 +974,8 @@ static void expression(void);
 static void statement(void);
 static void declaration(void);
 static void let_destructure(bool is_const);
+static void fn_declaration(void);
+static void anonymous_function(bool can_assign);
 static void block(void);
 static ParseRule *get_rule(TokenType type);
 static void parse_precedence(Precedence precedence);
@@ -1401,7 +1423,17 @@ static void list_literal(bool can_assign)
 		do {
 			expression();
 			count++;
-		} while (match(TOKEN_COMMA));
+			/*
+			 * A trailing comma is allowed: `[1, 2,]` is a
+			 * two-element list. A literal written across
+			 * lines almost always ends in a comma, and
+			 * rejecting that made the shape people actually
+			 * type the one shape that did not parse. The
+			 * `]` is what ends the list either way, so the
+			 * loop condition is the comma *and* not the
+			 * closer.
+			 */
+		} while (match(TOKEN_COMMA) && !check(TOKEN_RIGHT_BRACKET));
 	}
 	consume(TOKEN_RIGHT_BRACKET, "expect ']' after list.");
 	if (count > 255)
@@ -1476,7 +1508,9 @@ static void table_literal(bool can_assign)
 			expression();
 			emit_indexed(
 			        OP_SET_FIELD_TOP, OP_SET_FIELD_TOP_LONG, name);
-		} while (match(TOKEN_COMMA));
+			/* trailing comma, for the same reason as a list:
+			 * see list_literal() */
+		} while (match(TOKEN_COMMA) && !check(TOKEN_RIGHT_BRACE));
 	}
 	consume(TOKEN_RIGHT_BRACE, "expect '}' after table literal.");
 }
@@ -1530,7 +1564,7 @@ static ParseRule rules[] = {
         [TOKEN_ELSE] = {NULL, NULL, PREC_NONE},
         [TOKEN_EXPORT] = {NULL, NULL, PREC_NONE},
         [TOKEN_FALSE] = {literal, NULL, PREC_NONE},
-        [TOKEN_FN] = {NULL, NULL, PREC_NONE},
+        [TOKEN_FN] = {anonymous_function, NULL, PREC_NONE},
         [TOKEN_FOR] = {NULL, NULL, PREC_NONE},
         [TOKEN_IF] = {NULL, NULL, PREC_NONE},
         [TOKEN_IMPORT] = {NULL, NULL, PREC_NONE},
@@ -1597,6 +1631,60 @@ static void emit_close_upvalues_to(int depth)
 	}
 }
 
+/*
+ * try { ... } catch err { ... }
+ *
+ * OP_TRY pushes a handler and the catch block doubles as the jump target
+ * for errors. OP_POP_HANDLER retires the handler when the body completes
+ * normally. The catch clause binds the error value as an ordinary local:
+ * when the VM unwinds to the handler it pushes the error value at exactly
+ * the stack depth the try block began, which is where the catch body's
+ * first local belongs. No binding, and an OP_POP discards it instead.
+ */
+static void try_statement(void)
+{
+	consume(TOKEN_LEFT_BRACE, "expect '{' after try.");
+
+	int jump = emit_jump(OP_TRY);
+	state.current->try_depth++;
+	state.try_nesting++;
+	begin_scope();
+	block();
+	state.try_nesting--;
+	end_scope();
+	state.current->try_depth--;
+	emit_byte(OP_POP_HANDLER);
+	int skip = emit_jump(OP_JUMP);
+
+	patch_jump(jump);
+
+	if (!match(TOKEN_CATCH)) {
+		error("expect 'catch' after try block.");
+		return;
+	}
+	begin_scope();
+	bool have_binding = match(TOKEN_IDENTIFIER);
+	Token name = state.parser.previous;
+	if (!have_binding)
+		emit_byte(OP_POP);
+	else {
+		add_local(name, false);
+		mark_initialized();
+	}
+	consume(TOKEN_LEFT_BRACE, "expect '{' after catch.");
+	block();
+	end_scope();
+	patch_jump(skip);
+}
+
+/* throw expr: raise the value to the innermost handler, or the top. */
+static void throw_statement(void)
+{
+	expression();
+	emit_byte(OP_THROW);
+	consume_terminator();
+}
+
 static void print_statement(void)
 {
 	consume(TOKEN_LEFT_PAREN, "expect '(' after 'print'.");
@@ -1657,6 +1745,7 @@ static void while_statement(void)
 {
 	LoopContext loop;
 	loop.enclosing = state.loop;
+	loop.try_depth = state.current->try_depth;
 	loop.scope_depth = state.current->scope_depth;
 	loop.start = current_chunk()->count;
 	loop.continue_target = loop.start; /* re-test the condition */
@@ -1744,11 +1833,25 @@ static void for_statement(void)
 				      "variables; ranges yield one value.");
 				return;
 			}
-			/* stack: [start] then [start][end] */
+			/* stack: [start] then [start][end], then
+			 * [start][end][step] when a step was written */
 			expression();
 
-			/* the user's variable takes the start slot, and a
-			 * hidden local takes the end. */
+			/*
+			 * `a..b..s` steps the range. The step defaults to 1
+			 * and its sign decides both the comparison and the
+			 * direction, so the loop below branches on the sign
+			 * rather than being compiled twice: a step is usually a
+			 * literal, but it can be a variable, and two copies
+			 * of this loop would have to agree about everything
+			 * else.
+			 */
+			bool has_step = match(TOKEN_DOT_DOT);
+			if (has_step)
+				expression();
+
+			/* the user's variable takes the start slot, and hidden
+			 * locals take the end and the step. */
 			add_local(var_name, false);
 			mark_initialized();
 			Token hidden = {TOKEN_IDENTIFIER,
@@ -1760,8 +1863,22 @@ static void for_statement(void)
 			add_local(hidden, false);
 			mark_initialized();
 
+			/* the step is on the stack only when it was written;
+			 * otherwise the constant one goes here. */
+			if (!has_step)
+				emit_constant(NUMBER_VAL(1));
+			Token hidden_step = {TOKEN_IDENTIFIER,
+			        " step",
+			        5,
+			        var_name.line,
+			        false,
+			        var_name.offset};
+			add_local(hidden_step, false);
+			mark_initialized();
+
 			LoopContext loop;
 			loop.enclosing = state.loop;
+			loop.try_depth = state.current->try_depth;
 			loop.scope_depth = state.current->scope_depth;
 			loop.start = current_chunk()->count;
 			/* the increment is emitted below, so no single offset
@@ -1771,16 +1888,71 @@ static void for_statement(void)
 			loop.continue_count = 0;
 			state.loop = &loop;
 
-			int var_slot = state.current->local_count - 2;
-			int end_slot = state.current->local_count - 1;
+			int var_slot = state.current->local_count - 3;
+			int end_slot = state.current->local_count - 2;
+			int step_slot = state.current->local_count - 1;
 
-			/* condition: var < end */
+			if (has_step) {
+				/* a zero step never reaches the end, so
+				 * it is refused before the loop rather
+				 * than hanging the program inside it. */
+				emit_bytes(OP_GET_LOCAL, (uint8_t)step_slot);
+				emit_constant(NUMBER_VAL(0));
+				emit_byte(OP_EQUAL);
+				int ok = emit_jump(OP_JUMP_IF_FALSE);
+				emit_byte(OP_POP);
+				/*
+				 * Raises from a native so the error has the
+				 * standard table shape with `type` and
+				 * `message`, like every other runtime error,
+				 * rather than a bare thrown string. A script
+				 * that does `catch e { e.message }` then sees
+				 * the same thing it sees for any runtime
+				 * failure.
+				 */
+				int fn = identifier_constant_from(
+				        "__range_step_error", 18);
+				emit_indexed(
+				        OP_GET_GLOBAL, OP_GET_GLOBAL_LONG, fn);
+				emit_bytes(OP_CALL, 0);
+				emit_byte(OP_POP);
+				patch_jump(ok);
+				emit_byte(OP_POP);
+			}
+
+			/*
+			 * condition: step >= 0 ? var < end : var > end
+			 *
+			 * step < 0 means descending (var > end), otherwise
+			 * ascending (var < end). The check is per-iteration
+			 * because step can be a variable.
+			 */
+			emit_bytes(OP_GET_LOCAL, (uint8_t)step_slot);
+			emit_constant(NUMBER_VAL(0));
+			emit_byte(OP_LESS);
+
+			int descending = emit_jump(OP_JUMP_IF_FALSE);
+			emit_byte(OP_POP);
+
+			/* step < 0 -> descending: check var > end */
+			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
+			emit_bytes(OP_GET_LOCAL, (uint8_t)end_slot);
+			emit_byte(OP_GREATER);
+			int descending_exit = emit_jump(OP_JUMP_IF_FALSE);
+			emit_byte(OP_POP);
+			int to_body = emit_jump(OP_JUMP);
+
+			patch_jump(descending);
+			emit_byte(OP_POP);
+
+			/* step >= 0 -> ascending: check var < end */
 			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
 			emit_bytes(OP_GET_LOCAL, (uint8_t)end_slot);
 			emit_byte(OP_LESS);
-
-			int exit_jump = emit_jump(OP_JUMP_IF_FALSE);
+			int ascending_exit = emit_jump(OP_JUMP_IF_FALSE);
 			emit_byte(OP_POP);
+
+			patch_jump(to_body);
 
 			consume(TOKEN_LEFT_BRACE,
 			        "expect '{' after for range.");
@@ -1791,15 +1963,16 @@ static void for_statement(void)
 			for (int i = 0; i < loop.continue_count; i++)
 				patch_jump(loop.continue_jumps[i]);
 
-			/* increment: var = var + 1 */
+			/* increment: var = var + step */
 			emit_bytes(OP_GET_LOCAL, (uint8_t)var_slot);
-			emit_constant(NUMBER_VAL(1));
+			emit_bytes(OP_GET_LOCAL, (uint8_t)step_slot);
 			emit_byte(OP_ADD);
 			emit_bytes(OP_SET_LOCAL, (uint8_t)var_slot);
 			emit_byte(OP_POP);
 
 			emit_loop(loop.start);
-			patch_jump(exit_jump);
+			patch_jump(ascending_exit);
+			patch_jump(descending_exit);
 			emit_byte(OP_POP);
 
 			for (int i = 0; i < loop.break_count; i++)
@@ -1859,6 +2032,7 @@ static void for_statement(void)
 
 			LoopContext loop;
 			loop.enclosing = state.loop;
+			loop.try_depth = state.current->try_depth;
 			loop.scope_depth = state.current->scope_depth;
 			loop.start = current_chunk()->count;
 			loop.continue_target = -1;
@@ -1951,6 +2125,7 @@ static void for_statement(void)
 
 		LoopContext loop;
 		loop.enclosing = state.loop;
+		loop.try_depth = state.current->try_depth;
 		loop.scope_depth = state.current->scope_depth;
 		loop.start = current_chunk()->count;
 		loop.continue_target = -1;
@@ -2022,6 +2197,15 @@ static void break_statement(void)
 
 	emit_close_upvalues_to(state.loop->scope_depth);
 
+	/*
+	 * break jumps to the loop's end, so every try block opened
+	 * inside the loop since it began has to retire its handler.
+	 * Exactly the trys lexically between this break and the loop.
+	 */
+	for (int i = state.current->try_depth - state.loop->try_depth; i > 0;
+	        i--)
+		emit_byte(OP_POP_HANDLER);
+
 	/* the offsets are patched once the loop body is complete */
 	if (state.loop->break_count >= 256) {
 		error("too many break statements in loop.");
@@ -2045,6 +2229,12 @@ static void continue_statement(void)
 	}
 
 	emit_close_upvalues_to(state.loop->scope_depth);
+
+	/* retire the handlers of trys between here and the loop head */
+	for (int i = state.current->try_depth - state.loop->try_depth; i > 0;
+	        i--)
+		emit_byte(OP_POP_HANDLER);
+
 	if (state.loop->continue_target == -1) {
 		if (state.loop->continue_count >= 256) {
 			error("too many continue statements in loop.");
@@ -2064,12 +2254,22 @@ static void return_statement(void)
 	if (state.current->type == TYPE_SCRIPT)
 		error("can't return from top-level code.");
 
-	/* `return` with nothing after it is return nil */
+	/*
+	 * The return value is computed first, then the handlers are
+	 * retired. The other order looks equivalent and is not: an error
+	 * raised while computing the value has to reach a handler in this
+	 * function, and a handler already popped is a handler that is
+	 * gone. `try { return [][1] } catch e {}` has to catch.
+	 */
 	if (check(TOKEN_SEMICOLON) || check(TOKEN_RIGHT_BRACE) ||
 	        state.parser.current.newline_before || check(TOKEN_EOF)) {
+		for (int i = 0; i < state.current->try_depth; i++)
+			emit_byte(OP_POP_HANDLER);
 		emit_return();
 	} else {
 		expression();
+		for (int i = 0; i < state.current->try_depth; i++)
+			emit_byte(OP_POP_HANDLER);
 		emit_byte(OP_RETURN);
 	}
 	consume_terminator();
@@ -2122,6 +2322,10 @@ static void statement(void)
 		continue_statement();
 	} else if (match(TOKEN_RETURN)) {
 		return_statement();
+	} else if (match(TOKEN_TRY)) {
+		try_statement();
+	} else if (match(TOKEN_THROW)) {
+		throw_statement();
 	} else if (match(TOKEN_LEFT_BRACE)) {
 		/* a bare block is a scope */
 		begin_scope();
@@ -2146,13 +2350,19 @@ static void statement(void)
  * captured variable: 1 for a local slot in this frame, 0 for an upvalue of
  * this closure. That is exactly what resolve_upvalue() recorded.
  */
-static void fn_declaration(void)
+/*
+ * The parameter list and body of a function, for both spellings:
+ * `fn name(a, b) { ... }` and the anonymous expression `fn(a, b) { ... }`.
+ *
+ * The compiler is on the stack when this returns, and the caller's
+ * `end_compiler()` pops it. `compiler` is where the upvalue descriptors
+ * land, and the caller emits them right after OP_CLOSURE.
+ */
+static void fn_signature(Compiler *compiler, Token name)
 {
-	int global = parse_variable("expect function name.", false);
-	mark_initialized();
-
-	Compiler compiler;
-	init_compiler(&compiler, TYPE_FUNCTION);
+	init_compiler(compiler, TYPE_FUNCTION);
+	compiler->function->name =
+	        copy_string(state.vm, name.start, name.length);
 	begin_scope();
 
 	consume(TOKEN_LEFT_PAREN, "expect '(' after function name.");
@@ -2171,6 +2381,17 @@ static void fn_declaration(void)
 	consume(TOKEN_RIGHT_PAREN, "expect ')' after parameters.");
 	consume(TOKEN_LEFT_BRACE, "expect '{' before function body.");
 	block();
+}
+
+static void fn_declaration(void)
+{
+	int global = parse_variable("expect function name.", false);
+	mark_initialized();
+
+	Compiler compiler;
+	/* the name token the function was declared with, for the trace */
+	Token name = state.parser.previous;
+	fn_signature(&compiler, name);
 
 	ObjFunction *function = end_compiler();
 	int constant = make_constant(OBJ_VAL(function));
@@ -2183,6 +2404,32 @@ static void fn_declaration(void)
 	}
 
 	define_variable(global, false);
+}
+
+/*
+ * fn(a, b) { ... } as an expression, so a function can be a value:
+ * passed to another function, returned from one, or stored in a list.
+ *
+ * The value is the closure itself, on the stack, exactly where an
+ * expression is expected. `<anonymous>` is the name a stack trace shows:
+ * there is no name in the source to show, and an empty one would print
+ * as a bare `()`, which reads like a mistake.
+ */
+static void anonymous_function(bool can_assign)
+{
+	(void)can_assign;
+	Token anon = token_string("<anonymous>");
+
+	Compiler compiler;
+	fn_signature(&compiler, anon);
+
+	ObjFunction *function = end_compiler();
+	int constant = make_constant(OBJ_VAL(function));
+	emit_indexed(OP_CLOSURE, OP_CLOSURE_LONG, constant);
+	for (int i = 0; i < function->upvalue_count; i++) {
+		emit_byte(compiler.upvalues[i].is_local ? 1 : 0);
+		emit_byte(compiler.upvalues[i].index);
+	}
 }
 
 /* let, with or without an initializer. no initializer means nil. */
@@ -2450,6 +2697,7 @@ static void import_record(const char *name, int length, const Token *path)
 	imports[import_count].line = path->line;
 	imports[import_count].offset = path->offset;
 	imports[import_count].used = false;
+	imports[import_count].in_try = state.try_nesting > 0;
 	import_count++;
 }
 
@@ -2511,7 +2759,7 @@ static void import_check_unused(void)
 		}
 	}
 	for (size_t i = 0; i < import_count; i++) {
-		if (imports[i].used)
+		if (imports[i].used || imports[i].in_try)
 			continue;
 		Token at = {
 		        TOKEN_IDENTIFIER,
@@ -2652,16 +2900,22 @@ static void import_declaration(void)
 		 * Drop the extension. `stop` walks back from the end of the
 		 * component to its last '.', but only when that leaves a name
 		 * behind -- ".fl" must not reduce to nothing, and "a.b.fl" is
-		 * `a.b` rather than `a`.
+		 * `a.b` rather than `a`. With no dot at all the whole
+		 * component is the name: "shapes" binds `shapes`, not `s`.
 		 */
 		const char *stop = end;
 		while (stop > slash + 1 && stop[-1] != '.')
 			stop--;
 		/* back off the dot itself. the loop above stops with `stop`
 		 * one past the '.', because the test reads stop[-1] before
-		 * the decrement, so leaving it there yields "geometry." */
+		 * the decrement, so leaving it there yields "geometry.". when
+		 * the loop stopped for lack of a dot rather than finding one,
+		 * `stop` is at slash + 1 and the whole component -- which is
+		 * what `n` below must measure -- is kept. */
 		if (stop < end && stop[-1] == '.')
 			stop--;
+		else if (stop == slash + 1)
+			stop = end;
 		size_t n = (size_t)(stop - slash);
 		if (n >= sizeof(derived))
 			n = sizeof(derived) - 1;

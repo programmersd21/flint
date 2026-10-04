@@ -1,0 +1,9 @@
+# A quoted import with no extension binds the whole component.
+#
+# `import "./plainmod"` used to bind `p` -- the derivation walked back
+# looking for a dot it never found and stopped one character in. A path with
+# no dot has no extension to drop, so the full last component is the name.
+# (A slash-less name with no extension is a library name and resolves to the
+# standard library instead; that is why this import spells `./`.)
+import "./plainmod"
+print(plainmod.double(21))

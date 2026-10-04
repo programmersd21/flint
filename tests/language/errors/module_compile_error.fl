@@ -1,0 +1,9 @@
+# A syntax error in an imported module is still a compile error.
+#
+# try/catch is about run time. A file that does not parse never ran, so there
+# is nothing to catch: the import fails to compile and the importing script
+# does not start.
+
+import "syntax_error_mod.fl" as broken
+
+print(broken.never_reached)

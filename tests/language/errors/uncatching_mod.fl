@@ -1,0 +1,19 @@
+# A module whose import failure is not caught locally.
+#
+# The error raised by throwing_mod.fl has no handler in this module, so it
+# propagates to module_throw.fl's try. The trace names the file that raised it,
+# not this one and not the importer.
+#
+# The import is inside a try for the same reason as in catching_mod.fl: an
+# import that can fail has nothing to bind, so reporting it as an unused import
+# would be a second error about the same thing.
+
+export let ok = false
+let inner_module = "never loaded"
+
+try {
+	import "throwing_mod.fl" as inner
+	inner_module = "loaded"
+} catch e {
+	throw e
+}

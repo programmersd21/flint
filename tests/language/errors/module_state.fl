@@ -1,0 +1,26 @@
+# An error crossing a module boundary, with the module keeping state.
+#
+# state_mod.fl is imported by cross_feature.fl too, and imports are cached:
+# this file proves the second import gets the same module with the same
+# counters, and that an error inside it does not reset them.
+
+import "state_mod.fl" as a
+import "state_mod.fl" as b
+
+print(a.increment())
+print(b.increment())
+print(a.increment())
+
+# an error inside the module leaves its state alone
+try {
+	a.explode()
+} catch e {
+	print("caught: " + e.message)
+}
+
+print(a.value())
+print(b.value())
+
+# and the module is still usable, from either binding
+print(b.increment())
+print(a.describe())

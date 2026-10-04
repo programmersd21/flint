@@ -1,0 +1,59 @@
+# args -- the command line your script was called with.
+#
+#     import args as argv
+#     print(argv.count())
+#     print(argv.get(0))
+#
+# the alias is not optional style: a bare `import args` binds `args` in your
+# globals, which shadows the builtin `args()` this module is built on, and
+# every function below then tries to call a table. alias it and both names
+# stay usable.
+#
+
+export fn all() {
+    return args()
+}
+
+export fn count() {
+    return len(args())
+}
+
+# get(i) returns the i-th argument, or nil when it does not exist. nil rather
+# than an error, because asking for an optional argument is a normal case and
+# the caller can branch on the result.
+export fn get(i) {
+    let xs = args()
+    if i < 0 or i >= len(xs) {
+        return nil
+    }
+    return xs[i]
+}
+
+# has(flag) says whether an argument equal to the flag appeared. the point is
+# that it is exact matching, not substring matching: "--verbose" does not
+# answer for "--ver".
+export fn has(flag) {
+    let xs = args()
+    let i = 0
+    while i < len(xs) {
+        if xs[i] == flag {
+            return true
+        }
+        i += 1
+    }
+    return false
+}
+
+# value(flag) returns the argument after flag, or nil if flag is absent or
+# last. `flint app.fl --config production.toml` -> "production.toml".
+export fn value(flag) {
+    let xs = args()
+    let i = 0
+    while i < len(xs) - 1 {
+        if xs[i] == flag {
+            return xs[i + 1]
+        }
+        i += 1
+    }
+    return nil
+}

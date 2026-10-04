@@ -1,0 +1,76 @@
+# Errors from the standard library.
+#
+# A runtime error from a C builtin or a library module is a value like any
+# other, so the same catch handles a wrong argument, a missing file and a failed
+# parse. What the library does not do is hand back an error code: a function
+# that can fail either raises or succeeds, and there is no third answer.
+
+import json
+
+# --- json ---
+#
+# parse is the one that fails on input, so it is the one that needs a catch on
+# anything a user typed or a network produced.
+
+let good = json.parse("{\"name\": \"flint\", \"version\": 1}")
+print(good.name)
+print(good.version)
+
+try {
+	json.parse("{")
+} catch e {
+	print("parse failed: " + e.message)
+}
+
+# a helper that parses or says why, which is what a program actually wants
+fn parse_or(text, fallback) {
+	try {
+		return json.parse(text)
+	} catch e {
+		return fallback
+	}
+}
+
+print(parse_or("{\"a\": 1}", "none").a)
+print(parse_or("nonsense", "none"))
+
+# stringify refuses what it cannot represent, rather than producing something
+# that is not json
+try {
+	json.stringify(fn() { return 1 })
+} catch e {
+	print("caught: " + e.message)
+}
+
+# a file that does not exist. the path is absolute so the test does not depend
+# on the working directory
+try {
+	read_file("/nonexistent-directory-for-tests/no-such-file")
+} catch e {
+	print("caught a missing file")
+}
+
+# an error value is an ordinary table: `type` and `message` are data rather
+# than text, so an error can be passed, stored and inspected.
+fn describe(f) {
+	try {
+		f()
+	} catch e {
+		return e.type + ": " + e.message
+	}
+	return "no error"
+}
+
+print(describe(fn() { throw TypeError("t") }))
+print(describe(fn() { return 1 }))
+
+# a rethrow: catch one error, raise another from the handler
+try {
+	try {
+		throw IOError("first")
+	} catch e {
+		throw ValueError("second: " + e.message)
+	}
+} catch e {
+	print("caught: " + e.message)
+}

@@ -1,0 +1,129 @@
+# ansi -- terminal escape codes, as constants and small builders.
+#
+#     import ansi
+#     print(ansi.red("nope") + ansi.ANSI_RESET)
+#
+# every code is a plain string, so they compose with `+` like anything else.
+# nothing here touches the terminal. whether the other end interprets the
+# bytes is up to it; pipe this into a file and you get the codes in the file.
+# names follow the code they wrap: `ANSI_RED` is "31m", `ANSI_CURSOR_UP` moves
+# one line, and the `ANSI_fg256`/`ANSI_RGB` builders take numbers.
+
+export const ANSI_ESC = ""
+export const ANSI_CSI = ANSI_ESC + "["
+
+export const ANSI_RESET = ANSI_CSI + "0m"
+
+export const ANSI_BOLD          = ANSI_CSI + "1m"
+export const ANSI_DIM           = ANSI_CSI + "2m"
+export const ANSI_ITALIC        = ANSI_CSI + "3m"
+export const ANSI_UNDERLINE     = ANSI_CSI + "4m"
+export const ANSI_BLINK         = ANSI_CSI + "5m"
+export const ANSI_REVERSE       = ANSI_CSI + "7m"
+export const ANSI_HIDDEN        = ANSI_CSI + "8m"
+export const ANSI_STRIKE        = ANSI_CSI + "9m"
+export const ANSI_DUNDERLINE    = ANSI_CSI + "21m"
+export const ANSI_OVERLINE      = ANSI_CSI + "53m"
+
+export const ANSI_NO_BOLD       = ANSI_CSI + "22m"
+export const ANSI_NO_DIM        = ANSI_CSI + "22m"
+export const ANSI_NO_ITALIC     = ANSI_CSI + "23m"
+export const ANSI_NO_UNDERLINE  = ANSI_CSI + "24m"
+export const ANSI_NO_BLINK      = ANSI_CSI + "25m"
+export const ANSI_NO_REVERSE    = ANSI_CSI + "27m"
+export const ANSI_NO_HIDDEN     = ANSI_CSI + "28m"
+export const ANSI_NO_STRIKE     = ANSI_CSI + "29m"
+export const ANSI_NO_OVERLINE   = ANSI_CSI + "55m"
+
+export const ANSI_BLACK         = ANSI_CSI + "30m"
+export const ANSI_RED           = ANSI_CSI + "31m"
+export const ANSI_GREEN         = ANSI_CSI + "32m"
+export const ANSI_YELLOW        = ANSI_CSI + "33m"
+export const ANSI_BLUE          = ANSI_CSI + "34m"
+export const ANSI_MAGENTA       = ANSI_CSI + "35m"
+export const ANSI_CYAN          = ANSI_CSI + "36m"
+export const ANSI_WHITE         = ANSI_CSI + "37m"
+export const ANSI_DEFAULT_FG    = ANSI_CSI + "39m"
+
+export const ANSI_BRIGHT_BLACK   = ANSI_CSI + "90m"
+export const ANSI_BRIGHT_RED     = ANSI_CSI + "91m"
+export const ANSI_BRIGHT_GREEN   = ANSI_CSI + "92m"
+export const ANSI_BRIGHT_YELLOW  = ANSI_CSI + "93m"
+export const ANSI_BRIGHT_BLUE    = ANSI_CSI + "94m"
+export const ANSI_BRIGHT_MAGENTA = ANSI_CSI + "95m"
+export const ANSI_BRIGHT_CYAN    = ANSI_CSI + "96m"
+export const ANSI_BRIGHT_WHITE   = ANSI_CSI + "97m"
+export const ANSI_GRAY           = ANSI_CSI + "90m"
+
+export const ANSI_BG_BLACK      = ANSI_CSI + "40m"
+export const ANSI_BG_RED        = ANSI_CSI + "41m"
+export const ANSI_BG_GREEN      = ANSI_CSI + "42m"
+export const ANSI_BG_YELLOW     = ANSI_CSI + "43m"
+export const ANSI_BG_BLUE       = ANSI_CSI + "44m"
+export const ANSI_BG_MAGENTA    = ANSI_CSI + "45m"
+export const ANSI_BG_CYAN       = ANSI_CSI + "46m"
+export const ANSI_BG_WHITE      = ANSI_CSI + "47m"
+export const ANSI_DEFAULT_BG    = ANSI_CSI + "49m"
+
+export const ANSI_BG_BRIGHT_BLACK   = ANSI_CSI + "100m"
+export const ANSI_BG_BRIGHT_RED     = ANSI_CSI + "101m"
+export const ANSI_BG_BRIGHT_GREEN   = ANSI_CSI + "102m"
+export const ANSI_BG_BRIGHT_YELLOW  = ANSI_CSI + "103m"
+export const ANSI_BG_BRIGHT_BLUE    = ANSI_CSI + "104m"
+export const ANSI_BG_BRIGHT_MAGENTA = ANSI_CSI + "105m"
+export const ANSI_BG_BRIGHT_CYAN    = ANSI_CSI + "106m"
+export const ANSI_BG_BRIGHT_WHITE   = ANSI_CSI + "107m"
+
+export const ANSI_CURSOR_HOME      = ANSI_CSI + "H"
+export const ANSI_CURSOR_SAVE      = ANSI_ESC + "7"
+export const ANSI_CURSOR_RESTORE   = ANSI_ESC + "8"
+export const ANSI_CURSOR_HIDE      = ANSI_CSI + "?25l"
+export const ANSI_CURSOR_SHOW      = ANSI_CSI + "?25h"
+export const ANSI_CURSOR_UP        = ANSI_CSI + "1A"
+export const ANSI_CURSOR_DOWN      = ANSI_CSI + "1B"
+export const ANSI_CURSOR_RIGHT     = ANSI_CSI + "1C"
+export const ANSI_CURSOR_LEFT      = ANSI_CSI + "1D"
+export const ANSI_CURSOR_COL0      = ANSI_CSI + "1G"
+export const ANSI_CURSOR_QUERY     = ANSI_CSI + "6n"
+
+export const ANSI_CLEAR_SCREEN     = ANSI_CSI + "2J"
+export const ANSI_CLEAR_BELOW      = ANSI_CSI + "0J"
+export const ANSI_CLEAR_ABOVE      = ANSI_CSI + "1J"
+export const ANSI_CLEAR_SCROLLBACK = ANSI_CSI + "3J"
+export const ANSI_CLEAR_LINE       = ANSI_CSI + "2K"
+export const ANSI_CLEAR_LINE_END   = ANSI_CSI + "0K"
+export const ANSI_CLEAR_LINE_START = ANSI_CSI + "1K"
+
+export const ANSI_ALT_SCREEN_ON    = ANSI_CSI + "?1049h"
+export const ANSI_ALT_SCREEN_OFF   = ANSI_CSI + "?1049l"
+export const ANSI_wrap_OFF         = ANSI_CSI + "?7l"
+export const ANSI_wrap_ON          = ANSI_CSI + "?7h"
+
+export fn ANSI_fg256(n) { return ANSI_CSI + "38;5;" + str(n) + "m" }
+export fn ANSI_bg256(n) { return ANSI_CSI + "48;5;" + str(n) + "m" }
+
+export fn ANSI_RGB(r, g, b) { return ANSI_CSI + "38;2;" + str(r) + ";" + str(g) + ";" + str(b) + "m" }
+export fn ANSI_bg_RGB(r, g, b) { return ANSI_CSI + "48;2;" + str(r) + ";" + str(g) + ";" + str(b) + "m" }
+
+export fn ANSI_up(n)    { return ANSI_CSI + str(n) + "A" }
+export fn ANSI_down(n)  { return ANSI_CSI + str(n) + "B" }
+export fn ANSI_right(n) { return ANSI_CSI + str(n) + "C" }
+export fn ANSI_left(n)  { return ANSI_CSI + str(n) + "D" }
+
+export fn ANSI_goto(row, col) { return ANSI_CSI + str(row) + ";" + str(col) + "H" }
+
+export fn ANSI_wrap(s, code) { return code + s + ANSI_RESET }
+
+export fn red(s)       { return ANSI_wrap(s, ANSI_RED) }
+export fn green(s)     { return ANSI_wrap(s, ANSI_GREEN) }
+export fn yellow(s)    { return ANSI_wrap(s, ANSI_YELLOW) }
+export fn blue(s)      { return ANSI_wrap(s, ANSI_BLUE) }
+export fn magenta(s)   { return ANSI_wrap(s, ANSI_MAGENTA) }
+export fn cyan(s)      { return ANSI_wrap(s, ANSI_CYAN) }
+export fn white(s)     { return ANSI_wrap(s, ANSI_WHITE) }
+export fn gray(s)      { return ANSI_wrap(s, ANSI_GRAY) }
+export fn bold(s)      { return ANSI_wrap(s, ANSI_BOLD) }
+export fn dim(s)       { return ANSI_wrap(s, ANSI_DIM) }
+export fn italic(s)    { return ANSI_wrap(s, ANSI_ITALIC) }
+export fn underline(s) { return ANSI_wrap(s, ANSI_UNDERLINE) }
+export fn strike(s)    { return ANSI_wrap(s, ANSI_STRIKE) }

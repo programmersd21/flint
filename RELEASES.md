@@ -1,5 +1,143 @@
 # releases
 
+## v0.8.0
+
+the release that stops treating errors as a stop sign. runtime failures are
+values now, so a script can recover, and a module that throws can be caught
+by the script that imported it. the language picks up three features the
+stdlib and the tests kept needing: anonymous function literals, stepped
+ranges, and trailing commas in multi-line literals.
+
+### recoverable errors
+
+`try`, `catch` and `throw` are in the language. a thrown value is bound by
+the catch clause; a runtime error arrives as a table with `type` and
+`message`, the same shape everywhere a script can fail:
+
+```flint
+try {
+    let xs = [1, 2]
+    print(xs[10])
+} catch e {
+    print(e.type, e.message)
+}
+```
+
+no more. there is no `finally`, and no typed catch. bubbling up unchanged is
+the default path for code that does not care, and an uncaught error still
+prints one message plus one line per frame and exits 70.
+
+constructors name the categories: `Error`, `TypeError`, `ValueError`,
+`IOError`, `NetworkError`, `TimeoutError`, `ProcessError`, `ModuleError`,
+`PackageError`. they are ordinary functions with ordinary arity checks.
+
+runtime errors are categorized too, so a script can branch on the failure
+instead of parsing the message: an index failure is a `ValueError`, a type
+disagreement a `TypeError`, a bad file operation an `IOError`, a module
+problem a `ModuleError`, and only the genuinely unclassified rest a plain
+`Error`. the classification lives in one function over the message prefix,
+so it is one table to read and one place to extend.
+
+errors unwind the stack with frames, so a module whose top level throws
+rolls back cleanly: the importer's bindings are untouched, the failed
+module is remembered as failed, and "imported but never used" is not
+reported for a function of the failing import.
+
+### stepped ranges
+
+`a..b` already walked a range by one. it now takes a step: `a..b..s`.
+
+```flint
+for n in 0..10..2 { print(n) }    # 0, 2, 4, 6, 8
+for n in 10..0..-3 { print(n) }   # 10, 7, 4, 1
+```
+
+a step of zero is an error before the loop runs, not a hang inside it. an
+empty range is fine and runs zero iterations. step can be a negative
+literal, a variable, or any expression that evaluates to a number.
+
+### anonymous functions
+
+`fn` is a declaration and an expression now, so a function can be a value
+without a name:
+
+```flint
+let square = fn(x) { return x * x }
+print(square(5))    # 25
+```
+
+the closure semantics are the same as for `fn name(...)`: capture by
+reference, late binding. a bare name in a function reference does not
+resolve: you still write `fn name() {...}` to bind it first.
+
+### trailing commas
+
+multi-line list and table literals accept a trailing comma now, so adding
+or removing the last entry is a one-line diff instead of a two-line one.
+
+```flint
+let config = {
+    name: "flint",
+    port: 8080,
+    debug: false,
+}
+```
+
+single-line literals with a trailing comma (`[1, 2,]`) are accepted too;
+the comma is not a meaning, it is a prefix that did not get its entry.
+
+### module globals, fixed
+
+a module's own functions can now both read and write module-level globals.
+a closure carrying its defining module's environment is no longer confused
+for the importing module at write time: the write path resolves the
+closure's environment the same way the read path does.
+
+this was a quiet bug. it killed any program where a module function
+updated module-level state and was called from some other module. it did
+not break the old tests because every test that wrote module state also
+read it in the same function, and the read path *was* right.
+
+### stdlib and natives
+
+the builtin surface grows by two: `ord(s)` turns a one-character string
+into its byte value, and `chr(n)` turns a byte value into a one-character
+string. both reject anything that is not obviously a byte.
+
+the standard library grows by two modules:
+
+* `encoding`: base64 encode and decode, hex encode and decode, and url
+  percent-encode/decode. each function is an error on malformed input
+  rather than a silent pass-through.
+* `args`: the script's argv as data: `count()`, `get(i)`, `has(flag)`,
+  `value(flag)`. the checks a `--help` writer actually writes.
+
+it does not grow by regex, raw networking, or a crypto module, all of
+which are the kinds of thing a half-implementation of is worse than no
+implementation. they are listed in docs/limits.md as not present, on
+purpose.
+
+### runtime
+
+`--version --verbose` reports the language version, the bytecode format
+version, the native ABI version, the package format version, the lockfile
+version, and the runtime version, so a script can check what it was shipped
+against.
+
+the release gate for 0.8.0 is: clean build on the normal c11 configuration,
+full test suite, unit tests, diagnostic tests, stress build (gc on every
+allocation, asan and ubsan), the computed-goto interpreter with the same
+suite, formatting and lint gates. all of those are green on this tree.
+
+### docs
+
+the documents that still exist describe what was checked against the code.
+documents that described things that were not there -- native ABI,
+package formats, security guarantees we do not yet back -- were removed
+rather than patched to say "not yet". limits moved into docs/limits.md
+and every entry in it is a behavior the test suite or the source supports
+seeing stated.
+
 ## v0.7.0
 
 a daily-use release. the language learns to talk to the operating system,

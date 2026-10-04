@@ -1,0 +1,70 @@
+# A module assigning to its own private globals.
+#
+# The write path for a global resolved the running module's environment, while
+# the read path resolved the closure's own module. Inside the module's own
+# import the two are the same table, so the bug was invisible there. It
+# appeared the moment a module function was called from outside the module --
+# that is, from any real use of it -- and the assignment reported "undefined
+# variable" for a name the module had just defined.
+#
+# regression: read_ok_write_broken.fl is the smaller version of this.
+
+# --- a counter, read and written, entirely inside the module ---
+
+let count = 0
+let label = "not yet started"
+
+export fn increment() {
+	count += 1
+	label = "ran " + str(count) + " times"
+	return count
+}
+
+export fn value() {
+	return count
+}
+
+export fn describe() {
+	return label
+}
+
+# --- and from the importer, where the module's env is not the running one ---
+
+import "counter_mod.fl" as c
+
+print(c.increment())
+print(c.increment())
+print(c.increment())
+print(c.value())
+print(c.describe())
+
+# the same module imported again is the same module, so the state continues
+import "counter_mod.fl" as c2
+print(c2.increment())
+print(c2.value())
+
+# --- a private name is still private ---
+
+try {
+	c.increment_private
+} catch e {
+	print("caught: " + e.message)
+}
+
+# --- a const is still a const, from inside and outside ---
+
+try {
+	c.bump_const()
+} catch e {
+	print("caught: " + e.message)
+}
+
+# --- and a name that does not exist anywhere is still undefined ---
+
+try {
+	c.no_such_function()
+} catch e {
+	print("caught: " + e.message)
+}
+
+print("done")

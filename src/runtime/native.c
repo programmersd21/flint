@@ -136,6 +136,43 @@ static Value input_native(VM *vm, int argc, Value *argv)
 	return STR_VAL(line);
 }
 
+/* ord(s) -> number: the byte value at a one-character string (0-255). */
+static Value ord_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "argument to ord() must be a string.");
+		return NIL_VAL;
+	}
+	ObjString *s = AS_STRING(argv[0]);
+	if (s->length != 1) {
+		vm_runtime_error(
+		        vm, "argument to ord() must be a single character.");
+		return NIL_VAL;
+	}
+	return NUMBER_VAL((double)(unsigned char)s->chars[0]);
+}
+
+/* chr(n) -> string: a one-character string from a byte value 0-255. */
+static Value chr_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_NUMBER(argv[0]) ||
+	        (double)(int)AS_NUMBER(argv[0]) != AS_NUMBER(argv[0])) {
+		vm_runtime_error(
+		        vm, "argument to chr() must be a whole number.");
+		return NIL_VAL;
+	}
+	int n = (int)AS_NUMBER(argv[0]);
+	if (n < 0 || n > 255) {
+		vm_runtime_error(
+		        vm, "argument to chr() must be between 0 and 255.");
+		return NIL_VAL;
+	}
+	char c = (char)n;
+	return STR_VAL(new_string(vm, &c, 1));
+}
+
 /* strings and lists. byte length for strings, element count for lists. */
 static Value len_native(VM *vm, int argc, Value *argv)
 {
@@ -502,6 +539,19 @@ static Value num_native(VM *vm, int argc, Value *argv)
 	return NUMBER_VAL(result);
 }
 
+/* The zero-step check for `a..b..0`, raised from C so the message and the
+ * error shape come from the same place as every other runtime error. There is
+ * no compiler opcode for it: a range with a zero step would loop forever, and
+ * one call at the top of the loop is cheaper than a new opcode plus a verifier
+ * rule. */
+static Value range_step_error_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	(void)argv;
+	vm_runtime_error(vm, "a range step cannot be zero.");
+	return NIL_VAL;
+}
+
 /* the type name, as a string. type() is the only way to introspect. */
 static Value type_native(VM *vm, int argc, Value *argv)
 {
@@ -517,6 +567,54 @@ static Value type_native(VM *vm, int argc, Value *argv)
 	 */
 	const char *name = flint_type_name(argv[0]);
 	return STR_VAL(copy_string(vm, name, (int)strlen(name)));
+}
+
+/* Error(message) and friends: a table with `type` and `message`, the
+ * shape vm_runtime_error produces for caught-native errors */
+static Value error_make(VM *vm, int argc, Value *argv, const char *type)
+{
+	if (argc != 1 || !IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "%s() takes one string argument.", type);
+		return NIL_VAL;
+	}
+	return fl_error_value(vm, type, AS_CSTRING(argv[0]));
+}
+
+static Value error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "Error");
+}
+static Value type_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "TypeError");
+}
+static Value value_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "ValueError");
+}
+static Value io_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "IOError");
+}
+static Value network_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "NetworkError");
+}
+static Value timeout_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "TimeoutError");
+}
+static Value process_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "ProcessError");
+}
+static Value module_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "ModuleError");
+}
+static Value package_error_ctor(VM *vm, int argc, Value *argv)
+{
+	return error_make(vm, argc, argv, "PackageError");
 }
 
 /*
@@ -804,6 +902,10 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		table_set(vm, &vm->modules, key, FALSE_VAL);
 		vm_pop(vm);
 		free(path);
+		/* surface the module's error in the importing script, so
+		 * try/catch around an import catches module failures */
+		if (vm->has_pending)
+			vm_throw_value(vm, vm->pending_error);
 		return NIL_VAL;
 	}
 
@@ -904,6 +1006,16 @@ static Value slice_native(VM *vm, int argc, Value *argv)
 void register_natives(VM *vm)
 {
 	vm_define_native(vm, "clock", clock_native, 0);
+	vm_define_native(vm, "Error", error_ctor, 1);
+	vm_define_native(vm, "TypeError", type_error_ctor, 1);
+	vm_define_native(vm, "ValueError", value_error_ctor, 1);
+	vm_define_native(vm, "IOError", io_error_ctor, 1);
+	vm_define_native(vm, "NetworkError", network_error_ctor, 1);
+	vm_define_native(vm, "TimeoutError", timeout_error_ctor, 1);
+	vm_define_native(vm, "ProcessError", process_error_ctor, 1);
+	vm_define_native(vm, "ModuleError", module_error_ctor, 1);
+	vm_define_native(vm, "PackageError", package_error_ctor, 1);
+	vm_define_native(vm, "__range_step_error", range_step_error_native, 0);
 	/* -1 for the arity because input() takes zero or one argument, and
 	 * a fixed-arity native cannot express that. the check is inside. */
 	vm_define_native(vm, "input", input_native, -1);
@@ -916,6 +1028,8 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "has", has_native, 2);
 	vm_define_native(vm, "delete", delete_native, 2);
 	vm_define_native(vm, "str", str_native, 1);
+	vm_define_native(vm, "ord", ord_native, 1);
+	vm_define_native(vm, "chr", chr_native, 1);
 	vm_define_native(vm, "num", num_native, 1);
 	vm_define_native(vm, "type", type_native, 1);
 	vm_define_native(vm, "__slice", slice_native, 3);

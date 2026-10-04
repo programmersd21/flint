@@ -90,26 +90,13 @@ typedef struct {
 	ObjString *name; /* NULL for the top-level script */
 
 	/*
-	 * Hotness, and where a compiled body would go.
-	 *
-	 * call_count and loop_count are read by the profiler and written by
-	 * the interpreter on two instructions, which is cheap enough to leave
-	 * in a release build: a field in a struct the VM already touched,
-	 * rather than a branch on a mode flag at every call site.
-	 *
-	 * jit_code is a struct pointer rather than void* because the JIT
-	 * needs the code pointer, the size, and the deoptimization table
-	 * together, and reinterpreting a void* at each use would hide the
-	 * only interesting field behind three casts. It is a forward
-	 * declaration so the runtime does not have to include jit.h, and
-	 * the collector has to learn about it in blacken_object() -- the
-	 * compiled code holds no Value references of its own, but a future
-	 * specialization cache might, and a missed root is a use-after-free
-	 * that only shows up in optimized builds.
+	 * Hotness, read by the profiler and written by the interpreter on
+	 * two instructions, which is cheap enough to leave in a release
+	 * build: a field in a struct the VM already touched, rather than
+	 * a branch on a mode flag at every call site.
 	 */
 	uint32_t call_count;
 	uint32_t loop_count;
-	struct FlJitCode *jit_code;
 } ObjFunction;
 
 /* a C function exposed to flint. arity of -1 means variadic. */

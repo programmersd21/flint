@@ -1,0 +1,79 @@
+# Errors and the standard library, in the shape a real program uses.
+#
+# fs and json are the two libraries whose failures a program is most likely to
+# meet, and the pattern is the same for both: check what you can, and catch the
+# rest. Every call goes through the module, because the builtins underneath are
+# the same primitives and report the same messages.
+
+import fs
+import json
+
+# --- json ---
+#
+# parse is the one that fails on input, so it is the one that needs a catch on
+# anything a user typed or a network produced.
+
+let good = json.parse("{\"name\": \"flint\", \"version\": 1}")
+print(good.name)
+print(good.version)
+
+try {
+	json.parse("{")
+} catch e {
+	print("parse failed: " + e.message)
+}
+
+try {
+	json.parse("[1, 2")
+} catch e {
+	print("parse failed: " + e.message)
+}
+
+# a helper that parses or says why, which is what a program actually wants
+fn parse_or(text, fallback) {
+	try {
+		return json.parse(text)
+	} catch e {
+		return fallback
+	}
+}
+
+print(parse_or("{\"a\": 1}", "none").a)
+print(parse_or("nonsense", "none"))
+
+# --- fs ---
+#
+# Every fs failure is a missing path, a wrong type, or a permission problem.
+# The first is the common one and is the only one a test can rely on.
+
+let dir = "flint_fs_error_test"
+fs.mkdir(dir)
+
+let path = dir + "/data.json"
+fs.write(path, "{\"ok\": true}")
+print(fs.exists(path))
+print(fs.read(path))
+
+try {
+	fs.read(dir + "/missing.json")
+} catch e {
+	print("caught: " + e.message)
+}
+
+# writing into a path whose parent does not exist
+try {
+	fs.write(dir + "/nope/deeper/data.json", "x")
+} catch e {
+	print("caught: " + e.message)
+}
+
+# removing something that is not there
+try {
+	fs.remove(dir + "/missing.json")
+} catch e {
+	print("caught: " + e.message)
+}
+
+fs.remove(path)
+fs.remove(dir)
+print("exists is still false: " + str(fs.exists(dir)))

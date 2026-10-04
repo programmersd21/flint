@@ -14,6 +14,12 @@ import "geometry.fl"
 print(geometry.area(3, 4))     # 12
 ```
 
+a quoted path names a file exactly as written: no extension is added, so
+`"geometry.fl"` loads that file and binds `geometry` by dropping the
+extension. a quoted name with no slash and no extension takes the library
+path instead -- see below -- so quoted imports in practice always carry
+their `.fl`.
+
 This is the change from v0.5.0, and it is a breaking one. Before, every file
 shared one global table and an import dumped the module's names into the
 importer. `import math` meant `math.floor` by accident of the loader poking a
@@ -61,7 +67,7 @@ export fn taxed(amount) {     # public
 ```
 
 ```flint
-import "shapes"
+import "shapes.fl"
 print(shapes.taxed(10))      # 12
 print(shapes.tax)            # nil -- the private name is not in the table
 ```
@@ -104,7 +110,10 @@ search order is:
 2. `<exe-dir>/lib` -- the `lib/` directory next to the flint binary
 3. `~/.flint/stdlib` -- a per-user fallback
 
-A quoted path is a file. Relative paths resolve against the **importing
+A quoted path is a file, with one exception: a name with no slash and no
+`.fl` extension is a library name and resolves to the standard library, the
+same as a bare name. In practice that means quoted imports always carry
+their extension. Relative paths resolve against the **importing
 file's** directory, not the process working directory, so a script run from
 anywhere works. With `-e` or stdin there is no source file, so a relative
 path uses the working directory.

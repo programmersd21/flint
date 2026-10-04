@@ -1,0 +1,17 @@
+# The smallest version of module_global_write.fl.
+#
+# A module defines a private global, reads it from a function, and writes it
+# from the same function. Read worked; write reported "undefined variable"
+# because the write path resolved the running module's environment instead of
+# the closure's own.
+#
+# This is the two-line shape of the bug, kept separate because a regression
+# test that is small enough to read is a regression test that gets noticed.
+
+import "read_write_mod.fl" as m
+
+print(m.get())
+print(m.bump())
+print(m.get())
+
+print("done")

@@ -1,0 +1,11 @@
+try {
+    try {
+        throw "inner"
+    } catch e {
+        print("inner caught")
+        throw "rethrown"
+    }
+} catch e {
+    print("outer caught: " + e)
+}
+print("done")
