@@ -120,12 +120,18 @@ two builtins: `ord(s)` is the byte value of a one-character string, `chr(n)`
 is the inverse for 0-255. both reject anything that is not obviously a byte,
 so a multibyte character fails rather than returning half of one.
 
-two modules:
+four modules are new in the library, and it now ships fourteen `.fl` files:
 
 * `encoding`: base64 and hex encode and decode, url percent-encode and
   decode. malformed input raises rather than passing through silently.
-* `args`: the script's argv as data -- `count()`, `get(i)`, `has(flag)`,
-  `value(flag)`.
+* `args`: the script's argv as data -- `all()`, `count()`, `get(i)`,
+  `has(flag)`, `value(flag)`. it needs an alias (`import args as argv`),
+  because a bare `import args` binds the name `args` and would shadow the
+  builtin `args()` the module is written on top of.
+* `ansi`: terminal escape sequences, so a cli can colour its output
+  without hand-writing the escapes.
+* `pretty_print`: multi-line rendering of nested lists and tables, which is
+  what you want when the structure is the message.
 
 `fs.remove` now removes an empty directory as well as a file.
 
@@ -156,10 +162,14 @@ reproducibly is just a script that downloads things.
 a second thread without root registration and a safepoint model is how
 collectors get corrupted rather than how programs get faster.
 
-**no TLS, and no crypto.** The `http` module speaks plain sockets and
-validates no certificates. there are no hashes, no hmac, no password
-hashing. `random` is non-cryptographic and says so in its own header.
-shipping a hand-rolled cipher is worse than shipping none.
+**no TLS of flint's own, and no crypto.** `http://` goes out over native
+sockets; `https://` is handed to `curl(1)` as a subprocess, which brings
+its own TLS and its own certificate verification -- flint passes no
+`--insecure`, so a bad certificate fails, but the trust store, the TLS
+version policy and the hostname check are curl's, not flint's. there are no
+hashes, no hmac, no password hashing anywhere in the tree. `random` is
+xorshift64* and says so in its own header. shipping a hand-rolled cipher
+is worse than shipping none.
 
 **no regex.** A regex engine is a parser with a backtracking matcher
 attached, and it wants its own test corpus before it wants to be a module.

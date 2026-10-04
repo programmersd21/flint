@@ -74,9 +74,11 @@ not a source format. the only ways to get code into a script are
 and `flint sync` to refresh the installed library.
 
 there are no threads, channels or locks. the `http` module is a blocking
-client with no tls, so it validates no certificates; do not send secrets
-through it. there is no cryptography beyond the non-cryptographic `random`
-module, which says so itself.
+client: `http://` uses native sockets, and `https://` shells out to
+`curl(1)`, so tls, its trust store and its certificate verification are
+curl's rather than flint's. flint passes no `--insecure`. there is no
+cryptography beyond the non-cryptographic `random` module, which says so
+itself.
 
 there is no c extension point: no public header, no `native.load`, no
 ownership contract. `vm.h` and friends are internals and change between
