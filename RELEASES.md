@@ -31,6 +31,13 @@ constructors name the categories: `Error`, `TypeError`, `ValueError`,
 `IOError`, `NetworkError`, `TimeoutError`, `ProcessError`, `ModuleError`,
 `PackageError`. they are ordinary functions with ordinary arity checks.
 
+runtime errors are categorized too, so a script can branch on the failure
+instead of parsing the message: an index failure is a `ValueError`, a type
+disagreement a `TypeError`, a bad file operation an `IOError`, a module
+problem a `ModuleError`, and only the genuinely unclassified rest a plain
+`Error`. the classification lives in one function over the message prefix,
+so it is one table to read and one place to extend.
+
 errors unwind the stack with frames, so a module whose top level throws
 rolls back cleanly: the importer's bindings are untouched, the failed
 module is remembered as failed, and "imported but never used" is not

@@ -81,7 +81,15 @@ An error is a table with `type` (a string naming the category) and `message`
 (a string) fields. The constructors `Error`, `TypeError`, `ValueError`,
 `IOError`, `NetworkError`, `TimeoutError`, `ProcessError`, `ModuleError` and
 `PackageError` build these tables. `throw` accepts any value, not just
-error tables. A runtime error picks its category from its message -- an
+error tables.
+
+A runtime error raised by the VM or by a builtin is classified by its
+message into the same category names, so `catch e { e.type }` distinguishes
+a type disagreement from a bad value from a failed file operation. The
+classification is a table of message prefixes in `src/runtime/vm.c`
+(`error_type_for`), not a second argument on every error call. A runtime
+category therefore needs no constructor: a program never builds one by
+hand. A runtime error picks its category from its message -- an
 index failure is a `ValueError`, a type disagreement a `TypeError` -- so
 caught runtime errors carry the same shape as thrown ones.
 

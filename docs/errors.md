@@ -180,10 +180,19 @@ Available constructors: `Error`, `TypeError`, `ValueError`, `IOError`,
 
 a runtime error picks its category from its message: an index failure is a
 `ValueError`, a type disagreement is a `TypeError`, a bad file operation is
-an `IOError`, and only the unclassified rest stay `Error`. json failures
-arrive as `ParseError`. the constructors above cover the categories a
-program raises itself; the runtime's own categories need no constructor
-because a program never builds them by hand.
+an `IOError`, a process failure is a `ProcessError`, a module problem is a
+`ModuleError`, and only the unclassified rest stay `Error`. json failures
+arrive as `ParseError` and network transport failures as `NetworkError`. the
+constructors above cover the categories a program raises itself; the
+runtime's own categories need no constructor because a program never builds
+them by hand.
+
+this classification is by message prefix, in one place in `src/runtime/vm.c`
+(`error_type_for`), so the mapping is one readable table rather than a
+category argument threaded through sixty call sites. the trade is that a
+new native with a novel message falls back to `Error` until its prefix is
+added to the table. that is visible, not silent: the type is data, and a
+program that branches on it says so.
 
 Rules:
 
