@@ -49,8 +49,30 @@ jobs:
     - name: gc stress and sanitizers
       run: make stress
 
+    # The binary alone is not a usable release: `import encoding` looks for
+    # lib/ beside the executable, so a tarball with only `flint` in it fails
+    # every import that is not a source-relative module. The library ships
+    # in the same tarball for exactly that reason.
     - name: package
-      run: tar -czvf flint-${{ github.ref_name }}-linux-x86_64.tar.gz flint
+      run: |
+        mkdir -p stage
+        cp flint stage/flint
+        cp -r lib stage/lib
+        cp README.md SPEC.md RELEASES.md LICENSE stage/
+        tar -czvf flint-${{ github.ref_name }}-linux-x86_64.tar.gz -C stage .
+
+    - name: smoke test the artifact
+      run: |
+        # unpack what was just built and use it the way a person would, so a
+        # tarball that cannot import its own standard library fails here
+        # rather than in someone else's shell.
+        rm -rf verify && mkdir verify
+        tar -xzf flint-${{ github.ref_name }}-linux-x86_64.tar.gz -C verify
+        chmod +x verify/flint
+        cd verify
+        ./flint --version
+        ./flint -e 'import encoding
+        print(encoding.base64_encode("flint"))'
 
     - name: publish
       uses: softprops/action-gh-release@v2
