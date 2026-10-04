@@ -68,7 +68,27 @@ the `flint` executable runs scripts, `-e` code, stdin and the repl, plus
 `lint`, `build`, `debug`, `profile`, `doc`, `package`, `install` or `lsp`
 subcommands.
 
-there is no package manager, no registry and no lockfile. there are no
-threads, channels or locks. the `http` module is a blocking client with no
-tls. there is no cryptography beyond the non-cryptographic `random` module,
-which says so itself.
+there is no package manager, no registry and no lockfile. `flint.toml` is
+not a source format. the only ways to get code into a script are
+`import "some/file.fl"`, an `import` of a standard-library module by name,
+and `flint sync` to refresh the installed library.
+
+there are no threads, channels or locks. the `http` module is a blocking
+client with no tls, so it validates no certificates; do not send secrets
+through it. there is no cryptography beyond the non-cryptographic `random`
+module, which says so itself.
+
+there is no c extension point: no public header, no `native.load`, no
+ownership contract. `vm.h` and friends are internals and change between
+commits.
+
+## untrusted input
+
+flint has no permission system and no sandbox. a script that can run can
+read and write every file its user can. do not run flint programs you have
+not read.
+
+there is no bytecode file format and no loader, so there is no untrusted
+bytecode boundary; all bytecode is produced in-process by the compiler and
+checked by the in-process verifier before it runs. anything that arrives as
+a `.fl` file is source.
