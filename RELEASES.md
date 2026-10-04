@@ -129,44 +129,54 @@ two modules:
 
 `fs.remove` now removes an empty directory as well as a file.
 
-it does not grow by regex, raw networking or a crypto module. a
-half-implementation of any of those is worse than none, so they are listed
-in [docs/limits.md](docs/limits.md) as absent, on purpose.
-
-### runtime
-
-`--version --verbose` reports the language version, bytecode format
+`--version --verbose` now reports the language version, bytecode format
 version, native ABI version, package format version, lockfile version and
 runtime version, so a script can check what it was shipped against.
 
-### verification
+### deliberately not shipped
 
-run from a clean checkout of the tagged commit, on linux x86_64:
+documents describing what the tree does not have -- a native ABI,
+`flint.toml` manifests, TLS certificate validation -- were deleted rather
+than edited down to "not yet". the facts they uniquely stated now live in
+[docs/limits.md](docs/limits.md), which is the one page that says what
+flint does not do.
 
-```
-make clean && make release && make debug
-make test          # 116 tests
-make stress        # gc on every allocation, asan + ubsan
-make flint-goto && sh tests/run_tests.sh ./flint-goto
-make unit && make diagnostic-test && make fmt-check && make lint
-```
+**no native extension ABI.** There is no public header, no `native.load`,
+and no ownership rules, so a shared library cannot be taught to flint at
+all. a versioned public `flint.h` is real work, and a half-specified one is
+worse than none: an extension with a subtly wrong ownership rule corrupts
+memory rather than failing. it should be its own release.
 
-all green: 116/116 under release, stress and computed-goto dispatch;
-`-std=c11 -Wall -Wextra -Wpedantic -Werror` clean in both configurations;
-clang-tidy clean for the default and debug builds; 43 files formatted.
+**no package manager.** No `flint.toml`, no registry, no lockfile, and no
+`add`/`install`/`build` subcommands. reproducible dependency selection is
+the whole point of the design, and a resolver that does not resolve
+reproducibly is just a script that downloads things.
 
-what was **not** verified, stated plainly: macos and windows were not
-executed, no CI run was performed against the tagged commit, and the
-fuzz, fault-injection and thread-sanitizer targets do not exist yet.
+**no threads, channels or locks.** The collector is single-threaded, and
+a second thread without root registration and a safepoint model is how
+collectors get corrupted rather than how programs get faster.
 
-### docs
+**no TLS, and no crypto.** The `http` module speaks plain sockets and
+validates no certificates. there are no hashes, no hmac, no password
+hashing. `random` is non-cryptographic and says so in its own header.
+shipping a hand-rolled cipher is worse than shipping none.
 
-the documents that remain describe what was checked against the code.
-documents that described things that were not there -- a native ABI,
-`flint.toml` package manifests, TLS certificate validation, concurrency
-primitives -- were deleted rather than edited down to "not yet". the facts
-they uniquely stated (no sandbox, no bytecode file format) now live in
-[docs/limits.md](docs/limits.md).
+**no regex.** A regex engine is a parser with a backtracking matcher
+attached, and it wants its own test corpus before it wants to be a module.
+
+**no `finally`.** It needs cleanup actions to run on the way out, and
+unwinding currently discards frames rather than visiting them. the error
+model shipped whole; half of it would have been worse.
+
+### gate
+
+116 tests on release, under ASan + UBSan + GC-on-every-allocation, and on
+the computed-goto build -- plus new tests for every feature above, and a
+regression test for each bug fixed. unit tests, diagnostics,
+clang-tidy (default and debug configurations), clang-format clean.
+macos and windows were not executed; no fuzz, fault-injection or
+thread-sanitizer target exists yet, so "no leaks" is as far as the claim
+goes.
 
 ## v0.7.0
 
