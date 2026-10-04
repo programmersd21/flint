@@ -1,3 +1,10 @@
-bad config at flint_config_test/config.json: cannot read 'flint_config_test/config.json': No such file or directory.
-[line 34] in load_config()
-[line 43] in script
+localhost
+8080
+example.com
+443
+caught: bad config at flint_config_test/config.json: invalid json: expected a string at offset 1
+true
+could not save: cannot write 'flint_config_test/nope/out.json': No such file or directory.
+false
+true
+done

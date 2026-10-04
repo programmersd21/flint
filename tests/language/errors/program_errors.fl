@@ -28,7 +28,8 @@ fn load_config(path) {
 		# a missing file is normal; a malformed one is not. the message is
 		# the only way to tell them apart without a separate exists()
 		# call, which would be a race anyway.
-		if contains(e.message, "could not open") {
+		if contains(e.message, "cannot read") or
+		        contains(e.message, "could not open") {
 			return defaults()
 		}
 		throw Error("bad config at " + path + ": " + e.message)
