@@ -19,12 +19,13 @@ try {
     let xs = [1, 2]
     print(xs[10])
 } catch e {
-    print(e.type, e.message)
+    print(e.type)      # ValueError
+    print(e.message)   # list index 10 out of bounds (len 2).
 }
 ```
 
-no more. there is no `finally`, and no typed catch. bubbling up unchanged is
-the default path for code that does not care, and an uncaught error still
+there is no `finally` and no typed catch. bubbling up unchanged is the
+default path for code that does not care, and an uncaught error still
 prints one message plus one line per frame and exits 70.
 
 constructors name the categories: `Error`, `TypeError`, `ValueError`,
@@ -32,16 +33,29 @@ constructors name the categories: `Error`, `TypeError`, `ValueError`,
 `PackageError`. they are ordinary functions with ordinary arity checks.
 
 runtime errors are categorized too, so a script can branch on the failure
-instead of parsing the message: an index failure is a `ValueError`, a type
-disagreement a `TypeError`, a bad file operation an `IOError`, a module
-problem a `ModuleError`, and only the genuinely unclassified rest a plain
-`Error`. the classification lives in one function over the message prefix,
-so it is one table to read and one place to extend.
+instead of matching on the message text:
 
-errors unwind the stack with frames, so a module whose top level throws
-rolls back cleanly: the importer's bindings are untouched, the failed
-module is remembered as failed, and "imported but never used" is not
-reported for a function of the failing import.
+| failure | type |
+|---|---|
+| index out of bounds, empty `pop()`, bad `num()` conversion | `ValueError` |
+| wrong argument type, `as` assertion, calling a non-function | `TypeError` |
+| file read/write/remove | `IOError` |
+| import resolution, cycles, a module that failed to load | `ModuleError` |
+| http transport, bad URL scheme | `NetworkError` |
+| fork, exec, `process.run` | `ProcessError` |
+| malformed json | `ParseError` |
+| undefined variable, out of memory, stack overflow | `Error` |
+
+the classification is one function over the message prefix
+(`error_type_for` in `src/runtime/vm.c`) rather than a category argument on
+every call site. one table to read, one place to extend. the trade is that
+a native with a novel message stays `Error` until its prefix is added,
+which is visible rather than silent: the type is data.
+
+errors unwind frames, locals, open upvalues and the operand stack, so a
+module whose top level throws rolls back cleanly: the importer's bindings
+are untouched, the failed module is remembered as failed, and an import
+inside a `try` is not also reported as an unused import.
 
 ### stepped ranges
 
@@ -52,9 +66,10 @@ for n in 0..10..2 { print(n) }    # 0, 2, 4, 6, 8
 for n in 10..0..-3 { print(n) }   # 10, 7, 4, 1
 ```
 
-a step of zero is an error before the loop runs, not a hang inside it. an
-empty range is fine and runs zero iterations. step can be a negative
-literal, a variable, or any expression that evaluates to a number.
+a step of zero raises before the loop runs, rather than hanging inside it.
+an empty range is fine and runs zero iterations. the step can be a
+negative literal, a variable, or any expression evaluating to a number,
+and the comparison follows the step's sign each iteration.
 
 ### anonymous functions
 
@@ -67,8 +82,9 @@ print(square(5))    # 25
 ```
 
 the closure semantics are the same as for `fn name(...)`: capture by
-reference, late binding. a bare name in a function reference does not
-resolve: you still write `fn name() {...}` to bind it first.
+reference, late binding. a bare name in a function position still does not
+resolve, so `fn name() {...}` is how a function binds a name. an unnamed
+function reports itself as `<anonymous>` in a stack trace.
 
 ### trailing commas
 
@@ -83,60 +99,74 @@ let config = {
 }
 ```
 
-single-line literals with a trailing comma (`[1, 2,]`) are accepted too;
-the comma is not a meaning, it is a prefix that did not get its entry.
+single-line literals accept one too (`[1, 2,]`). the comma carries no
+meaning; it is a prefix that did not get its entry.
 
 ### module globals, fixed
 
 a module's own functions can now both read and write module-level globals.
-a closure carrying its defining module's environment is no longer confused
-for the importing module at write time: the write path resolves the
-closure's environment the same way the read path does.
+the write path resolves the closure's defining environment the same way the
+read path does, instead of resolving whatever module happened to be running
+when the call came from somewhere else.
 
-this was a quiet bug. it killed any program where a module function
-updated module-level state and was called from some other module. it did
-not break the old tests because every test that wrote module state also
-read it in the same function, and the read path *was* right.
+this was a quiet bug and it killed any program where a module function
+updated module-level state and was called from another module. no old test
+caught it because every test that wrote module state also read it in the
+same function, and the read path was already right.
 
 ### stdlib and natives
 
-the builtin surface grows by two: `ord(s)` turns a one-character string
-into its byte value, and `chr(n)` turns a byte value into a one-character
-string. both reject anything that is not obviously a byte.
+two builtins: `ord(s)` is the byte value of a one-character string, `chr(n)`
+is the inverse for 0-255. both reject anything that is not obviously a byte,
+so a multibyte character fails rather than returning half of one.
 
-the standard library grows by two modules:
+two modules:
 
-* `encoding`: base64 encode and decode, hex encode and decode, and url
-  percent-encode/decode. each function is an error on malformed input
-  rather than a silent pass-through.
-* `args`: the script's argv as data: `count()`, `get(i)`, `has(flag)`,
-  `value(flag)`. the checks a `--help` writer actually writes.
+* `encoding`: base64 and hex encode and decode, url percent-encode and
+  decode. malformed input raises rather than passing through silently.
+* `args`: the script's argv as data -- `count()`, `get(i)`, `has(flag)`,
+  `value(flag)`.
 
-it does not grow by regex, raw networking, or a crypto module, all of
-which are the kinds of thing a half-implementation of is worse than no
-implementation. they are listed in docs/limits.md as not present, on
-purpose.
+`fs.remove` now removes an empty directory as well as a file.
+
+it does not grow by regex, raw networking or a crypto module. a
+half-implementation of any of those is worse than none, so they are listed
+in [docs/limits.md](docs/limits.md) as absent, on purpose.
 
 ### runtime
 
-`--version --verbose` reports the language version, the bytecode format
-version, the native ABI version, the package format version, the lockfile
-version, and the runtime version, so a script can check what it was shipped
-against.
+`--version --verbose` reports the language version, bytecode format
+version, native ABI version, package format version, lockfile version and
+runtime version, so a script can check what it was shipped against.
 
-the release gate for 0.8.0 is: clean build on the normal c11 configuration,
-full test suite, unit tests, diagnostic tests, stress build (gc on every
-allocation, asan and ubsan), the computed-goto interpreter with the same
-suite, formatting and lint gates. all of those are green on this tree.
+### verification
+
+run from a clean checkout of the tagged commit, on linux x86_64:
+
+```
+make clean && make release && make debug
+make test          # 116 tests
+make stress        # gc on every allocation, asan + ubsan
+make flint-goto && sh tests/run_tests.sh ./flint-goto
+make unit && make diagnostic-test && make fmt-check && make lint
+```
+
+all green: 116/116 under release, stress and computed-goto dispatch;
+`-std=c11 -Wall -Wextra -Wpedantic -Werror` clean in both configurations;
+clang-tidy clean for the default and debug builds; 43 files formatted.
+
+what was **not** verified, stated plainly: macos and windows were not
+executed, no CI run was performed against the tagged commit, and the
+fuzz, fault-injection and thread-sanitizer targets do not exist yet.
 
 ### docs
 
-the documents that still exist describe what was checked against the code.
-documents that described things that were not there -- native ABI,
-package formats, security guarantees we do not yet back -- were removed
-rather than patched to say "not yet". limits moved into docs/limits.md
-and every entry in it is a behavior the test suite or the source supports
-seeing stated.
+the documents that remain describe what was checked against the code.
+documents that described things that were not there -- a native ABI,
+`flint.toml` package manifests, TLS certificate validation, concurrency
+primitives -- were deleted rather than edited down to "not yet". the facts
+they uniquely stated (no sandbox, no bytecode file format) now live in
+[docs/limits.md](docs/limits.md).
 
 ## v0.7.0
 
