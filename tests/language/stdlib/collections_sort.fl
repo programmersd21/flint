@@ -1,0 +1,68 @@
+# collections.sort
+#
+# sorting is the one helper that was held back, because heterogeneous values
+# have no total order worth promising. it now sorts a list of numbers or a
+# list of strings and raises on anything mixed, which is a rule rather than a
+# surprise.
+#
+# flint strings are bytes, so string order here is byte-lexicographic. it is
+# the same order len() and subscript use, and it is not unicode collation.
+
+import collections
+
+# numbers
+print(collections.sort([3, 1, 4, 1, 5]))
+print(collections.sort([10, 9, 100, -1]))
+print(collections.sort([2.5, 1.5, -0.5]))
+
+# already sorted, and one element, and empty
+print(collections.sort([1, 2, 3]))
+print(collections.sort([7]))
+print(collections.sort([]))
+
+# strings, ordered by bytes
+print(collections.sort(["pear", "apple", "kiwi"]))
+print(collections.sort(["b", "a", "c"]))
+
+# the original list is not mutated
+let original = [3, 2, 1]
+let sorted = collections.sort(original)
+print(original)
+print(sorted)
+
+# mixed kinds are refused rather than silently coerced
+try {
+	collections.sort([1, "a"])
+} catch e {
+	print(e.type)
+	print(e.message)
+}
+
+try {
+	collections.sort([true, false])
+} catch e {
+	print(e.type)
+}
+
+# a single element of an unsupported kind is refused too
+try {
+	collections.sort([nil])
+} catch e {
+	print(e.type)
+}
+
+# __strcmp is the primitive underneath: negative, zero, positive
+print(__strcmp("a", "b") < 0)
+print(__strcmp("b", "a") > 0)
+print(__strcmp("same", "same") == 0)
+# a prefix sorts before the longer string
+print(__strcmp("ab", "abc") < 0)
+# bytes, not characters: "Z" (0x5a) sorts before "a" (0x61)
+print(__strcmp("Z", "a") < 0)
+
+# it refuses non-strings like every other string primitive
+try {
+	__strcmp(1, 2)
+} catch e {
+	print(e.type)
+}

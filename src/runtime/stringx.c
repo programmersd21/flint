@@ -349,6 +349,34 @@ static Value contains_native(VM *vm, int argc, Value *argv)
 	return FALSE_VAL;
 }
 
+/*
+ * __strcmp(a, b) -> number
+ *
+ * Byte-lexicographic ordering: negative when a sorts before b, zero when the
+ * bytes are equal, positive otherwise. Bytes, not characters -- flint strings
+ * are byte sequences, and anything that tried to be clever here would disagree
+ * with len() and subscript.
+ *
+ * This exists because flint has no ordering operator for strings. `>` and `<`
+ * are number-only by design, which is why collections.sort needs a primitive
+ * rather than an expression, and why the public face of this stays in the
+ * library rather than being another builtin.
+ */
+static Value strcmp_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	REQUIRE_STRING(vm, argv[0], "__strcmp()");
+	REQUIRE_STRING(vm, argv[1], "__strcmp()");
+
+	ObjString *a = AS_STRING(argv[0]);
+	ObjString *b = AS_STRING(argv[1]);
+	int shared = a->length < b->length ? a->length : b->length;
+	int c = shared > 0 ? memcmp(a->chars, b->chars, (size_t)shared) : 0;
+	if (c != 0)
+		return NUMBER_VAL((double)c);
+	return NUMBER_VAL((double)(a->length - b->length));
+}
+
 /* starts_with(s, prefix) -> bool */
 static Value starts_with_native(VM *vm, int argc, Value *argv)
 {
@@ -571,6 +599,7 @@ void register_string_natives(VM *vm)
 	vm_define_native(vm, "trim", trim_native, 1);
 	vm_define_native(vm, "contains", contains_native, 2);
 	vm_define_native(vm, "starts_with", starts_with_native, 2);
+	vm_define_native(vm, "__strcmp", strcmp_native, 2);
 	vm_define_native(vm, "ends_with", ends_with_native, 2);
 	vm_define_native(vm, "replace", replace_native, 3);
 	vm_define_native(vm, "lower", lower_native, 1);

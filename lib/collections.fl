@@ -109,3 +109,52 @@ export fn drop(xs, n) {
     }
     return out
 }
+
+export fn sort(xs) {
+    if len(xs) <= 1 { return xs }
+
+    let out = []
+    let ci = 0
+    while ci < len(xs) {
+        push(out, xs[ci])
+        ci += 1
+    }
+
+    let kind = type(out[0])
+    if kind != "number" and kind != "string" {
+        throw TypeError("collections.sort needs numbers or strings, got " + str(kind))
+    }
+
+    let n = len(out)
+    let i = 0
+    while i < n {
+        let j = 0
+        while j < n - i - 1 {
+            if type(out[j]) != kind or type(out[j+1]) != kind {
+                throw TypeError("collections.sort needs only one kind of element")
+            }
+            # out of order?
+            let swap = false
+            if kind == "number" {
+                if out[j] > out[j+1] { swap = true }
+            } else {
+                if __strcmp(out[j], out[j+1]) > 0 { swap = true }
+            }
+            if swap {
+                let tmp = out[j]
+                out[j] = out[j+1]
+                out[j+1] = tmp
+            }
+            j += 1
+        }
+        i += 1
+    }
+    return out
+}
+
+
+
+
+
+
+
