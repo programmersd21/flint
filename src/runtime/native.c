@@ -198,7 +198,7 @@ static Value minmax_native(VM *vm, int argc, Value *argv, bool want_max)
 		if (!IS_NUMBER(best) || !IS_NUMBER(argv[i])) {
 			vm_runtime_error(vm,
 			        "%s() takes numbers, but argument %d is not "
-				"one.",
+			        "one.",
 			        name,
 			        i);
 			return NIL_VAL;
@@ -595,6 +595,41 @@ static Value range_step_error_native(VM *vm, int argc, Value *argv)
 	(void)argc;
 	(void)argv;
 	vm_runtime_error(vm, "a range step cannot be zero.");
+	return NIL_VAL;
+}
+
+/*
+ * assert(condition, message?)
+ *
+ * A failing assertion is an ordinary runtime error, so it is catchable by
+ * the same try/catch as everything else and reports the same way. That is
+ * the point: an assertion is a check the program can recover from, not a
+ * second exception system.
+ *
+ * The message is optional and defaults to something that names the
+ * assertion rather than leaving the reader to guess what failed.
+ */
+static Value assert_native(VM *vm, int argc, Value *argv)
+{
+	if (argc < 1 || argc > 2) {
+		vm_runtime_error(vm, "assert() takes one or two arguments.");
+		return NIL_VAL;
+	}
+	if (!IS_FALSY(argv[0]))
+		return NIL_VAL;
+
+	const char *message;
+	if (argc == 2) {
+		if (!IS_STRING(argv[1])) {
+			vm_runtime_error(
+			        vm, "assert() message must be a string.");
+			return NIL_VAL;
+		}
+		message = AS_CSTRING(argv[1]);
+	} else {
+		message = "assertion failed";
+	}
+	vm_runtime_error(vm, "%s", message);
 	return NIL_VAL;
 }
 
@@ -1068,6 +1103,7 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "len", len_native, 1);
 	vm_define_native(vm, "min", min_native, -1);
 	vm_define_native(vm, "max", max_native, -1);
+	vm_define_native(vm, "assert", assert_native, -1);
 	vm_define_native(vm, "push", push_native, 2);
 	vm_define_native(vm, "pop", pop_native, 1);
 	vm_define_native(vm, "insert", insert_native, 3);

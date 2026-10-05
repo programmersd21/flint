@@ -1,0 +1,80 @@
+# Comprehensive test for try-finally and try-catch-finally
+
+# 1. try-finally success
+let log = []
+try {
+	push(log, "try 1")
+} finally {
+	push(log, "finally 1")
+}
+print(join(log, " -> "))
+
+# 2. try-finally when try throws
+log = []
+try {
+	try {
+		push(log, "try 2")
+		throw "err 2"
+	} finally {
+		push(log, "finally 2")
+	}
+} catch e {
+	push(log, "caught: " + str(e))
+}
+print(join(log, " -> "))
+
+# 3. try-catch-finally success
+log = []
+try {
+	push(log, "try 3")
+} catch e {
+	push(log, "catch 3")
+} finally {
+	push(log, "finally 3")
+}
+print(join(log, " -> "))
+
+# 4. try-catch-finally when try throws and catch succeeds
+log = []
+try {
+	push(log, "try 4")
+	throw "err 4"
+} catch e {
+	push(log, "caught 4: " + str(e))
+} finally {
+	push(log, "finally 4")
+}
+print(join(log, " -> "))
+
+# 5. try-catch-finally when catch rethrows
+log = []
+try {
+	try {
+		push(log, "try 5")
+		throw "err 5"
+	} catch e {
+		push(log, "catch 5")
+		throw "catch err 5"
+	} finally {
+		push(log, "finally 5")
+	}
+} catch e {
+	push(log, "outer caught: " + str(e))
+}
+print(join(log, " -> "))
+
+# 6. Nested finally blocks
+log = []
+try {
+	try {
+		push(log, "inner try")
+		throw "inner err"
+	} finally {
+		push(log, "inner finally")
+	}
+} catch e {
+	push(log, "outer catch")
+} finally {
+	push(log, "outer finally")
+}
+print(join(log, " -> "))

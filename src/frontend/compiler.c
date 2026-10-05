@@ -1645,36 +1645,106 @@ static void try_statement(void)
 {
 	consume(TOKEN_LEFT_BRACE, "expect '{' after try.");
 
-	int jump = emit_jump(OP_TRY);
+	int try_jump = emit_jump(OP_TRY);
 	state.current->try_depth++;
 	state.try_nesting++;
+
 	begin_scope();
 	block();
-	state.try_nesting--;
 	end_scope();
+
+	state.try_nesting--;
 	state.current->try_depth--;
+
 	emit_byte(OP_POP_HANDLER);
-	int skip = emit_jump(OP_JUMP);
+	int skip_catch = emit_jump(OP_JUMP);
 
-	patch_jump(jump);
+	patch_jump(try_jump);
 
-	if (!match(TOKEN_CATCH)) {
-		error("expect 'catch' after try block.");
+	bool has_catch = match(TOKEN_CATCH);
+	int catch_try_jump = -1;
+	int skip_catch_success = -1;
+	int skip_catch_error = -1;
+
+	if (has_catch) {
+		bool has_finally_ahead = check(TOKEN_FINALLY);
+		if (has_finally_ahead) {
+			catch_try_jump = emit_jump(OP_TRY);
+			state.current->try_depth++;
+		}
+
+		begin_scope();
+		bool have_binding = match(TOKEN_IDENTIFIER);
+		Token name = state.parser.previous;
+		if (!have_binding)
+			emit_byte(OP_POP);
+		else {
+			add_local(name, false);
+			mark_initialized();
+		}
+		consume(TOKEN_LEFT_BRACE, "expect '{' after catch.");
+		block();
+		end_scope();
+
+		if (has_finally_ahead) {
+			state.current->try_depth--;
+			emit_byte(OP_POP_HANDLER);
+			skip_catch_success = emit_jump(OP_JUMP);
+
+			patch_jump(catch_try_jump);
+			emit_byte(OP_TRUE);
+			skip_catch_error = emit_jump(OP_JUMP);
+		}
+	}
+
+	bool has_finally = match(TOKEN_FINALLY);
+	if (!has_catch && !has_finally) {
+		error("expect 'catch' or 'finally' after try block.");
 		return;
 	}
-	begin_scope();
-	bool have_binding = match(TOKEN_IDENTIFIER);
-	Token name = state.parser.previous;
-	if (!have_binding)
-		emit_byte(OP_POP);
-	else {
-		add_local(name, false);
+
+	if (has_finally) {
+		patch_jump(skip_catch);
+		if (skip_catch_success != -1) {
+			patch_jump(skip_catch_success);
+		}
+
+		emit_byte(OP_NIL);
+		emit_byte(OP_FALSE);
+		int skip_rethrow_setup = emit_jump(OP_JUMP);
+
+		if (!has_catch) {
+			emit_byte(OP_TRUE);
+		} else if (skip_catch_error != -1) {
+			patch_jump(skip_catch_error);
+		}
+
+		patch_jump(skip_rethrow_setup);
+
+		Token err_tok = token_string("__err");
+		Token flag_tok = token_string("__flag");
+		add_local(err_tok, false);
 		mark_initialized();
+		add_local(flag_tok, false);
+		mark_initialized();
+
+		consume(TOKEN_LEFT_BRACE, "expect '{' after finally.");
+		begin_scope();
+		block();
+		end_scope();
+
+		state.current->local_count -= 2;
+
+		int finally_done = emit_jump(OP_JUMP_IF_FALSE);
+		emit_byte(OP_POP);
+		emit_byte(OP_THROW);
+
+		patch_jump(finally_done);
+		emit_byte(OP_POP);
+		emit_byte(OP_POP);
+	} else {
+		patch_jump(skip_catch);
 	}
-	consume(TOKEN_LEFT_BRACE, "expect '{' after catch.");
-	block();
-	end_scope();
-	patch_jump(skip);
 }
 
 /* throw expr: raise the value to the innermost handler, or the top. */

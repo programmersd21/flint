@@ -1,0 +1,6 @@
+try 1 -> finally 1
+try 2 -> finally 2 -> caught: err 2
+try 3 -> finally 3
+try 4 -> caught 4: err 4 -> finally 4
+try 5 -> catch 5 -> finally 5 -> outer caught: catch err 5
+inner try -> inner finally -> outer catch -> outer finally

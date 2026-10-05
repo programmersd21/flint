@@ -1,0 +1,78 @@
+# assert
+#
+# a failing assertion is an ordinary runtime error, so it is catchable by
+# the same try/catch as everything else and reports the same way. that is
+# the point: an assertion is a check the program can recover from, not a
+# second exception system.
+#
+# a passing assertion prints nothing. a test that asserts and then prints
+# "ok" is a test that cannot tell a pass from a silent failure.
+
+# passing assertions are silent
+assert(true)
+assert(1 == 1)
+assert("a" == "a")
+assert(0)
+assert("")
+print("passing assertions produce no output")
+
+# the default message names the assertion
+try {
+	assert(false)
+} catch e {
+	print(e.message)
+}
+
+# an optional message is preserved
+try {
+	assert(1 == 2, "one is not two")
+} catch e {
+	print(e.message)
+}
+
+# a failing assertion inside a function is still catchable
+fn check(x) {
+	assert(x > 0, "x must be positive")
+	return x
+}
+print(check(5))
+try {
+	check(-1)
+} catch e {
+	print(e.message)
+}
+
+# an assertion that fails after an allocation leaves the VM consistent:
+# the error is catchable and the script keeps running
+let kept = []
+try {
+	push(allocated, 1)
+	assert(false, "after allocation")
+} catch e {
+	print(e.message)
+}
+print(len(allocated))
+
+# arity and message type are checked
+try {
+	assert()
+} catch e {
+	print(e.message)
+}
+
+try {
+	assert(true, false)
+} catch e {
+	print(e.message)
+}
+
+# a failing assertion unwinds through a try/catch/finally chain correctly
+try {
+	try {
+		assert(false, "inner")
+	} finally {
+		print("finally ran")
+	}
+} catch e {
+	print("outer caught:", e.message)
+}
