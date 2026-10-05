@@ -1,0 +1,52 @@
+# collections: enumerate, zip, range_list
+#
+# enumerate and zip return lists of pairs. the two-variable `for` form is
+# for tables, so these are read by index in the examples below; that is a
+# language rule, not a limitation of these helpers.
+
+import collections
+
+# --- enumerate ---
+
+print(collections.enumerate(["a", "b", "c"]))
+print(collections.enumerate([]))
+print(collections.enumerate([42]))
+
+# read by index, which is how a list of pairs is consumed
+let xs = ["x", "y"]
+for pair in collections.enumerate(xs) {
+	print(pair[0], pair[1])
+}
+
+# --- zip ---
+
+print(collections.zip([1, 2, 3], ["a", "b", "c"]))
+print(collections.zip([1, 2], ["a", "b"]))
+print(collections.zip([], []))
+print(collections.zip([1], []))
+
+# unequal lengths stop at the shorter one
+print(collections.zip([1, 2, 3], ["a"]))
+print(collections.zip(["a"], [1, 2, 3]))
+
+# --- range_list ---
+
+print(collections.range_list(0, 5, 1))
+print(collections.range_list(0, 10, 3))
+print(collections.range_list(5, 0, -2))
+print(collections.range_list(3, 3, 1))
+
+# a zero step is refused
+try {
+	collections.range_list(0, 10, 0)
+} catch e {
+	print(e.type)
+}
+
+# range_list matches the for-range semantics
+let total = 0
+for n in 0..5..1 {
+	total += n
+}
+print(total)
+print(collections.range_list(0, 5, 1))

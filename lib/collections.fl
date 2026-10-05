@@ -228,3 +228,70 @@ export fn reversed(xs) {
     }
     return out
 }
+
+# enumerate(xs) -- each element paired with its index.
+#
+#     let xs = ["a", "b"]
+#     for pair in collections.enumerate(xs) { print(pair[0], pair[1]) }
+#
+# a list of two-element lists. note that the two-variable `for` form is for
+# tables, so a list of pairs is read by index rather than unpacked:
+#
+#     for i, x in xs { ... }        # xs is a table
+#
+# an empty list yields an empty result.
+export fn enumerate(xs) {
+    let out = []
+    let i = 0
+    while i < len(xs) {
+        push(out, [i, xs[i]])
+        i += 1
+    }
+    return out
+}
+
+# zip(a, b) -- elements of two lists, paired, stopping at the shorter one.
+#
+#     let out = collections.zip([1, 2], ["a", "b"])   # [[1, "a"], [2, "b"]]
+#
+# stopping short rather than padding or erroring: zip is a convenience, and a
+# length mismatch is the caller's data to check, not a failure inside the
+# helper. an empty list on either side gives an empty result.
+export fn zip(a, b) {
+    let out = []
+    let n = len(a)
+    if len(b) < n {
+        n = len(b)
+    }
+    let i = 0
+    while i < n {
+        push(out, [a[i], b[i]])
+        i += 1
+    }
+    return out
+}
+
+# range_list(start, end, step) -- the numbers start..end..step as a list.
+#
+# this is a convenience over the step form of a for loop, for when you want
+# the numbers rather than a loop. the same rules apply: a zero step is an
+# error, and the range is half-open.
+export fn range_list(start, end, step) {
+    if step == 0 {
+        throw ValueError("collections.range_list step cannot be zero")
+    }
+    let out = []
+    let i = start
+    if step > 0 {
+        while i < end {
+            push(out, i)
+            i += step
+        }
+    } else {
+        while i > end {
+            push(out, i)
+            i += step
+        }
+    }
+    return out
+}
