@@ -1,0 +1,107 @@
+# strings -- the byte-level string helpers, in flint.
+#
+#     import strings
+#     print(strings.repeat("ab", 3))    # ababab
+#
+# the runtime's own string primitives (split, join, trim, lower, upper,
+# replace, find, char_at) are builtins and need no import. what is here is
+# what a script writes often enough to deserve a name, and what is easier to
+# read as flint than as a loop.
+#
+# everything here counts bytes, not characters. flint strings are byte
+# sequences, and a multibyte utf-8 character is a run of bytes: `len` counts
+# them, subscript indexes them, and so do these. that is consistent, which
+# matters more than it being unicode-aware.
+
+# repeat(s, n) -- s n times.
+#
+# a negative count repeats zero times, which is the only answer that cannot
+# produce a string nobody asked for. n is clamped so a large count fails on
+# allocation rather than on a wrapped length.
+export fn repeat(s, n) {
+    if n <= 0 {
+        return ""
+    }
+    let out = ""
+    let i = 0
+    while i < n {
+        out += s
+        i += 1
+    }
+    return out
+}
+
+# reverse(s) -- the bytes back to front.
+#
+#     print(strings.reverse("stressed"))    # desserts
+#
+# it operates on bytes, so reversing a multibyte character breaks it. that
+# is not a bug to be fixed here; it is what byte-oriented means.
+export fn reverse(s) {
+    let out = ""
+    let i = len(s) - 1
+    while i >= 0 {
+        out += s[i]
+        i -= 1
+    }
+    return out
+}
+
+# is_empty(s) -> bool. len(s) == 0, named because it reads better in a guard.
+export fn is_empty(s) {
+    return len(s) == 0
+}
+
+# slice(s, from, to) -- the bytes in [from, to), clamped to the string.
+#
+# the same half-open, clamping, negative-index rules as the `__slice` the
+# path module uses. out of range clamps rather than erroring, because
+# slicing past the end is a normal thing to do when the length is not
+# known in advance.
+export fn slice(s, from, to) {
+    return __slice(s, from, to)
+}
+
+# pad_start(s, width, fill) -- left-pad to width with fill.
+#
+#     print(strings.pad_start("7", 3, "0"))    # 007
+#
+# for the fixed-width numbers that come up constantly in text formats. a
+# string already at or over the width is returned unchanged.
+export fn pad_start(s, width, fill) {
+    if len(s) >= width or len(fill) == 0 {
+        return s
+    }
+    return repeat(fill, width - len(s)) + s
+}
+
+# pad_end(s, width, fill) -- right-pad to width with fill.
+export fn pad_end(s, width, fill) {
+    if len(s) >= width or len(fill) == 0 {
+        return s
+    }
+    return s + repeat(fill, width - len(s))
+}
+
+# count(s, needle) -- how many times needle appears, not overlapping.
+#
+#     print(strings.count("banana", "an"))    # 2
+#
+# an empty needle counts zero rather than a length-plus-one, because a count
+# of occurrences of nothing is not useful.
+export fn count(s, needle) {
+    if len(needle) == 0 {
+        return 0
+    }
+    let n = 0
+    let i = 0
+    while i + len(needle) <= len(s) {
+        if s[i] == needle[0] and __slice(s, i, i + len(needle)) == needle {
+            n += 1
+            i += i + len(needle)
+        } else {
+            i += 1
+        }
+    }
+    return n
+}

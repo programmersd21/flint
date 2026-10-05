@@ -1,0 +1,67 @@
+# strings: the flint-level byte helpers, and the new runtime primitives.
+#
+# everything here counts bytes. a multibyte utf-8 character is a run of
+# bytes, so len, subscript and these agree about what a position is.
+
+import strings
+
+# --- repeat ---
+print(strings.repeat("ab", 3))
+print(strings.repeat("ab", 1))
+print(strings.repeat("ab", 0))
+print(strings.repeat("ab", -1))
+print(strings.repeat("", 5))
+
+# --- reverse ---
+print(strings.reverse("stressed"))
+print(strings.reverse(""))
+print(strings.reverse("a"))
+
+# --- is_empty ---
+print(strings.is_empty(""))
+print(strings.is_empty("x"))
+
+# --- slice: half-open, negative from the end, clamped ---
+print(strings.slice("hello", 1, 3))
+print(strings.slice("hello", 0, 0))
+print(strings.slice("hello", 2, 99))
+print(strings.slice("hello", -2, 5))
+print(strings.slice("hello", 3, 1))
+
+# --- padding ---
+print(strings.pad_start("7", 3, "0"))
+print(strings.pad_start("1234", 3, "0"))
+print(strings.pad_start("7", 0, "0"))
+print(strings.pad_start("7", 3, ""))
+print(strings.pad_end("7", 3, "."))
+print(strings.pad_end("abc", 3, "."))
+
+# --- count: non-overlapping, empty needle is zero ---
+print(strings.count("banana", "an"))
+print(strings.count("aaa", "aa"))
+print(strings.count("abcabc", "abc"))
+print(strings.count("x", ""))
+print(strings.count("", "a"))
+
+# --- char_at: the same as subscript, named ---
+print(char_at("hello", 0))
+print(char_at("hello", 4))
+print(char_at("hello", -1))
+try {
+	char_at("hi", 9)
+} catch e {
+	print(e.type)
+}
+try {
+	char_at("hi", 1.5)
+} catch e {
+	print(e.type)
+}
+
+# --- find: index or -1, empty needle at the start ---
+print(find("hello", "ll"))
+print(find("hello", "hello"))
+print(find("hello", ""))
+print(find("hello", "z"))
+print(find("hi", "hello"))
+print(find("", "a"))

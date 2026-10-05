@@ -377,6 +377,70 @@ static Value strcmp_native(VM *vm, int argc, Value *argv)
 	return NUMBER_VAL((double)(a->length - b->length));
 }
 
+/*
+ * char_at(s, i) -> string
+ *
+ * The one-byte string at index i, the same thing `s[i]` gives. It exists
+ * because a name says what it is for: `char_at` reads better in code that
+ * is walking a string, and `s[i]` stays the shorter form for the common case.
+ *
+ * A negative index counts from the end, like every other index in flint. Out
+ * of range is an error rather than nil: an index into a string is a bug at
+ * the call site, and the bounds check the subscript does not do is what this
+ * adds.
+ */
+static Value char_at_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	REQUIRE_STRING(vm, argv[0], "char_at()");
+	if (!IS_NUMBER(argv[1])) {
+		vm_runtime_error(vm, "char_at() index must be a number.");
+		return NIL_VAL;
+	}
+	ObjString *s = AS_STRING(argv[0]);
+	double d = AS_NUMBER(argv[1]);
+	if (d != (double)(int)d) {
+		vm_runtime_error(vm, "char_at() index must be a whole number.");
+		return NIL_VAL;
+	}
+	int i = (int)d;
+	if (i < 0)
+		i += s->length;
+	if (i < 0 || i >= s->length) {
+		vm_runtime_error(vm,
+		        "char_at() index %d out of bounds (len %d).",
+		        (int)d,
+		        s->length);
+		return NIL_VAL;
+	}
+	char c = s->chars[i];
+	return STR_VAL(new_string(vm, &c, 1));
+}
+
+/* find(s, needle) -> number: the index of needle in s, or -1. */
+static Value find_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	REQUIRE_STRING(vm, argv[0], "find()");
+	REQUIRE_STRING(vm, argv[1], "find()");
+
+	ObjString *hay = AS_STRING(argv[0]);
+	ObjString *needle = AS_STRING(argv[1]);
+	/* an empty needle is found at the start, which is the only answer
+	 * that keeps the result usable for slicing */
+	if (needle->length == 0)
+		return NUMBER_VAL(0);
+	if (needle->length > hay->length)
+		return NUMBER_VAL(-1);
+	for (int i = 0; i + needle->length <= hay->length; i++) {
+		if (memcmp(hay->chars + i,
+		            needle->chars,
+		            (size_t)needle->length) == 0)
+			return NUMBER_VAL((double)i);
+	}
+	return NUMBER_VAL(-1);
+}
+
 /* starts_with(s, prefix) -> bool */
 static Value starts_with_native(VM *vm, int argc, Value *argv)
 {
@@ -601,6 +665,8 @@ void register_string_natives(VM *vm)
 	vm_define_native(vm, "starts_with", starts_with_native, 2);
 	vm_define_native(vm, "__strcmp", strcmp_native, 2);
 	vm_define_native(vm, "ends_with", ends_with_native, 2);
+	vm_define_native(vm, "char_at", char_at_native, 2);
+	vm_define_native(vm, "find", find_native, 2);
 	vm_define_native(vm, "replace", replace_native, 3);
 	vm_define_native(vm, "lower", lower_native, 1);
 	vm_define_native(vm, "upper", upper_native, 1);
