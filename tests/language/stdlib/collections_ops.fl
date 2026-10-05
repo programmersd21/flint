@@ -1,0 +1,80 @@
+# collections: map, filter, reduce, reversed, min, max
+#
+# the four list helpers a program reaches for, plus the two variadic
+# comparisons. every one of them is tested on the empty case and on the
+# error case, because those are the two that get forgotten.
+
+import collections
+
+# --- map ---
+
+print(collections.map([1, 2, 3], fn(x) { return x * 2 }))
+print(collections.map([], fn(x) { return x }))
+print(collections.map(["a", "b"], fn(s) { return s + s }))
+
+# order is preserved, and the original is not mutated
+let src = [1, 2, 3]
+let doubled = collections.map(src, fn(x) { return x * 10 })
+print(src)
+print(doubled)
+
+# a callback that returns nil puts nil in the list, it does not drop it
+print(collections.map([1, 2], fn(x) { return nil }))
+
+# an error inside the callback propagates
+try {
+	collections.map([1, 2], fn(x) { return [][0] })
+} catch e {
+	print(e.type)
+}
+
+# --- filter ---
+
+print(collections.filter([1, 5, 9, 2], fn(x) { return x > 3 }))
+print(collections.filter([], fn(x) { return true }))
+print(collections.filter([1, 2, 3], fn(x) { return false }))
+
+# zero is truthy, so only nil and false are dropped
+print(collections.filter([0, 1, nil, false, 2], fn(x) { return x }))
+
+# --- reduce ---
+
+print(collections.reduce([1, 2, 3, 4], fn(a, b) { return a + b }))
+print(collections.reduce([1, 2, 3, 4], fn(a, b) { return a * b }))
+print(collections.reduce([7], fn(a, b) { return a + b }))
+print(collections.reduce([], fn(a, b) { return a + b }))
+
+# --- reversed ---
+
+print(collections.reversed([1, 2, 3]))
+print(collections.reversed([]))
+print(collections.reversed([1]))
+
+# reversed copies, reverse() mutates
+let r = [1, 2, 3]
+print(collections.reversed(r))
+print(r)
+
+# --- min / max ---
+
+print(min(3, 1, 2))
+print(max(3, 1, 2))
+print(min(-5))
+print(max(1.5, 2.5))
+print(min(1, 1, 1))
+
+try {
+	min()
+} catch e {
+	print(e.message)
+}
+
+try {
+	max(1, "a")
+} catch e {
+	print(e.message)
+}
+
+# a single argument is that argument, not an error
+print(min(42))
+print(max(42))

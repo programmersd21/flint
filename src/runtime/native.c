@@ -173,7 +173,53 @@ static Value chr_native(VM *vm, int argc, Value *argv)
 	return STR_VAL(new_string(vm, &c, 1));
 }
 
-/* strings and lists. byte length for strings, element count for lists. */
+/*
+ * min(a, b, ...) / max(a, b, ...)
+ *
+ * variadic because that is how they read at the call site: min(1, 2, 3)
+ * rather than min([1, 2, 3]). a single list argument is not unpacked --
+ * there is no implicit coercion, and a list is not a number.
+ *
+ * zero arguments has nothing to compare, so it is an error rather than nil:
+ * asking for the minimum of nothing is a bug at the call site, and nil would
+ * quietly become a value that flows onward.
+ */
+static Value minmax_native(VM *vm, int argc, Value *argv, bool want_max)
+{
+	const char *name = want_max ? "max" : "min";
+	if (argc == 0) {
+		vm_runtime_error(vm, "%s() needs at least one argument.", name);
+		return NIL_VAL;
+	}
+	Value best = argv[0];
+	for (int i = 1; i < argc; i++) {
+		/* a type failure names min or max and the offending argument,
+		 * rather than the generic "operands must be numbers" */
+		if (!IS_NUMBER(best) || !IS_NUMBER(argv[i])) {
+			vm_runtime_error(vm,
+			        "%s() takes numbers, but argument %d is not "
+				"one.",
+			        name,
+			        i);
+			return NIL_VAL;
+		}
+		if (want_max ? AS_NUMBER(argv[i]) > AS_NUMBER(best)
+		             : AS_NUMBER(argv[i]) < AS_NUMBER(best))
+			best = argv[i];
+	}
+	return best;
+}
+
+static Value min_native(VM *vm, int argc, Value *argv)
+{
+	return minmax_native(vm, argc, argv, false);
+}
+
+static Value max_native(VM *vm, int argc, Value *argv)
+{
+	return minmax_native(vm, argc, argv, true);
+}
+
 static Value len_native(VM *vm, int argc, Value *argv)
 {
 	(void)vm;
@@ -1020,6 +1066,8 @@ void register_natives(VM *vm)
 	 * a fixed-arity native cannot express that. the check is inside. */
 	vm_define_native(vm, "input", input_native, -1);
 	vm_define_native(vm, "len", len_native, 1);
+	vm_define_native(vm, "min", min_native, -1);
+	vm_define_native(vm, "max", max_native, -1);
 	vm_define_native(vm, "push", push_native, 2);
 	vm_define_native(vm, "pop", pop_native, 1);
 	vm_define_native(vm, "insert", insert_native, 3);

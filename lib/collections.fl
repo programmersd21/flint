@@ -158,3 +158,73 @@ export fn sort(xs) {
 
 
 
+
+# map(xs, f) -- a new list of f applied to each element, in order.
+#
+#     print(collections.map([1, 2, 3], fn(x) { return x * 2 }))    # [2, 4, 6]
+#
+# f is called with one argument and its result is kept, so a callback that
+# returns nil drops a nil into the list rather than shrinking it. an error
+# raised inside f propagates: map does not swallow it.
+export fn map(xs, f) {
+    let out = []
+    let i = 0
+    while i < len(xs) {
+        push(out, f(xs[i]))
+        i += 1
+    }
+    return out
+}
+
+# filter(xs, f) -- the elements f accepted, in order.
+#
+#     print(collections.filter([1, 5, 9, 2], fn(x) { return x > 3 }))  # [5, 9]
+#
+# f returns something truthy to keep an element. zero counts: only nil and
+# false are falsy, which is the same rule as everywhere else in flint.
+export fn filter(xs, f) {
+    let out = []
+    let i = 0
+    while i < len(xs) {
+        if f(xs[i]) {
+            push(out, xs[i])
+        }
+        i += 1
+    }
+    return out
+}
+
+# reduce(xs, f) -- fold the list into one value, left to right.
+#
+#     print(collections.reduce([1, 2, 3, 4], fn(a, b) { return a + b }))  # 10
+#
+# an empty list has nothing to fold, so it returns nil. a one-element list
+# returns that element without calling f at all, which means reduce over
+# one item is not a way to check that f works.
+export fn reduce(xs, f) {
+    if len(xs) == 0 {
+        return nil
+    }
+    let acc = xs[0]
+    let i = 1
+    while i < len(xs) {
+        acc = f(acc, xs[i])
+        i += 1
+    }
+    return acc
+}
+
+# reverse(xs) -- the elements back to front.
+#
+# collections.reverse() is not this: that one mutates in place, because
+# "reverse" on a list usually means "reverse it". this one copies, because
+# a helper that both mutates and copies is a helper nobody trusts.
+export fn reversed(xs) {
+    let out = []
+    let i = len(xs) - 1
+    while i >= 0 {
+        push(out, xs[i])
+        i -= 1
+    }
+    return out
+}

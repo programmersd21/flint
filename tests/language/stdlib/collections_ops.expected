@@ -1,0 +1,29 @@
+[2, 4, 6]
+[]
+["aa", "bb"]
+[1, 2, 3]
+[10, 20, 30]
+[nil, nil]
+ValueError
+[5, 9]
+[]
+[]
+[0, 1, 2]
+10
+24
+7
+nil
+[3, 2, 1]
+[]
+[1]
+[3, 2, 1]
+[1, 2, 3]
+1
+3
+-5
+2.5
+1
+min() needs at least one argument.
+max() takes numbers, but argument 1 is not one.
+42
+42
