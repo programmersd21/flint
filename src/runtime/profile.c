@@ -77,6 +77,20 @@ static void report_kb(FILE *out, const char *label, uint64_t bytes)
 	fprintf(out, "  %-22s %8.1f KiB\n", label, (double)bytes / 1024.0);
 }
 
+/* a duration in nanoseconds, printed as milliseconds. it is a separate
+ * function because gc_ns used to go through report_kb, which printed a
+ * duration in bytes -- "time in gc 0.0 KiB" is worse than no number. */
+static void report_ms(FILE *out, const char *label, uint64_t ns)
+{
+	fprintf(out, "  %-22s %8.3f ms\n", label, (double)ns / 1000000.0);
+}
+
+/* a wall-clock duration, same unit as the collector's own time */
+static void report_seconds(FILE *out, const char *label, uint64_t ns)
+{
+	fprintf(out, "  %-22s %8.3f s\n", label, (double)ns / 1000000000.0);
+}
+
 void fl_profile_report(void *out_handle, const FlCounters *c)
 {
 	FILE *out = (FILE *)out_handle;
@@ -99,7 +113,8 @@ void fl_profile_report(void *out_handle, const FlCounters *c)
 
 	fprintf(out, "\ncollector\n");
 	report_rate(out, "collections", c->gc_cycles, "");
-	report_kb(out, "time in gc", c->gc_ns / 1000);
+	report_ms(out, "time in gc", c->gc_ns);
+	report_seconds(out, "wall clock", c->wall_ns);
 	report_rate(out, "objects visited", c->gc_visited, "");
 	report_rate(out, "objects swept", c->gc_swept, "");
 	report_kb(out, "bytes reclaimed", c->gc_freed_bytes);

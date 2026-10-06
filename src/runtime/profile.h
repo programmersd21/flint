@@ -41,6 +41,10 @@ typedef struct {
 	uint64_t gc_visited; /* objects reached by mark */
 	uint64_t gc_swept; /* objects freed by sweep */
 	uint64_t gc_freed_bytes;
+	/* set by the driver from a wall clock, not by the runtime: the
+	 * runtime cannot time itself without paying for a clock read on
+	 * every instruction */
+	uint64_t wall_ns;
 	uint64_t gc_ns; /* nanoseconds inside the collector */
 
 	/* strings */

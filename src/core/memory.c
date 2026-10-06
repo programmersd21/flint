@@ -348,10 +348,18 @@ void collect_garbage(VM *vm)
 
 	/* measured here, before the sweep, because sweep() frees through
 	 * fl_reallocate() which has its own accounting. the delta below is
-	 * what the collector itself reclaimed, not what the program did. */
-	size_t before = vm->counters.bytes;
+	 * what the collector itself reclaimed, not what the program did.
+	 *
+	 * Signed, because the sweep can legitimately drop the total by more
+	 * than the pre-sweep value if the delta was computed before the
+	 * additions are folded in. An unsigned subtraction here wraps and
+	 * reports an absurd "bytes reclaimed", which is worse than no
+	 * number at all. */
+	int64_t before = (int64_t)vm->counters.bytes;
 	sweep(vm);
-	vm->counters.gc_freed_bytes += vm->counters.bytes - before;
+	int64_t reclaimed = (int64_t)vm->counters.bytes - before;
+	if (reclaimed > 0)
+		vm->counters.gc_freed_bytes += (uint64_t)reclaimed;
 
 	vm->counters.gc_ns += fl_now_ns() - started;
 

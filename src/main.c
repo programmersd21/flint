@@ -319,15 +319,16 @@ static int compile_and_maybe_run(
 		return 0;
 
 	uint64_t started = profile ? fl_now_ns() : 0;
+	/* the wall clock is reported from the counters, so it lands in the
+	 * same report as everything else instead of being printed beside it */
+	if (profile)
+		vm->counters.wall_ns = started;
 	InterpretResult result =
 	        vm_interpret_function(vm, function, source, name);
 	if (profile) {
-		uint64_t elapsed = fl_now_ns() - started;
+		vm->counters.wall_ns = fl_now_ns() - started;
 		fprintf(stderr, "\n");
 		fl_profile_report(stderr, &vm->counters);
-		fprintf(stderr,
-		        "\nwall clock                  %8.2f ms\n",
-		        (double)elapsed / 1e6);
 	}
 
 	if (result == INTERPRET_COMPILE_ERROR)
