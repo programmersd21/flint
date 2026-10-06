@@ -1717,6 +1717,17 @@ dispatch_resume:;
 			break;
 		}
 		case OP_IN: {
+			/*
+			 * No break out of these loops, on purpose. A break
+			 * inside an opcode handler is a handler ending to
+			 * the computed-goto transform, which rewrites every
+			 * one of them into a dispatch jump -- breaking out
+			 * of a search loop with one would skip the push
+			 * below and corrupt the stack in the goto build
+			 * only, while the switch build stays green. The
+			 * flag in the loop condition ends the search
+			 * instead, which both builds read the same way.
+			 */
 			Value collection = vm_pop(vm);
 			Value item = vm_pop(vm);
 			if (IS_STRING(collection) && IS_STRING(item)) {
@@ -1727,27 +1738,24 @@ dispatch_resume:;
 					found = true;
 				} else if (sub->length <= s->length) {
 					int limit = s->length - sub->length;
-					for (int i = 0; i <= limit; i++) {
+					for (int i = 0; i <= limit && !found;
+					        i++) {
 						if (memcmp(s->chars + i,
 						            sub->chars,
 						            (size_t)sub
 						                    ->length) ==
-						        0) {
+						        0)
 							found = true;
-							break;
-						}
 					}
 				}
 				vm_push(vm, BOOL_VAL(found));
 			} else if (IS_LIST(collection)) {
 				ObjList *list = AS_LIST(collection);
 				bool found = false;
-				for (int i = 0; i < list->count; i++) {
-					if (values_equal(
-					            list->items[i], item)) {
+				for (int i = 0; i < list->count && !found;
+				        i++) {
+					if (values_equal(list->items[i], item))
 						found = true;
-						break;
-					}
 				}
 				vm_push(vm, BOOL_VAL(found));
 			} else if (IS_FLINT_TABLE(collection) &&
@@ -1755,11 +1763,9 @@ dispatch_resume:;
 				ObjTable *t = AS_FLINT_TABLE(collection);
 				ObjString *key = AS_STRING(item);
 				bool found = false;
-				for (int i = 0; i < t->count; i++) {
-					if (fl_strings_equal(t->keys[i], key)) {
+				for (int i = 0; i < t->count && !found; i++) {
+					if (fl_strings_equal(t->keys[i], key))
 						found = true;
-						break;
-					}
 				}
 				vm_push(vm, BOOL_VAL(found));
 			} else if (IS_FLINT_TABLE(collection)) {
