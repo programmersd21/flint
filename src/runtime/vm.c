@@ -1709,6 +1709,62 @@ dispatch_resume:;
 			vm_push(vm, BOOL_VAL(!values_equal(a, b)));
 			break;
 		}
+		case OP_IN: {
+			Value collection = vm_pop(vm);
+			Value item = vm_pop(vm);
+			if (IS_STRING(collection) && IS_STRING(item)) {
+				ObjString *s = AS_STRING(collection);
+				ObjString *sub = AS_STRING(item);
+				bool found = false;
+				if (sub->length == 0) {
+					found = true;
+				} else if (sub->length <= s->length) {
+					int limit = s->length - sub->length;
+					for (int i = 0; i <= limit; i++) {
+						if (memcmp(s->chars + i,
+						            sub->chars,
+						            (size_t)sub
+						                    ->length) ==
+						        0) {
+							found = true;
+							break;
+						}
+					}
+				}
+				vm_push(vm, BOOL_VAL(found));
+			} else if (IS_LIST(collection)) {
+				ObjList *list = AS_LIST(collection);
+				bool found = false;
+				for (int i = 0; i < list->count; i++) {
+					if (values_equal(
+					            list->items[i], item)) {
+						found = true;
+						break;
+					}
+				}
+				vm_push(vm, BOOL_VAL(found));
+			} else if (IS_FLINT_TABLE(collection) &&
+			           IS_STRING(item)) {
+				ObjTable *t = AS_FLINT_TABLE(collection);
+				ObjString *key = AS_STRING(item);
+				bool found = false;
+				for (int i = 0; i < t->count; i++) {
+					if (fl_strings_equal(t->keys[i], key)) {
+						found = true;
+						break;
+					}
+				}
+				vm_push(vm, BOOL_VAL(found));
+			} else if (IS_FLINT_TABLE(collection)) {
+				vm_push(vm, BOOL_VAL(false));
+			} else {
+				vm_runtime_error(vm,
+				        "membership asks a string, list or "
+				        "table.");
+				RESUME_OR_RETURN_RUNTIME_ERROR();
+			}
+			break;
+		}
 		case OP_CAST: {
 			/*
 			 * `x as T`. Peek, check, and leave the value exactly

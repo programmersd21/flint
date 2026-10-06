@@ -390,10 +390,15 @@ Token scan_token(void)
 		if (match('.'))
 			return make_token(TOKEN_DOT_DOT);
 		return make_token(TOKEN_DOT);
-	/* "??" is nil-coalescing. a lone "?" is not valid flint. */
+	/* "??" is nil-coalescing, "??=" assigns the right side only when
+	 * the left is nil. a lone "?" is not valid flint. */
 	case '?':
-		if (match('?'))
+		if (match('?')) {
+			if (match('='))
+				return make_token(
+				        TOKEN_QUESTION_QUESTION_EQUAL);
 			return make_token(TOKEN_QUESTION_QUESTION);
+		}
 		return error_token("unexpected character '?'.");
 	case '-':
 		if (match('='))

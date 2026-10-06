@@ -45,11 +45,11 @@ This is where a C programmer's first `if (count)` port usually goes wrong.
 Operators, from loose to tight:
 
 ```text
-= += -= *= /=
+= += -= *= /= ??=
 ??
 or
 and
-== !=
+== != in
 < <= > >=
 ..
 + -
@@ -62,6 +62,12 @@ call, index, field
 `and` and `or` short-circuit and return an operand. `+` adds two numbers or
 joins two strings. There is no implicit conversion. Comparisons do not chain:
 `1 < 2 < 3` compares the boolean result of `1 < 2` with `3` and errors.
+
+`a ?? b` is `b` when `a` is nil, and `a` otherwise; only nil triggers, so
+`false`, `0` and `""` stay. `a ??= b` assigns `b` to `a` only when `a` is
+nil, and runs `b` only then. `x in y` is membership: a substring for
+strings, an element for lists, a key for tables, and a runtime error for
+anything else.
 
 `as` checks a value's type and leaves the value alone:
 

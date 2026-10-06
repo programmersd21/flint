@@ -1021,7 +1021,8 @@ static void parse_precedence(Precedence precedence)
 	if (can_assign &&
 	        (match(TOKEN_EQUAL) || match(TOKEN_PLUS_EQUAL) ||
 	                match(TOKEN_MINUS_EQUAL) || match(TOKEN_STAR_EQUAL) ||
-	                match(TOKEN_SLASH_EQUAL)))
+	                match(TOKEN_SLASH_EQUAL) ||
+	                match(TOKEN_QUESTION_QUESTION_EQUAL)))
 		error("invalid assignment target.");
 }
 
@@ -1189,6 +1190,22 @@ static void named_variable(Token name, bool can_assign)
 			break;
 		}
 		emit_variable_op(set_op, arg);
+	} else if (can_assign && match(TOKEN_QUESTION_QUESTION_EQUAL)) {
+		if (get_op == OP_GET_LOCAL &&
+		        state.current->locals[arg].is_const) {
+			error("can't assign to constant.");
+			return;
+		}
+		/* `a ??= b`: keep a when it is not nil, else store b.
+		 * the read stays on top of the stack the whole time, so
+		 * either path leaves exactly one value -- the same shape
+		 * as `??` itself, and for the same reason. */
+		emit_variable_op(get_op, arg);
+		int end_jump = emit_jump(OP_JUMP_IF_NOT_NIL);
+		emit_byte(OP_POP);
+		expression();
+		emit_variable_op(set_op, arg);
+		patch_jump(end_jump);
 	} else {
 		emit_variable_op(get_op, arg);
 	}
@@ -1329,6 +1346,24 @@ static void coalesce(bool can_assign)
 	emit_byte(OP_POP);
 	parse_precedence(PREC_COALESCE);
 	patch_jump(end_jump);
+}
+
+/*
+ * `item in collection`: substring for strings, element for lists, key for
+ * tables. Anything else is a runtime error, not false -- `1 in 2` is a
+ * mistake, and answering false would send the caller looking in the wrong
+ * place.
+ *
+ * Comparison precedence, like the other comparisons. Non-chaining:
+ * `a in b in c` parses as `(a in b) in c`, which then fails at runtime
+ * because the left is a bool. That failure is correct: chained membership
+ * would need parentheses to mean anything, so it asks for them by failing.
+ */
+static void membership(bool can_assign)
+{
+	(void)can_assign;
+	parse_precedence(PREC_RANGE);
+	emit_byte(OP_IN);
 }
 
 /*
@@ -1568,7 +1603,7 @@ static ParseRule rules[] = {
         [TOKEN_FOR] = {NULL, NULL, PREC_NONE},
         [TOKEN_IF] = {NULL, NULL, PREC_NONE},
         [TOKEN_IMPORT] = {NULL, NULL, PREC_NONE},
-        [TOKEN_IN] = {NULL, NULL, PREC_NONE},
+        [TOKEN_IN] = {NULL, membership, PREC_COMPARISON},
         [TOKEN_LET] = {NULL, NULL, PREC_NONE},
         [TOKEN_NIL] = {literal, NULL, PREC_NONE},
         [TOKEN_NOT] = {unary, NULL, PREC_NONE},

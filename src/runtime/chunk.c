@@ -124,6 +124,7 @@ int chunk_instruction_size(uint8_t opcode)
 	case OP_POP:
 	case OP_EQUAL:
 	case OP_NOT_EQUAL:
+	case OP_IN:
 	case OP_GREATER:
 	case OP_GREATER_EQUAL:
 	case OP_LESS:

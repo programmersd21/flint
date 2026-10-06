@@ -193,6 +193,8 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return simple_instruction("OP_EQUAL", offset);
 	case OP_NOT_EQUAL:
 		return simple_instruction("OP_NOT_EQUAL", offset);
+	case OP_IN:
+		return simple_instruction("OP_IN", offset);
 	case OP_CAST: {
 		/* the operand is a type tag, not a constant index, so it
 		 * gets its own printer rather than reusing byte_instruction

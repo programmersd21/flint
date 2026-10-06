@@ -73,6 +73,16 @@ typedef enum {
 	OP_EQUAL,
 	OP_NOT_EQUAL,
 	/*
+	 * Membership. Stack: [item][collection] -> [bool]. Strings ask
+	 * substring, lists ask element, tables ask key. Anything else is a
+	 * runtime error: membership in a number is a mistake, not a false.
+	 *
+	 * Emitted only by `in`. There is no builtin behind it -- a call
+	 * would need the callee under two already-pushed operands, and an
+	 * opcode is the honest shape for a two-operand question.
+	 */
+	OP_IN,
+	/*
 	 * Check the value's type and pass it through unchanged, or fail.
 	 * Operands: u8 FlType.
 	 *

@@ -1,0 +1,45 @@
+# `in` asks membership: substring for strings, element for lists, key
+# for tables. anything else is a runtime error, not false.
+print(1 in [1, 2, 3])
+print(9 in [1, 2, 3])
+print("a" in ["a", "b"])
+print("c" in ["a", "b"])
+print("ell" in "hello")
+print("z" in "hello")
+print("" in "hello")
+print("" in "")
+print("a" in {a: 1, b: 2})
+print("z" in {a: 1, b: 2})
+print(1 in {a: 1})
+
+# list elements compare with ==, which is identity for containers:
+# the same list is found, an equal-but-different one is not.
+let needle = [1]
+print(needle in [needle, [2]])
+print([1] in [[1], [2]])
+
+# combines with the other operators at the expected precedence:
+# comparisons bind tighter than `not`, looser than addition.
+print(not 9 in [1])
+print(1 + 1 in [2])
+if "a" in ["a", "b"] {
+    print("branch taken")
+}
+
+# membership in something that is not a container is a mistake, and
+# fails loudly instead of answering false.
+try {
+    print(1 in 2)
+} catch e {
+    print("number error")
+}
+try {
+    print("a" in nil)
+} catch e {
+    print("nil error")
+}
+try {
+    print(1 in true)
+} catch e {
+    print("bool error")
+}

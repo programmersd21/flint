@@ -1,0 +1,46 @@
+# ??= assigns the right side only when the left is nil. false, 0 and ""
+# are all values that stay: only nil triggers the fallback, which is the
+# entire difference from `or` and the reason both exist.
+let a = nil
+a ??= 1
+print(a)
+a ??= 2
+print(a)
+
+let b = false
+b ??= true
+print(b)
+
+let c = 0
+c ??= 99
+print(c)
+
+let d = ""
+d ??= "fallback"
+print(d)
+
+# the right side evaluates only when needed. if it ran every time, the
+# call would print on the second line too.
+fn noisy() {
+    print("evaluated")
+    return 7
+}
+let e = 3
+e ??= noisy()
+print(e)
+let f = nil
+f ??= noisy()
+print(f)
+
+# ??= is an expression, like the other assignments: it leaves the value.
+let g = nil
+print(g ??= 5)
+print(g)
+
+# globals, not just locals. like the other compound assignments, the
+# name must already be declared: there is nothing to read otherwise.
+let h = nil
+h ??= "global"
+print(h)
+h ??= "again"
+print(h)

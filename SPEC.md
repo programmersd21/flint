@@ -105,11 +105,11 @@ insertion order. a single variable over a table is a runtime error.
 
 loosest to tightest:
 
-1. assignment: `=`, `+=`, `-=`, `*=`, `/=`
+1. assignment: `=`, `+=`, `-=`, `*=`, `/=`, `??=`
 2. nil-coalescing: `??` (right associative)
 3. `or`
 4. `and`
-5. equality: `==`, `!=`
+5. equality: `==`, `!=`, `in`
 6. comparison: `<`, `<=`, `>`, `>=`
 7. range: `..`
 8. term: `+`, `-`
@@ -154,6 +154,26 @@ and tighter than assignment.
 ```flint
 let port = config["port"] ?? 8080
 ```
+
+### nil-coalescing assignment
+
+`a ??= b` evaluates `a`. when it is not nil nothing further happens and `b`
+never runs. when it is nil, `b` runs and its value is assigned to `a`.
+
+only nil triggers the assignment. `false`, `0`, `""`, `[]` and `{}` all
+stay. the target follows the ordinary assignment rules: the name must
+already be declared, and writing to a `const` is an error.
+
+### membership
+
+`x in y` is a boolean. `y` must be a string, list or table; anything else
+is a runtime error.
+
+for a string `y`, the result is whether `x` is a substring of `y`. for a
+list, whether any element equals `x` under `==`, which for containers means
+identity: the same object, not an equal one. for a table, whether `x` is a
+key of `y`; a non-string key is never a key, so the result is false rather
+than an error.
 
 ### destructuring
 

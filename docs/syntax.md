@@ -107,11 +107,11 @@ tightest binding first, which is the order you read them in:
 
 | level | operators | notes |
 |---|---|---|
-| 1 | `=`, `+=`, `-=`, `*=`, `/=` | assignment. right associative. |
+| 1 | `=`, `+=`, `-=`, `*=`, `/=`, `??=` | assignment. right associative. |
 | 2 | `??` | nil-coalescing. right associative. |
 | 3 | `or` | |
 | 4 | `and` | |
-| 5 | `==`, `!=` | |
+| 5 | `==`, `!=`, `in` | `in` is membership, see below |
 | 6 | `<`, `<=`, `>`, `>=` | not chainable, see below |
 | 7 | `..` | ranges only, inside `for` |
 | 8 | `+`, `-` | |
@@ -170,6 +170,44 @@ is not evaluated before the left is known to need it.
 
 binds looser than `or` and tighter than `=`, which is the order C# uses and
 reads the way you expect: `a or b ?? c` is `a or (b ?? c)`.
+
+### nil-coalescing assignment
+
+`a ??= b` assigns `b` to `a` only when `a` is nil, and leaves `a` alone
+otherwise. only nil triggers: `false`, `0` and `""` all stay.
+
+```flint
+let retries = nil
+retries ??= 3
+print(retries)   # 3
+let limit = 0
+limit ??= 10
+print(limit)     # 0
+```
+
+the right side runs only when the left is nil. `x ??= boom()` never calls
+`boom` when `x` already holds a value. the name must already be declared:
+`??=` on an undeclared name is a runtime error, the same as a plain
+assignment to it.
+
+### membership
+
+`x in y` asks whether `y` contains `x`. what "contains" means depends on
+`y`: a substring for strings, an element for lists, a key for tables.
+anything else is a runtime error.
+
+```flint
+print("ell" in "hello")   # true
+print(2 in [1, 2, 3])     # true
+print(9 in [1, 2, 3])     # false
+print("k" in {k: 1})      # true
+```
+
+list membership compares with `==`, so two containers are the same member
+only when they are the same object: `[1] in [[1]]` is false unless the
+inner list is that very list. a non-string key in a table is simply false:
+`1 in {k: 1}` is false. membership against anything that is not a string,
+list or table stops the program with a runtime error.
 
 ### destructuring
 
