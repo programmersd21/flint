@@ -594,7 +594,8 @@ static Value os_lookupenv_native(VM *vm, int argc, Value *argv)
 {
 	(void)argc;
 	if (!IS_STRING(argv[0])) {
-		vm_runtime_error(vm, "argument to lookupenv() must be a string.");
+		vm_runtime_error(
+		        vm, "argument to lookupenv() must be a string.");
 		return NIL_VAL;
 	}
 

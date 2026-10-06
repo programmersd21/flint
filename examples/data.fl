@@ -122,7 +122,7 @@ config.port = 9090
 print(config.port)
 
 print(config.missing)     # nil. not an error. a typo is silent, which is
-                          # the tradeoff for cheap partial records.
+# the tradeoff for cheap partial records.
 
 # adding a key grows the table; writing an existing key overwrites
 config.timeout = 30

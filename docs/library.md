@@ -841,3 +841,114 @@ form, where a space is `+`.
 none of these is a cipher. base64 is not encryption, and neither is hex.
 a malformed input is a runtime error naming the position, not a best
 effort: decoding `"zz"` as hex fails rather than returning half a byte.
+
+## env
+
+```flint
+import env
+
+print(env.string("HOST", "localhost"))  # text, or the fallback when unset
+print(env.int("PORT", 8080))            # a number, or the fallback
+print(env.bool("DEBUG", false))         # 1/true/yes/on/y mean true
+print(env.has("HOME"))                  # true when the variable is set at all
+print(env.paths("PATH"))                # split on the platform separator
+print(env.expand("~/notes"))            # leading ~ becomes the home directory
+env.set("FLINT_DEMO", "1")              # set it for this process and children
+env.unset("FLINT_DEMO")                 # remove it again
+```
+
+the runtime already has `env(name)`, `os.getenv`, `os.setenv` and
+`os.unsetenv`. this module is the parsing layer on top of them: a variable
+arrives as text and the script wants a number, a yes-or-no, or a list of
+paths. every getter takes the value to use when the variable is not set, so
+a caller never branches on nil.
+
+an empty value is a value: set-but-empty returns `""`, not the fallback,
+which is why `has` exists. `int` returns the fallback when the variable is
+unset or does not name a number, and `bool` treats anything set-but-not-true
+as false, because a misspelled config value should be a default, not a
+crash. `paths` splits on the platform separator and drops empty entries, so
+an unset variable is `[]` and safe to loop over. `expand` only touches a
+leading `~`; anything else, or a missing home directory, comes back
+unchanged. `set` returns false when the name is invalid -- empty or
+containing `=` -- and `unset` succeeds even when nothing was set.
+
+## strings
+
+```flint
+import strings
+
+print(strings.repeat("ab", 3))       # ababab
+print(strings.reverse("stressed"))   # desserts
+print(strings.is_empty(""))          # true
+print(strings.slice("hello", 1, 4))  # ell
+print(strings.pad_start("7", 3, "0"))  # 007
+print(strings.pad_end("7", 3, "0"))    # 700
+print(strings.count("banana", "an"))   # 2
+```
+
+the runtime's own string primitives -- `split`, `join`, `trim`, `lower`,
+`upper`, `replace`, `find`, `char_at` -- are builtins and need no import.
+what is here is what a script writes often enough to deserve a name. a
+negative `repeat` count gives `""`, and `pad_start`/`pad_end` return the
+string unchanged when it is already at width or the fill is empty. `count`
+tallies non-overlapping occurrences, and an empty needle counts zero.
+
+everything here counts bytes, not characters. flint strings are byte
+sequences, so `len`, subscripting, and these helpers all see a multibyte
+utf-8 character as a run of bytes. that is consistent rather than
+unicode-aware, and `reverse` on such a string breaks the character apart
+rather than working around it.
+
+## glob
+
+```flint
+import glob
+
+print(glob.match("*.fl", "args.fl"))            # true
+print(glob.filter("*.fl", ["a.fl", "b.txt"]))  # ["a.fl"]
+print(glob.list("lib", "*.fl"))                # matching entries, sorted
+```
+
+shell-style filename matching with no dependencies: `*` matches any run
+including empty, `?` matches exactly one character, and `[...]` classes
+take ranges (`[a-z]`) and negation (`[!abc]`). anything else matches
+literally, and an unclosed `[` is a literal bracket rather than an error.
+
+`match` says whether the whole name fits the pattern. `filter` keeps the
+matching names and keeps their order: filtering selects, it does not sort.
+`list` matches against each entry of a directory, skipping `.` and `..`,
+and returns the hits sorted, because the filesystem promises no order and
+a test depending on readdir order fails on someone else's machine. it
+returns nil when the directory cannot be read and `[]` when nothing
+matches, so those two answers stay distinguishable. the underscore names
+(`_match`, `_class_end`, `_class_hit`, `_sort`) are the module's own
+helpers, not part of what a script imports it for.
+
+## terminal
+
+```flint
+import terminal
+
+print(terminal.width())              # $COLUMNS, or 80
+print(terminal.height())             # $LINES, or 24
+print(terminal.is_tty())             # false when TERM is unset or "dumb"
+print(terminal.hyperlink("docs", "https://example.com"))
+print(terminal.progress_bar(0.5, 10))
+print(terminal.spinner_frame(0))
+```
+
+small terminal helpers, all pure flint. sizes come from the `COLUMNS` and
+`LINES` environment variables, falling back to 80 and 24 when they are
+unset or do not name a positive number. colors and cursor movement live in
+`ansi.fl`; this module is the rest: sizes, tty guessing, hyperlinks, and
+progress widgets.
+
+`is_tty` is honestly a guess: flint has no isatty binding, so it is
+env-based heuristics only -- false when `TERM` is unset, empty, or
+`"dumb"`, true otherwise. a pipe with `TERM` set still reads true, which
+is wrong, and unavoidable until the runtime exposes isatty. `hyperlink`
+wraps text in an OSC-8 link that terminals without support render as plain
+text. `progress_bar` clamps its fraction to 0..1 and fills with blocks
+against light shade inside brackets; `spinner_frame` cycles `"|/-\\"`
+for any integer, including negatives.

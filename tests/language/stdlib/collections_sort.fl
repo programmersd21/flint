@@ -32,23 +32,23 @@ print(sorted)
 
 # mixed kinds are refused rather than silently coerced
 try {
-	collections.sort([1, "a"])
+    collections.sort([1, "a"])
 } catch e {
-	print(e.type)
-	print(e.message)
+    print(e.type)
+    print(e.message)
 }
 
 try {
-	collections.sort([true, false])
+    collections.sort([true, false])
 } catch e {
-	print(e.type)
+    print(e.type)
 }
 
 # a single element of an unsupported kind is refused too
 try {
-	collections.sort([nil])
+    collections.sort([nil])
 } catch e {
-	print(e.type)
+    print(e.type)
 }
 
 # __strcmp is the primitive underneath: negative, zero, positive
@@ -62,7 +62,7 @@ print(__strcmp("Z", "a") < 0)
 
 # it refuses non-strings like every other string primitive
 try {
-	__strcmp(1, 2)
+    __strcmp(1, 2)
 } catch e {
-	print(e.type)
+    print(e.type)
 }

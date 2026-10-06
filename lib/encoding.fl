@@ -75,7 +75,7 @@ export fn base64_encode(bytes) {
     let i = 0
     while i + 2 < len(bytes) {
         let n = ord(bytes[i]) * 65536 + ord(bytes[i + 1]) * 256
-                + ord(bytes[i + 2])
+        + ord(bytes[i + 2])
         out += __slice(B64, __trunc(n / 262144), __trunc(n / 262144) + 1)
         out += __slice(B64, __trunc(n / 4096) % 64, __trunc(n / 4096) % 64 + 1)
         out += __slice(B64, __trunc(n / 64) % 64, __trunc(n / 64) % 64 + 1)
@@ -187,7 +187,7 @@ export fn url_encode(text) {
         } else {
             let n = ord(c)
             out += "%" + __slice(HEX_DIGITS, __trunc(n / 16), __trunc(n / 16) + 1)
-                   + __slice(HEX_DIGITS, __trunc(n % 16), __trunc(n % 16) + 1)
+            + __slice(HEX_DIGITS, __trunc(n % 16), __trunc(n % 16) + 1)
         }
         i += 1
     }

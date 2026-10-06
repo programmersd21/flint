@@ -15,9 +15,9 @@ import process
 
 let steps = [
     ["cc", "-fsyntax-only", "-Isrc/core", "-Isrc/frontend",
-     "-Isrc/runtime", "-Isrc/util", "src/main.c"],
+        "-Isrc/runtime", "-Isrc/util", "src/main.c"],
     ["cc", "-fsyntax-only", "-Isrc/core", "-Isrc/frontend",
-     "-Isrc/runtime", "-Isrc/util", "src/runtime/vm.c"]
+        "-Isrc/runtime", "-Isrc/util", "src/runtime/vm.c"]
 ]
 
 let failed = false

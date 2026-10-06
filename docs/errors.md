@@ -134,6 +134,7 @@ with a capital because the legacy wording predates structured diagnostics.
 | `String index must be a whole number.` | fractional string index |
 | `String is too long to concatenate.` | the two lengths would overflow int |
 | `Only tables have fields.` | `.name` on something that is not a table |
+| `membership asks a string, list or table.` | `in` against something that is not a string, list or table |
 | `Expected type 'T' but got 'U'.` | an `as` assertion that did not hold |
 | `Expected N arguments but got M.` | call arity |
 | `Stack overflow.` | more than 256 frames, including runaway recursion |

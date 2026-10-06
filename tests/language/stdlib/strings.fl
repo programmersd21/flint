@@ -48,14 +48,14 @@ print(char_at("hello", 0))
 print(char_at("hello", 4))
 print(char_at("hello", -1))
 try {
-	char_at("hi", 9)
+    char_at("hi", 9)
 } catch e {
-	print(e.type)
+    print(e.type)
 }
 try {
-	char_at("hi", 1.5)
+    char_at("hi", 1.5)
 } catch e {
-	print(e.type)
+    print(e.type)
 }
 
 # --- find: index or -1, empty needle at the start ---

@@ -64,9 +64,9 @@ permissions; flint adds no sandbox.
 ## toolchain
 
 the `flint` executable runs scripts, `-e` code, stdin and the repl, plus
-`flint sync` and the diagnostic flags. there are no `check`, `test`, `fmt`,
-`lint`, `build`, `debug`, `profile`, `doc`, `package`, `install` or `lsp`
-subcommands.
+`flint sync`, `flint test`, `flint fmt` and the diagnostic flags. there are
+no `check`, `lint`, `build`, `debug`, `profile`, `doc`, `package`,
+`install` or `lsp` subcommands.
 
 there is no package manager, no registry and no lockfile. `flint.toml` is
 not a source format. the only ways to get code into a script are

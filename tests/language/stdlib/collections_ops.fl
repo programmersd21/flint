@@ -23,9 +23,9 @@ print(collections.map([1, 2], fn(x) { return nil }))
 
 # an error inside the callback propagates
 try {
-	collections.map([1, 2], fn(x) { return [][0] })
+    collections.map([1, 2], fn(x) { return [][0] })
 } catch e {
-	print(e.type)
+    print(e.type)
 }
 
 # --- filter ---
@@ -64,15 +64,15 @@ print(max(1.5, 2.5))
 print(min(1, 1, 1))
 
 try {
-	min()
+    min()
 } catch e {
-	print(e.message)
+    print(e.message)
 }
 
 try {
-	max(1, "a")
+    max(1, "a")
 } catch e {
-	print(e.message)
+    print(e.message)
 }
 
 # a single argument is that argument, not an error

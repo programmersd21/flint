@@ -15,7 +15,7 @@ print(collections.enumerate([42]))
 # read by index, which is how a list of pairs is consumed
 let xs = ["x", "y"]
 for pair in collections.enumerate(xs) {
-	print(pair[0], pair[1])
+    print(pair[0], pair[1])
 }
 
 # --- zip ---
@@ -38,15 +38,15 @@ print(collections.range_list(3, 3, 1))
 
 # a zero step is refused
 try {
-	collections.range_list(0, 10, 0)
+    collections.range_list(0, 10, 0)
 } catch e {
-	print(e.type)
+    print(e.type)
 }
 
 # range_list matches the for-range semantics
 let total = 0
 for n in 0..5..1 {
-	total += n
+    total += n
 }
 print(total)
 print(collections.range_list(0, 5, 1))

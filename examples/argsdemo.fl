@@ -1,0 +1,16 @@
+# argsdemo -- what the script was given on the command line.
+#
+# run it:  ./flint examples/argsdemo.fl hello --out result.txt
+#
+# the alias is required, not style: a bare `import args` binds `args` in
+# your globals and shadows the builtin `args()` the module itself calls.
+# get() answers nil past the end rather than failing, because a missing
+# argument is a normal thing to check for.
+
+import args as argv
+
+print("count: " + str(argv.count()))
+print(argv.all())
+print("first: " + str(argv.get(0)))
+print("has --out: " + str(argv.has("--out")))
+print("value of --out: " + str(argv.value("--out")))

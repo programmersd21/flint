@@ -1,0 +1,19 @@
+# envconfig -- read server config from the environment, with fallbacks.
+#
+# run it:  ./flint examples/envconfig.fl
+#           PORT=9000 DEBUG=1 HOST=example.com ./flint examples/envconfig.fl
+#
+# every getter takes its fallback, so there is no branch on nil: unset
+# means the default. PORT parses as a number (a misspelling is the
+# fallback, not a crash), DEBUG treats 1/true/yes/on/y as true, and HOST
+# is plain text. an empty HOST is a value, not a missing one -- see the
+# env module's has() for telling those apart.
+
+import env
+
+let host = env.string("HOST", "localhost")
+let port = env.int("PORT", 8080)
+let debug = env.bool("DEBUG", false)
+
+# str() because + only joins two strings, and port is a number.
+print("listening on " + host + ":" + str(port) + " debug=" + str(debug))

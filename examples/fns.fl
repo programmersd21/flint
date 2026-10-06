@@ -7,30 +7,30 @@
 # --- named ---
 
 fn add(a, b) {
-	return a + b
+    return a + b
 }
 print(add(2, 3))
 
 # --- literal, bound to a name ---
 
 let square = fn(x) {
-	return x * x
+    return x * x
 }
 print(square(5))
 
 # --- literal, passed straight through ---
 
 fn apply(f, v) {
-	return f(v)
+    return f(v)
 }
 print(apply(fn(x) { return x + 1 }, 41))
 
 # --- a closure, either way ---
 
 fn adder(base) {
-	return fn(x) {
-		return base + x
-	}
+    return fn(x) {
+        return base + x
+    }
 }
 let add10 = adder(10)
 print(add10(5))
@@ -38,24 +38,24 @@ print(add10(5))
 # --- recursion through the binding ---
 
 let fact = fn(n) {
-	if n <= 1 {
-		return 1
-	}
-	return n * fact(n - 1)
+    if n <= 1 {
+        return 1
+    }
+    return n * fact(n - 1)
 }
 print(fact(5))
 
 # --- many of them, each over its own captured variable ---
 
 fn make_adders() {
-	let out = []
-	let i = 0
-	while i < 3 {
-		let captured = i
-		push(out, fn(x) { return captured + x })
-		i += 1
-	}
-	return out
+    let out = []
+    let i = 0
+    while i < 3 {
+        let captured = i
+        push(out, fn(x) { return captured + x })
+        i += 1
+    }
+    return out
 }
 
 let adders = make_adders()
@@ -66,7 +66,7 @@ print(adders[2](10))
 # --- an error inside a literal is an ordinary error ---
 
 try {
-	apply(fn(x) { return [1, 2][10] }, 1)
+    apply(fn(x) { return [1, 2][10] }, 1)
 } catch err {
-	print("caught: " + err.message)
+    print("caught: " + err.message)
 }

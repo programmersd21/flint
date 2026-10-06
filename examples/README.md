@@ -13,6 +13,8 @@ bottom rather than dipping in.
 | [input.fl](input.fl) | prompts, lines, empty input, EOF, and a long line |
 | [closures.fl](closures.fl) | capture by reference, the factory pattern, `map`/`filter` |
 | [data.fl](data.fl) | lists, tables, strings, and the functions the library omits |
+| [envconfig.fl](envconfig.fl) | the env module: PORT/DEBUG/HOST with fallbacks |
+| [argsdemo.fl](argsdemo.fl) | the args module: count, get, flags, and flag values |
 | [modules/](modules/) | a four-file program: import, export, shared globals, const |
 
 ## running them
@@ -26,6 +28,8 @@ from the repository root:
 ./flint examples/math.fl
 ./flint examples/closures.fl
 ./flint examples/data.fl
+./flint examples/envconfig.fl
+./flint examples/argsdemo.fl hello --out result.txt
 printf 'Ada\nsecond\n\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n21' | ./flint examples/input.fl
 ```
 
