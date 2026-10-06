@@ -1,0 +1,101 @@
+# terminal -- small terminal helpers, all pure flint.
+#
+#     import terminal
+#     print(terminal.width())
+#     print(terminal.progress_bar(0.5, 10))
+#     print(terminal.spinner_frame(0))
+#
+# sizes come from the COLUMNS and LINES environment variables, falling back
+# to 80 and 24 when they are unset or do not name a positive number. colors
+# and cursor movement are ansi.fl; this module is the rest: sizes, tty
+# guessing, hyperlinks, and progress widgets.
+
+# _to_int parses text as a number, giving fallback when the text is empty
+# or does not name a number. num() raises on those, and a size reader
+# should fall back rather than stop the script.
+export fn _to_int(text, fallback) {
+    if text == nil or text == "" {
+        return fallback
+    }
+    try {
+        return num(text)
+    } catch e {
+        return fallback
+    }
+}
+
+# width() is the terminal width in columns: $COLUMNS, or 80 when it is
+# unset or not a positive number.
+export fn width() {
+    let w = _to_int(__os_lookupenv("COLUMNS"), 80)
+    if w <= 0 {
+        return 80
+    }
+    return w
+}
+
+# height() is the terminal height in rows: $LINES, or 24 when it is unset
+# or not a positive number.
+export fn height() {
+    let h = _to_int(__os_lookupenv("LINES"), 24)
+    if h <= 0 {
+        return 24
+    }
+    return h
+}
+
+# is_tty() guesses whether output is a terminal. honestly: flint has no
+# isatty binding, so this is env-based heuristics only -- false when TERM
+# is unset or "dumb", true otherwise. a pipe with TERM set still reads
+# true, which is wrong, and unavoidable until the runtime exposes isatty.
+export fn is_tty() {
+    let term = __os_lookupenv("TERM")
+    if term == nil or term == "" or lower(term) == "dumb" {
+        return false
+    }
+    return true
+}
+
+# hyperlink(text, url) wraps text in an OSC-8 link. terminals that do not
+# understand it show the text; the url travels in the escape sequence.
+# the escape is chr(27): flint strings have no \x escapes, so the byte is
+# built rather than written literally.
+export fn hyperlink(text, url) {
+    let esc = chr(27)
+    return esc + "]8;;" + url + esc + "\\" + text + esc + "]8;;" + esc + "\\"
+}
+
+# progress_bar(frac, w) draws a bar w cells wide: filled with blocks and
+# the rest with light shade, wrapped in brackets. frac is clamped to 0..1,
+# and a non-positive width gives just the brackets.
+export fn progress_bar(frac, w) {
+    if frac < 0 {
+        frac = 0
+    }
+    if frac > 1 {
+        frac = 1
+    }
+    let bar = "["
+    let i = 0
+    while i < w {
+        if i < frac * w {
+            bar = bar + "█"
+        } else {
+            bar = bar + "░"
+        }
+        i += 1
+    }
+    return bar + "]"
+}
+
+# spinner_frame(i) is frame i of a spinner, cycling "|/-\\". any integer
+# works, including negatives: frame -1 is the last frame.
+export fn spinner_frame(i) {
+    let frames = "|/-\\"
+    let n = len(frames)
+    let k = i % n
+    if k < 0 {
+        k += n
+    }
+    return __slice(frames, k, k + 1)
+}

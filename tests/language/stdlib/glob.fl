@@ -1,0 +1,53 @@
+import glob
+
+# star matches any run, including empty
+print(glob.match("*", ""))
+print(glob.match("*", "anything.fl"))
+print(glob.match("*.fl", "args.fl"))
+print(glob.match("*.fl", "args.txt"))
+print(glob.match("a*b", "ab"))
+print(glob.match("a*b", "axxxb"))
+print(glob.match("a*b", "axxxc"))
+print(glob.match("**", "deep"))
+
+# question mark takes exactly one character
+print(glob.match("a?c", "abc"))
+print(glob.match("a?c", "ac"))
+print(glob.match("a?c", "abbc"))
+print(glob.match("???", "abc"))
+print(glob.match("???", "ab"))
+
+# classes, ranges, negation
+print(glob.match("[abc]", "b"))
+print(glob.match("[abc]", "d"))
+print(glob.match("[a-z]", "m"))
+print(glob.match("[a-z]", "M"))
+print(glob.match("[!abc]", "d"))
+print(glob.match("[!abc]", "a"))
+print(glob.match("file[0-9].txt", "file7.txt"))
+print(glob.match("file[0-9].txt", "filex.txt"))
+
+# empty pattern and literal text
+print(glob.match("", ""))
+print(glob.match("", "x"))
+print(glob.match("exact", "exact"))
+print(glob.match("exact", "exac"))
+
+# filter keeps input order and selects only hits
+print(glob.filter("*.fl", ["a.fl", "b.txt", "c.fl"]))
+print(glob.filter("???", ["a", "abc", "abcd", "xyz"]))
+
+# list on a temp dir: sorted, so the output is deterministic
+let dir = "/tmp/flint-glob-test"
+__mkdir(dir)
+write_file(dir + "/b.fl", "x")
+write_file(dir + "/a.fl", "x")
+write_file(dir + "/c.txt", "x")
+print(glob.list(dir, "*.fl"))
+print(glob.list(dir, "*"))
+print(glob.list("/no/such/directory/flint-glob-test", "*"))
+__remove(dir + "/b.fl")
+__remove(dir + "/a.fl")
+__remove(dir + "/c.txt")
+__remove(dir)
+print("cleaned")

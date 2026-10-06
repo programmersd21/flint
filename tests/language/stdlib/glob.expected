@@ -1,0 +1,31 @@
+true
+true
+true
+false
+true
+true
+false
+true
+true
+false
+false
+true
+false
+true
+false
+true
+false
+true
+false
+true
+false
+true
+false
+true
+false
+["a.fl", "c.fl"]
+["abc", "xyz"]
+["a.fl", "b.fl"]
+["a.fl", "b.fl", "c.txt"]
+nil
+cleaned

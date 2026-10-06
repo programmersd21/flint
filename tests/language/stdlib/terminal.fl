@@ -1,0 +1,50 @@
+import terminal
+
+# defaults when nothing is set
+__os_unsetenv("COLUMNS")
+__os_unsetenv("LINES")
+print(terminal.width())
+print(terminal.height())
+
+# set values are honored
+__os_setenv("COLUMNS", "120")
+__os_setenv("LINES", "40")
+print(terminal.width())
+print(terminal.height())
+
+# bad values fall back
+__os_setenv("COLUMNS", "wide")
+__os_setenv("LINES", "-3")
+print(terminal.width())
+print(terminal.height())
+__os_setenv("COLUMNS", "")
+__os_unsetenv("LINES")
+print(terminal.width())
+print(terminal.height())
+__os_unsetenv("COLUMNS")
+
+# tty guessing is env heuristics: unset or dumb means false
+__os_unsetenv("TERM")
+print(terminal.is_tty())
+__os_setenv("TERM", "dumb")
+print(terminal.is_tty())
+__os_setenv("TERM", "xterm-256color")
+print(terminal.is_tty())
+__os_setenv("TERM", "DUMB")
+print(terminal.is_tty())
+
+# widgets
+print(terminal.progress_bar(0.5, 10))
+print(terminal.progress_bar(0, 4))
+print(terminal.progress_bar(1, 4))
+print(terminal.progress_bar(2, 4))
+print(terminal.progress_bar(-1, 4))
+print(terminal.spinner_frame(0))
+print(terminal.spinner_frame(1))
+print(terminal.spinner_frame(2))
+print(terminal.spinner_frame(3))
+print(terminal.spinner_frame(4))
+print(terminal.spinner_frame(-1))
+print(len(terminal.hyperlink("docs", "https://example.com")))
+print(contains(terminal.hyperlink("docs", "https://example.com"), "docs"))
+print(contains(terminal.hyperlink("docs", "https://example.com"), "https://example.com"))
