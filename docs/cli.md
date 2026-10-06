@@ -53,6 +53,18 @@ assert(parse("a b") == ["a", "b"], "split on a single space")
 the name of a test file is its description, so it should read as one:
 `collections_sort_test.fl` rather than `test3.fl`.
 
+## fmt
+
+```sh
+flint fmt program.fl
+flint fmt [--check] a.fl b.fl
+```
+
+rewrites each file in canonical layout: 4-space indentation, no trailing
+whitespace, a single trailing newline. the contents of multiline strings
+are left alone. `--check` lists the files that would change and exits 1
+when any would, rewriting nothing: the shape CI wants.
+
 ## sync
 
 ```sh
@@ -74,6 +86,21 @@ flint --explain E0600                    # what a diagnostic code means
 flint --fix program.fl                   # apply machine-applicable fixes
 flint --warnings=none program.fl         # errors only
 flint --quiet                            # no repl prompt
+flint --stats -e 'print(1)'              # size summary on stderr, then runs
+```
+
+`--stats` prints the function count, the bytecode bytes and the constant
+count to stderr, then runs the program as normal.
+
+## repl history
+
+the repl remembers lines across sessions. `:history` lists the numbered
+entries, and `!N` re-runs entry `N`:
+
+```sh
+$ printf '1+2\n:history\n' | flint --quiet
+3
+  1  1+2
 ```
 
 ## version

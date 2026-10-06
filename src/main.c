@@ -11,6 +11,7 @@
 #include "value.h"
 #include "vm.h"
 #include "compiler.h"
+#include "fmt.h"
 #include "diagnostic.h"
 #include "object.h"
 #include "debug.h"
@@ -110,13 +111,16 @@ static void repl_help(void)
 {
 	printf("\n");
 	printf("  :help      this text\n");
+	printf("  :history   what you typed this session and before\n");
 	printf("  :quit      leave, same as ctrl-d\n");
+	printf("  !N        run history entry N again\n");
 	printf("\n");
-	printf("  each line is its own script. state carries over through\n");
-	printf("  globals, so `x = 1` then `x + 1` works. a block that is\n");
-	printf("  not closed yet is a syntax error; there is no multi-line\n");
-	printf("  input, which is a real limitation and not a design "
-	       "choice.\n");
+	printf("  each entry is its own script. state carries over through\n");
+	printf("  globals, so `x = 1` then `x + 1` works. multi-line input\n");
+	printf("  keeps reading with `... ` until the entry is complete.\n");
+	printf("  history lives in ~/.flint_history when HOME names a\n");
+	printf("  directory it can be written to; otherwise it is this\n");
+	printf("  session only, and nothing complains about it.\n");
 	printf("\n");
 	printf("  try:\n");
 	printf("    1 + 2\n");
@@ -124,6 +128,92 @@ static void repl_help(void)
 	printf("    for x in xs { print(x * 2) }\n");
 	printf("    split(\"a,b,c\", \",\")\n");
 	printf("\n");
+}
+
+/*
+ * Repl history. fgets gives no line editing, so this is not readline: it
+ * is a record. Every executed entry is appended to ~/.flint_history when
+ * that file can be written, and `:history` lists entries while `!N` runs
+ * one again. Both degrade silently -- a repl that cannot write history is
+ * still a repl, and saying so on every line would be worse than silence.
+ */
+#define REPL_HISTORY_MAX 500
+
+typedef struct {
+	char *entries[REPL_HISTORY_MAX];
+	int count;
+} ReplHistory;
+
+static void repl_history_path(char *out, size_t size)
+{
+	const char *home = getenv("HOME");
+	if (home == NULL || home[0] == '\0') {
+		out[0] = '\0';
+		return;
+	}
+	snprintf(out, size, "%s/.flint_history", home);
+}
+
+static void repl_history_add(ReplHistory *history, const char *entry)
+{
+	if (history->count == REPL_HISTORY_MAX)
+		return;
+	size_t n = strlen(entry);
+	char *copy = malloc(n + 1);
+	if (copy == NULL)
+		return;
+	memcpy(copy, entry, n + 1);
+	history->entries[history->count++] = copy;
+}
+
+static void repl_history_load(ReplHistory *history)
+{
+	char path[1024];
+	repl_history_path(path, sizeof(path));
+	if (path[0] == '\0')
+		return;
+	FILE *file = fopen(path, "r");
+	if (file == NULL)
+		return;
+	char line[8192];
+	while (history->count < REPL_HISTORY_MAX &&
+	        fgets(line, sizeof(line), file) != NULL) {
+		size_t n = strlen(line);
+		while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
+			line[--n] = '\0';
+		if (n > 0)
+			repl_history_add(history, line);
+	}
+	fclose(file);
+}
+
+static void repl_history_save(const char *entry)
+{
+	char path[1024];
+	repl_history_path(path, sizeof(path));
+	if (path[0] == '\0')
+		return;
+	FILE *file = fopen(path, "a");
+	if (file == NULL)
+		return;
+	fputs(entry, file);
+	if (entry[strlen(entry)] != '\n')
+		fputc('\n', file);
+	fclose(file);
+}
+
+static void repl_history_list(const ReplHistory *history)
+{
+	int from = history->count > 20 ? history->count - 20 : 0;
+	for (int i = from; i < history->count; i++)
+		printf("  %d  %s\n", i + 1, history->entries[i]);
+}
+
+static void repl_history_free(ReplHistory *history)
+{
+	for (int i = 0; i < history->count; i++)
+		free(history->entries[i]);
+	history->count = 0;
 }
 
 /*
@@ -136,6 +226,8 @@ static int repl(VM *vm)
 {
 	int worst = 0;
 	char line[1024];
+	ReplHistory history = {0};
+	repl_history_load(&history);
 	print_banner(vm);
 	for (;;) {
 		/*
@@ -214,12 +306,34 @@ static int repl(VM *vm)
 			if (strcmp(typed, ":help\n") == 0 ||
 			        strcmp(typed, ":help\r\n") == 0)
 				repl_help();
-			else if (strncmp(typed, ":q", 2) == 0)
+			else if (strncmp(typed, ":history", 8) == 0)
+				repl_history_list(&history);
+			else if (strncmp(typed, ":q", 2) == 0) {
 				break;
-			else
+			} else
 				printf("unknown command. try :help\n");
 			continue;
 		}
+
+		/* `!N` runs history entry N again. the entry is echoed, so
+		 * what runs is visible in the session, and it is not
+		 * recorded twice: the original is the history. */
+		if (*typed == '!') {
+			long n = strtol(typed + 1, NULL, 10);
+			if (n < 1 || n > history.count) {
+				printf("no history entry %s", typed + 1);
+				continue;
+			}
+			const char *entry = history.entries[n - 1];
+			printf("%s\n", entry);
+			memmove(line, entry, strlen(entry) + 1);
+			goto run_line;
+		}
+
+		/* a recall is already history; only new input is recorded. */
+		repl_history_add(&history, line);
+		repl_history_save(line);
+run_line:;
 
 		/*
 		 * Echo mode, and it is on for the repl only. In a script
@@ -245,6 +359,7 @@ static int repl(VM *vm)
 				vm_print_value(v);
 		}
 	}
+	repl_history_free(&history);
 	return worst;
 }
 
@@ -258,7 +373,30 @@ typedef struct {
 	bool dump_bytecode; /* print the bytecode before running */
 	bool trace; /* print every instruction as it executes */
 	bool profile; /* print counters after the run */
+	bool stats; /* print static program stats, then run */
 } FlRunMode;
+
+/* static stats over a compiled function and everything nested in it.
+ * --profile asks what the run did; --stats asks what the program is:
+ * how many functions, how many bytes of bytecode, how many constants.
+ * to stderr, so stdout stays the program's. */
+typedef struct {
+	int functions;
+	int bytes;
+	int constants;
+} FlStats;
+
+static void fl_stats_walk(ObjFunction *function, FlStats *stats)
+{
+	stats->functions++;
+	stats->bytes += function->chunk.count;
+	stats->constants += function->chunk.constants.count;
+	for (int i = 0; i < function->chunk.constants.count; i++) {
+		Value constant = function->chunk.constants.values[i];
+		if (IS_FUNCTION(constant))
+			fl_stats_walk(AS_FUNCTION(constant), stats);
+	}
+}
 
 /*
  * Compile a source text and either dump it or run it.
@@ -277,6 +415,7 @@ static int compile_and_maybe_run(
 	bool check_only = mode->check;
 	bool dump_bytecode = mode->dump_bytecode;
 	bool profile = mode->profile;
+	bool stats = mode->stats;
 	ObjFunction *function = compile_named(vm, source, name);
 	if (function == NULL)
 		return 65;
@@ -313,6 +452,14 @@ static int compile_and_maybe_run(
 						: "<anonymous>");
 			}
 		}
+	}
+
+	if (stats) {
+		FlStats st = {0, 0, 0};
+		fl_stats_walk(function, &st);
+		fprintf(stderr, "functions: %d\n", st.functions);
+		fprintf(stderr, "bytecode: %d bytes\n", st.bytes);
+		fprintf(stderr, "constants: %d\n", st.constants);
 	}
 
 	if (check_only)
@@ -655,6 +802,8 @@ static void print_usage(FILE *stream)
 	fprintf(stream,
 	        "  test                    run every *_test.fl under tests/\n");
 	fprintf(stream,
+	        "  fmt [--check] FILES     canonical layout for sources\n");
+	fprintf(stream,
 	        "  test --filter P         only tests whose name has P\n");
 	fprintf(stream, "\n");
 	fprintf(stream, "Diagnostics:\n");
@@ -670,6 +819,22 @@ static void print_usage(FILE *stream)
 	        "  --explain CODE         what a diagnostic code means\n");
 	fprintf(stream,
 	        "  --fix                  apply machine-applicable fixes\n");
+	fprintf(stream, "\n");
+	fprintf(stream, "Inspection:\n");
+	fprintf(stream, "\n");
+	fprintf(stream,
+	        "  --check                compile and verify, do not run\n");
+	fprintf(stream,
+	        "  --dump-bytecode        print the bytecode before running\n");
+	fprintf(stream,
+	        "  --profile              print runtime counters after "
+	        "the run\n");
+	fprintf(stream,
+	        "  --stats                print functions, bytecode bytes "
+	        "and\n");
+	fprintf(stream,
+	        "                         constants, then run as normal\n");
+	fprintf(stream, "  --trace                print every instruction\n");
 	fprintf(stream, "\n");
 	fprintf(stream, "Output:\n");
 	fprintf(stream, "\n");
@@ -1202,6 +1367,7 @@ int main(int argc, char *argv[])
 	bool check_only = false;
 	bool trace = false;
 	bool profile = false;
+	bool stats = false;
 	FlWarnMode warnings = FL_WARN_DEFAULT;
 
 	/*
@@ -1310,6 +1476,10 @@ int main(int argc, char *argv[])
 				profile = true;
 				continue;
 			}
+			if (strcmp(a, "--stats") == 0) {
+				stats = true;
+				continue;
+			}
 			if (strncmp(a, "--warnings=", 11) == 0) {
 				const char *value = a + 11;
 				if (strcmp(value, "default") == 0)
@@ -1347,6 +1517,7 @@ int main(int argc, char *argv[])
 	        .dump_bytecode = dump_bytecode,
 	        .trace = trace,
 	        .profile = profile,
+	        .stats = stats,
 	};
 
 	/* what the script will see: itself, then everything flint did not
@@ -1415,6 +1586,17 @@ int main(int argc, char *argv[])
 		 * `flint test`. Same rule as sync: only when no such file
 		 * exists, so a script named `test` still runs.
 		 */
+		/*
+		 * `flint fmt`. Same rule as sync and test: only when no
+		 * such file exists, so a script named `fmt` still runs.
+		 */
+		if (strcmp(flag, "fmt") == 0 && access(flag, F_OK) != 0) {
+			/* --check is flint's own flag, so the option scan
+			 * already ate it wherever it appeared and set
+			 * check_only. for fmt that *is* the check mode:
+			 * `flint fmt --check f` lists without rewriting. */
+			return flint_fmt(argc, argv, arg + 1, check_only);
+		}
 		if (strcmp(flag, "test") == 0 && access(flag, F_OK) != 0) {
 			const char *filter = NULL;
 			for (int i = arg + 1; i < argc; i++) {
