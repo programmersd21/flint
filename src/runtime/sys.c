@@ -582,6 +582,30 @@ static Value args_native(VM *vm, int argc, Value *argv)
 }
 
 /*
+ * __os_lookupenv(name) -> string or nil
+ *
+ * the same question env() asks, under a name a module can call. `import env`
+ * binds `env` to the module table, so the builtin env() is no longer reachable
+ * from inside the module that shadows it -- and the module is exactly the place
+ * that needs to ask. nil for a variable that is not set, so an empty value and
+ * an unset one stay different things.
+ */
+static Value os_lookupenv_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_STRING(argv[0])) {
+		vm_runtime_error(vm, "argument to lookupenv() must be a string.");
+		return NIL_VAL;
+	}
+
+	const char *value = getenv(AS_CSTRING(argv[0]));
+	if (value == NULL)
+		return NIL_VAL;
+
+	return STR_VAL(new_string(vm, value, (int)strlen(value)));
+}
+
+/*
  * env(name) -> string or nil
  *
  * nil for a variable that is not set, which is what `if not env("X")` wants
@@ -673,6 +697,22 @@ static Value os_pathsep_native(VM *vm, int argc, Value *argv)
 	return STR_VAL(new_string(vm, "\\", 1));
 #else
 	return STR_VAL(new_string(vm, "/", 1));
+#endif
+}
+
+/* the separator between entries in PATH-like variables: ";" on windows
+ * where a drive letter already uses the colon, ":" everywhere else. this is
+ * a different question from the file separator, which is why it is a
+ * different native instead of a second use of __os_pathsep. */
+static Value os_pathlistsep_native(VM *vm, int argc, Value *argv)
+{
+	(void)vm;
+	(void)argc;
+	(void)argv;
+#ifdef _WIN32
+	return STR_VAL(new_string(vm, ";", 1));
+#else
+	return STR_VAL(new_string(vm, ":", 1));
 #endif
 }
 
@@ -2011,9 +2051,11 @@ void register_sys_natives(VM *vm)
 	vm_define_native(vm, "__os_name", os_name_native, 0);
 	vm_define_native(vm, "__os_arch", os_arch_native, 0);
 	vm_define_native(vm, "__os_pathsep", os_pathsep_native, 0);
+	vm_define_native(vm, "__os_pathlistsep", os_pathlistsep_native, 0);
 	vm_define_native(vm, "__os_getcwd", os_getcwd_native, 0);
 	vm_define_native(vm, "__os_chdir", os_chdir_native, 1);
 	vm_define_native(vm, "__os_getenv", os_getenv_native, 2);
+	vm_define_native(vm, "__os_lookupenv", os_lookupenv_native, 1);
 	vm_define_native(vm, "__os_setenv", os_setenv_native, 2);
 	vm_define_native(vm, "__os_unsetenv", os_unsetenv_native, 1);
 	vm_define_native(vm, "__os_homedir", os_homedir_native, 0);
