@@ -1,0 +1,10 @@
+# a test file for `flint test`
+#
+# the runner runs every *_test.fl under tests/ in its own VM and reports
+# each one. there is no assertion framework: a test uses assert(), which
+# raises an ordinary runtime error, and the runner treats a non-zero exit
+# exactly as it treats any other script.
+
+assert(1 + 1 == 2)
+assert("a" + "b" == "ab")
+print("sanity checks passed")

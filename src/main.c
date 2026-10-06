@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include <unistd.h>
 
 #ifndef FLINT_VERSION
@@ -650,6 +651,10 @@ static void print_usage(FILE *stream)
 	fprintf(stream,
 	        "  sync                    update the installed standard "
 	        "library\n");
+	fprintf(stream,
+	        "  test                    run every *_test.fl under tests/\n");
+	fprintf(stream,
+	        "  test --filter P         only tests whose name has P\n");
 	fprintf(stream, "\n");
 	fprintf(stream, "Diagnostics:\n");
 	fprintf(stream, "\n");
@@ -859,6 +864,138 @@ static bool files_are_identical(const char *a, const char *b)
 	fclose(fa);
 	fclose(fb);
 	return same;
+}
+
+/*
+ * flint test -- the built-in test runner.
+ *
+ * Discovery is deliberately narrow: files named *_test.fl under tests/,
+ * sorted, each run in its own VM. A test file that fails reports the
+ * failure and the runner moves on, so one broken test does not hide the
+ * rest; the exit code is non-zero if any failed.
+ *
+ * There is no assertion library. A test file uses assert(), which is a
+ * normal builtin and raises a normal runtime error, so a failing test needs
+ * no special machinery to report itself and the runner treats a non-zero
+ * exit exactly as it treats any other script.
+ */
+static int compare_names(const void *a, const void *b)
+{
+	/* qsort hands back pointers to the array's elements, which are
+	 * themselves char *: each is one dereference, not two */
+	const char *const *x = a;
+	const char *const *y = b;
+	return strcmp(*x, *y);
+}
+
+/* collect *_test.fl under dir into out, growing *count. */
+static void collect_tests(
+        const char *dir, const char *sub, char ***out, int *count)
+{
+	char path[1024];
+	if (sub != NULL)
+		snprintf(path, sizeof(path), "%s/%s", dir, sub);
+	else
+		snprintf(path, sizeof(path), "%s", dir);
+
+	DIR *d = opendir(path);
+	if (d == NULL)
+		return;
+	struct dirent *entry;
+	while ((entry = readdir(d)) != NULL) {
+		size_t n = strlen(entry->d_name);
+		/* "_test.fl" is eight characters: an off-by-one here finds
+		 * nothing at all and reports an empty suite */
+		if (n < 8 || strcmp(entry->d_name + n - 8, "_test.fl") != 0)
+			continue;
+		char child[1024];
+		int written = snprintf(
+		        child, sizeof(child), "%s/%s", path, entry->d_name);
+		if (written < 0 || (size_t)written >= sizeof(child))
+			continue;
+		struct stat st;
+		if (stat(child, &st) == 0 && S_ISDIR(st.st_mode)) {
+			/* walk it and keep going: a sibling test file in the
+			 * parent must not be skipped because a subdirectory
+			 * happened to be read first */
+			collect_tests(dir, child, out, count);
+			continue;
+		}
+		/* grow by exactly one each time: the index and the number of
+		 * entries are the same number, and letting them drift is how
+		 * a collected path gets overwritten before it is read */
+		char **grown =
+		        realloc(*out, sizeof(char *) * (size_t)(*count + 1));
+		if (grown == NULL)
+			break;
+		*out = grown;
+		(*out)[*count] = strdup(child);
+		(*count)++;
+	}
+	closedir(d);
+}
+
+static int run_test_suite(const char *filter)
+{
+	char **tests = NULL;
+	int cap = 0;
+
+	collect_tests("tests", NULL, &tests, &cap);
+	if (cap == 0) {
+		fprintf(stderr, "no tests found under tests/\n");
+		fprintf(stderr, "a test file is named *_test.fl\n");
+		return 65;
+	}
+	qsort(tests, (size_t)cap, sizeof(char *), compare_names);
+
+	int ran = 0;
+	int failed = 0;
+	for (int i = 0; i < cap; i++) {
+		const char *path = tests[i];
+		const char *base = strrchr(path, '/');
+		base = base ? base + 1 : path;
+		if (filter != NULL && strstr(base, filter) == NULL)
+			continue;
+
+		/* one VM per test, so a test that defines a global or
+		 * imports a module cannot leak into the next one */
+		VM vm;
+		vm_init(&vm);
+		vm_set_diagnostics(&vm, FL_DIAG_SHORT, FL_COLOR_NEVER);
+		vm.quiet = true;
+
+		char *source = read_file(path);
+		if (source == NULL) {
+			fprintf(stderr, "FAIL %s: cannot read\n", base);
+			failed++;
+			vm_free(&vm);
+			continue;
+		}
+		/* compile_and_maybe_run dereferences mode, so a test run
+		 * needs a real one rather than a null to mean "defaults" */
+		FlRunMode test_mode = {0};
+		int rc = compile_and_maybe_run(&vm, source, path, &test_mode);
+		free(source);
+		vm_free(&vm);
+
+		ran++;
+		if (rc != 0) {
+			fprintf(stderr, "FAIL %s\n", base);
+			failed++;
+		} else {
+			printf("ok   %s\n", base);
+			fflush(stdout);
+		}
+		free(tests[i]);
+	}
+	free(tests);
+
+	if (failed == 0) {
+		printf("\n%d test file(s), all passed\n", ran);
+		return 0;
+	}
+	printf("\n%d test file(s), %d failed\n", ran, failed);
+	return 70;
 }
 
 static int sync_stdlib(int argc, char **argv, int first)
@@ -1272,6 +1409,32 @@ int main(int argc, char *argv[])
 		 */
 		if (strcmp(flag, "sync") == 0 && access(flag, F_OK) != 0) {
 			return sync_stdlib(argc, argv, arg + 1);
+		}
+		/*
+		 * `flint test`. Same rule as sync: only when no such file
+		 * exists, so a script named `test` still runs.
+		 */
+		if (strcmp(flag, "test") == 0 && access(flag, F_OK) != 0) {
+			const char *filter = NULL;
+			for (int i = arg + 1; i < argc; i++) {
+				if (strcmp(argv[i], "--filter") == 0) {
+					if (i + 1 >= argc) {
+						fprintf(stderr,
+						        "--filter requires a "
+						        "pattern\n");
+						return 64;
+					}
+					filter = argv[i + 1];
+					i++;
+				} else {
+					fprintf(stderr,
+					        "flint test: unknown option "
+					        "'%s'\n",
+					        argv[i]);
+					return 64;
+				}
+			}
+			return run_test_suite(filter);
 		}
 		if (strcmp(flag, "-e") == 0) {
 			if (argc <= arg + 1) {
