@@ -1,8 +1,9 @@
-undefined variable 'allocated'.
-[line 54] in script
 passing assertions produce no output
 assertion failed
 one is not two
 5
 x must be positive
-undefined variable 'allocated'.
+after allocation
+1
+assert() takes one or two arguments.
+finally ran

@@ -42,9 +42,9 @@ try {
 	print(e.message)
 }
 
-# an assertion that fails after an allocation leaves the VM consistent:
+# a failing assertion after an allocation leaves the VM consistent:
 # the error is catchable and the script keeps running
-let kept = []
+let allocated = []
 try {
 	push(allocated, 1)
 	assert(false, "after allocation")

@@ -17,6 +17,7 @@ program you can run: `./flint -e 'print(1)'`.
 | [diagnostics.md](diagnostics.md) | formats, current coverage, and `--fix` |
 | [limits.md](limits.md) | what the language does not do, and untrusted input |
 | [internals.md](internals.md) | how the compiler and the vm work |
+| [cli.md](cli.md) | commands, flags, exit codes, `flint test` |
 
 the formal grammar and semantics are in [../SPEC.md](../SPEC.md), and the
 measured performance is in [../bench/RESULTS.md](../bench/RESULTS.md).

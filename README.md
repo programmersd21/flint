@@ -65,7 +65,7 @@ to uninstall:
 make uninstall
 ```
 
-flint requires no runtime dependencies beyond libc and libm. the installation consists of one binary and fourteen `.fl` files.
+flint requires no runtime dependencies beyond libc and libm. the installation consists of one binary and fifteen `.fl` files.
 
 ### standard library lookup
 
@@ -151,6 +151,7 @@ two modules can define the same private name without exposing or overwriting eac
 | `path`        | path manipulation                      |
 | `collections` | collection helpers                     |
 | `json`        | parsing and serialization              |
+| `strings`     | repeat, reverse, padding, counting     |
 | `os`          | information about the host system      |
 | `process`     | spawning programs and capturing output |
 | `http`        | http client requests                   |
@@ -272,6 +273,7 @@ if `make stress` finds something, congratulations. the garbage collector has opi
 * [`docs/data.md`](docs/data.md) - strings, lists and tables
 * [`docs/modules.md`](docs/modules.md) - modules
 * [`docs/library.md`](docs/library.md) - standard library
+* [`docs/cli.md`](docs/cli.md) - commands, flags, exit codes
 * [`docs/diagnostics.md`](docs/diagnostics.md) - diagnostics
 * [`docs/internals.md`](docs/internals.md) - vm internals
 * [`ARCHITECTURE.md`](ARCHITECTURE.md) - architecture
