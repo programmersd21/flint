@@ -592,6 +592,11 @@ static bool raise_to_handler(VM *vm, Value value)
 		vm->frame_count = h.frame + 1;
 		vm->stack_top = h.stack;
 		vm_push(vm, value);
+		/* save the fault site before redirecting: a landing pad
+		 * that rethrows must report where the error happened,
+		 * not the pad's own address. */
+		vm->error_ip = vm->frames[h.frame].ip;
+		vm->error_frame = h.frame;
 		vm->frames[h.frame].ip = h.ip;
 		vm->pending_catch = true;
 		clear_pending(vm);
@@ -941,6 +946,8 @@ void vm_init(VM *vm)
 	vm->handler_count = 0;
 	vm->run_count = 0;
 	vm->pending_catch = false;
+	vm->error_ip = NULL;
+	vm->error_frame = -1;
 	vm->has_pending = false;
 	vm->pending_error = NIL_VAL;
 	vm->pending_diag = NULL;
@@ -2024,6 +2031,25 @@ dispatch_resume:;
 		}
 		case OP_THROW: {
 			Value thrown = vm_pop(vm);
+			/* an explicit throw is a fresh error at this site:
+			 * forget any saved fault underneath it. */
+			vm->error_frame = -1;
+			vm_throw_value(vm, thrown);
+			RESUME_OR_RETURN_RUNTIME_ERROR();
+			break;
+		}
+		case OP_RETHROW: {
+			Value thrown = vm_pop(vm);
+			/* a landing pad rethrows the error it caught. report
+			 * the fault, not the pad: put the saved address back
+			 * when the frame is still the one that faulted. A
+			 * call inside the pad means the frame moved on, and
+			 * the pad's own line is the honest answer then. */
+			if (vm->error_frame >= 0 &&
+			        vm->error_frame == vm->frame_count - 1 &&
+			        vm->error_ip != NULL)
+				frame->ip = vm->error_ip;
+			vm->error_frame = -1;
 			vm_throw_value(vm, thrown);
 			RESUME_OR_RETURN_RUNTIME_ERROR();
 			break;

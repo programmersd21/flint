@@ -186,6 +186,19 @@ struct VM {
 	bool pending_catch;
 
 	/*
+	 * Where the in-flight error was first raised, for OP_RETHROW.
+	 * A handler landing pad runs at the handler's address, so an
+	 * error rethrown from one would report the pad's line instead
+	 * of the fault's. raise_to_handler saves the frame ip here
+	 * before redirecting it; OP_RETHROW puts it back before throwing
+	 * again, so the trace names the fault, not the plumbing.
+	 * -1 frame means nothing in flight: user `throw` sites use
+	 * OP_THROW and report themselves.
+	 */
+	uint8_t *error_ip;
+	int error_frame;
+
+	/*
 	 * An error that escaped every handler in the current run.
 	 * vm_runtime_error captures the rendered diagnostic and trace here
 	 * instead of printing immediately, so a module error can be caught

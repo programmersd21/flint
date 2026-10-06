@@ -1,6 +1,6 @@
-# flint language specification 0.8.0
+# flint language specification 0.9.0
 
-version 0.8.0. this is the authoritative grammar and semantics specification.
+version 0.9.0. this is the authoritative grammar and semantics specification.
 
 [docs/language.md](docs/language.md) is a prose version of this for people who
 want to read it rather than implement it. [docs/diagnostics.md](docs/diagnostics.md)
@@ -66,7 +66,8 @@ returnStmt     = "return" expression? terminator ;
 breakStmt      = "break" terminator ;
 continueStmt   = "continue" terminator ;
 throwStmt      = "throw" expression terminator ;
-tryStmt        = "try" block "catch" ( IDENTIFIER )? block ;
+tryStmt        = "try" block "catch" ( IDENTIFIER )? block ( "finally" block )? ;
+               | "try" block "finally" block ;
 
 terminator     = ";" | newline | "}" | EOF ;
 ```
@@ -76,6 +77,15 @@ value to the matching `catch` body, which binds the error to the optional
 identifier. When nothing catches the error, the script reports it and exits
 with code 70. Nested `try`s match innermost first. `break`, `continue` and
 `return` inside a `try` body retire its handler before leaving the block.
+
+A `finally` block runs after its `try` (and `catch`, when present) however
+they complete: success, caught error, or propagating error. An error thrown
+by the `catch` body runs the `finally` before propagating outward. When the
+`try` or `catch` raised, the `finally` runs and the original error keeps
+propagating after it, reporting the fault's location rather than the
+plumbing's: a rethrow is not a new error. `return` inside a `finally` body
+replaces a propagating error with the return, the same as any other block
+exit; there is no special casing, which is the point.
 
 An error is a table with `type` (a string naming the category) and `message`
 (a string) fields. The constructors `Error`, `TypeError`, `ValueError`,

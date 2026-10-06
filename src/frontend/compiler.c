@@ -1694,19 +1694,41 @@ static void try_statement(void)
 	emit_byte(OP_POP_HANDLER);
 	int skip_catch = emit_jump(OP_JUMP);
 
-	patch_jump(try_jump);
-
+	/*
+	 * Where an error in the try body lands depends on what follows.
+	 * With a catch, it lands here, at the catch body. Without one --
+	 * try/finally -- there is no catch body, and landing here would
+	 * run the finally prologue with the rethrow flag false, which
+	 * swallows the error and leaks a stack value that later catches
+	 * bind instead of their own error. So the patch waits: the
+	 * no-catch case patches it below, onto the flag-true setup that
+	 * marks the error path for what it is.
+	 */
 	bool has_catch = match(TOKEN_CATCH);
+	if (has_catch)
+		patch_jump(try_jump);
 	int catch_try_jump = -1;
 	int skip_catch_success = -1;
 	int skip_catch_error = -1;
 
+	bool finally_ahead = false;
 	if (has_catch) {
-		bool has_finally_ahead = check(TOKEN_FINALLY);
-		if (has_finally_ahead) {
-			catch_try_jump = emit_jump(OP_TRY);
-			state.current->try_depth++;
-		}
+		/*
+		 * The catch body gets its own handler, unconditionally.
+		 * An error thrown here must still run a following finally
+		 * before propagating -- and the check for "following" can
+		 * only happen after the body, past the binding name and
+		 * the braces, so a guard decided up front would have to
+		 * guess. Emitting it always means no guessing.
+		 *
+		 * Without a finally the landing pad rethrows directly.
+		 * Only the stack top matters there: the unwind discards
+		 * everything below the new error, so the stale try error
+		 * underneath is dropped by the handler that catches it,
+		 * not by us.
+		 */
+		catch_try_jump = emit_jump(OP_TRY);
+		state.current->try_depth++;
 
 		begin_scope();
 		bool have_binding = match(TOKEN_IDENTIFIER);
@@ -1721,18 +1743,27 @@ static void try_statement(void)
 		block();
 		end_scope();
 
-		if (has_finally_ahead) {
-			state.current->try_depth--;
-			emit_byte(OP_POP_HANDLER);
+		state.current->try_depth--;
+		emit_byte(OP_POP_HANDLER);
+
+		if (check(TOKEN_FINALLY)) {
+			finally_ahead = true;
 			skip_catch_success = emit_jump(OP_JUMP);
 
 			patch_jump(catch_try_jump);
 			emit_byte(OP_TRUE);
 			skip_catch_error = emit_jump(OP_JUMP);
+		} else {
+			int skip_rethrow = emit_jump(OP_JUMP);
+			patch_jump(catch_try_jump);
+			emit_byte(OP_RETHROW);
+			patch_jump(skip_rethrow);
 		}
 	}
 
-	bool has_finally = match(TOKEN_FINALLY);
+	/* match first: check() above only peeked, so the finally token
+	 * is still current and must be consumed here either way. */
+	bool has_finally = match(TOKEN_FINALLY) || finally_ahead;
 	if (!has_catch && !has_finally) {
 		error("expect 'catch' or 'finally' after try block.");
 		return;
@@ -1749,6 +1780,11 @@ static void try_statement(void)
 		int skip_rethrow_setup = emit_jump(OP_JUMP);
 
 		if (!has_catch) {
+			/* an error in the try body lands here, with the
+			 * error value on the stack: flag true, so the
+			 * finally body runs and the error is rethrown
+			 * after it. the normal path jumps over this. */
+			patch_jump(try_jump);
 			emit_byte(OP_TRUE);
 		} else if (skip_catch_error != -1) {
 			patch_jump(skip_catch_error);
@@ -1772,7 +1808,7 @@ static void try_statement(void)
 
 		int finally_done = emit_jump(OP_JUMP_IF_FALSE);
 		emit_byte(OP_POP);
-		emit_byte(OP_THROW);
+		emit_byte(OP_RETHROW);
 
 		patch_jump(finally_done);
 		emit_byte(OP_POP);

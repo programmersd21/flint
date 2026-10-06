@@ -7,3 +7,5 @@ after allocation
 1
 assert() takes one or two arguments.
 finally ran
+outer caught:
+inner

@@ -1,5 +1,85 @@
 # releases
 
+## v0.9.0
+
+the release that finishes what 0.8.0 left open and sharpens the tools
+around the language. `finally` closes the error-handling story: a block
+that runs however its `try` completes, with the original error -- and its
+location -- surviving the trip. two operators answer questions scripts
+kept asking by hand: `??=` for defaulting a variable only when it is nil,
+and `in` for membership in strings, lists and tables. around them, a
+formatter, program statistics, repl history, and three stdlib modules.
+
+### finally
+
+`try`/`catch`/`throw` gain the missing third clause, in both shapes:
+
+```flint
+try {
+    let f = open(path)
+    work(f)
+} finally {
+    close(f)
+}
+
+try {
+    risky()
+} catch e {
+    log(e.message)
+} finally {
+    cleanup()
+}
+```
+
+the finally body runs on success, on caught error, and on propagating
+error alike. an error thrown by the `catch` body runs the finally before
+propagating outward. a rethrow is not a new error: it reports the fault's
+line, not the landing pad's, through a dedicated `OP_RETHROW` opcode that
+carries the saved fault address. `return` inside a finally body replaces a
+propagating error the way any block exit does; there is no special casing.
+
+### ??= and in
+
+`a ??= b` assigns `b` only when `a` is nil. `false`, `0` and `""` are all
+values that stay, and the right side evaluates only when needed:
+
+```flint
+let port = nil
+port ??= 8080      # 8080 now; a second ??= would leave it
+```
+
+`item in collection` asks membership: substring for strings, element for
+lists (compared with `==`), key for tables. anything else is a runtime
+error rather than false, because membership in a number is a mistake:
+
+```flint
+print("ell" in "hello")   # true
+print(2 in [1, 2, 3])     # true
+print("k" in {k: 1})      # true
+```
+
+### tooling
+
+`flint fmt` rewrites sources in canonical layout -- four-space
+indentation, no trailing whitespace, one trailing newline -- and never
+touches bytes inside a multiline string. `fmt --check` lists what would
+change and exits 1, rewriting nothing. `flint --stats` prints functions,
+bytecode bytes and constants to stderr, then runs as normal: `--profile`
+asks what the run did, `--stats` asks what the program is. the repl keeps
+history in `~/.flint_history`, lists it with `:history`, and re-runs an
+entry with `!N`.
+
+### stdlib and builtins
+
+three modules: `env` reads variables as text, numbers, flags and path
+lists with fallbacks, so callers never branch on nil; `glob` matches `*`,
+`?` and `[...]` with no dependencies; `terminal` brings width, hyperlinks,
+a progress bar and a spinner. `collections` gains `sort`, `map`, `filter`,
+`reduce`, `reversed`, `enumerate`, `zip` and `range_list`; `strings` and
+`encoding` arrive alongside. builtins gain `assert`, variadic `min` and
+`max`, `char_at` and `find`, `ord` and `chr`. `flint test` runs every
+`*_test.fl` under `tests/` with `--filter`, in isolated VMs.
+
 ## v0.8.0
 
 the release that stops treating errors as a stop sign. runtime failures are

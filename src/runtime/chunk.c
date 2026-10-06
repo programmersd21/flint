@@ -180,6 +180,7 @@ int chunk_instruction_size(uint8_t opcode)
 	/* one byte: nothing to fetch */
 	case OP_POP_HANDLER:
 	case OP_THROW:
+	case OP_RETHROW:
 		return 1;
 
 	/*

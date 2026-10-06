@@ -83,6 +83,13 @@ typedef enum {
 	 */
 	OP_IN,
 	/*
+	 * Rethrow the top of stack, reporting the saved fault site.
+	 * Emitted only in handler landing pads (catch-guard and finally
+	 * epilogue rethrows). A plain OP_THROW would name the pad's own
+	 * line; this one names the fault. Stack: [error] -> [].
+	 */
+	OP_RETHROW,
+	/*
 	 * Check the value's type and pass it through unchanged, or fail.
 	 * Operands: u8 FlType.
 	 *
