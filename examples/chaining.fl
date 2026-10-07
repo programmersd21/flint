@@ -1,0 +1,20 @@
+# optional chaining: read through values that may be nil.
+#
+# run me: flint examples/chaining.fl
+let config = {server: {host: "example.com", port: 8080}}
+
+print(config?.server?.host)      # example.com
+print(config?.missing?.deep)     # nil, no error
+
+let empty = nil
+print(empty?.server?.host)       # nil, no error
+
+# the chain conditions calls too: loud() never runs here.
+fn loud(who) {
+    print("RAN")
+    return who
+}
+print(empty?.greet(loud("bo")))  # nil
+
+# pair it with ??: a fallback for the missing branch.
+print(empty?.server?.host ?? "localhost")

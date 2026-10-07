@@ -1,0 +1,45 @@
+# errors.fl -- try, catch, throw, finally.
+#
+# run it:  ./flint examples/errors.fl
+#
+# a runtime error and a thrown value both arrive as a table with `type` and
+# `message`. `catch e as T` keeps only that one type and lets everything else
+# carry on outward to the next try, and finally runs on every way out.
+
+fn fail(setting) {
+    throw {type: "ConfigError", message: "no such setting: " + setting}
+}
+
+# an index failure is a ValueError: this filter runs, the rest of the block does not
+try {
+    print([1, 2][9])
+} catch e as ValueError {
+    print("value: " + e.message)
+}
+
+# a TypeError does not match that filter, so it walks past to the catch below
+try {
+    (1)()
+} catch e as TypeError {
+    print("type: " + e.message)
+}
+
+# throw takes any table, so `type` is yours to name -- and catch-then-rethrow
+# adds context without swallowing the fault: throw e is the same error again.
+try {
+    try {
+        fail("retries")
+    } catch e as ConfigError {
+        print("logging: " + e.message)
+        throw e
+    }
+} catch e {
+    print("outer: " + e.message)
+}
+
+# finally runs after the body, on the way out, error or not
+try {
+    print("work done")
+} finally {
+    print("cleanup ran")
+}

@@ -1,0 +1,31 @@
+# files.fl -- write a file, read it back, and clean up after yourself.
+#
+# run it:  ./flint examples/files.fl
+#
+# fs moves bytes, path moves strings and never touches the disk. whole files
+# in and out: no handles, no modes, no offsets, so there is no cursor state to
+# get wrong. write truncates, append is a read and a write, and mkdir makes
+# one level only.
+
+import fs
+import os
+import path
+
+let dir = path.join(os.tmpdir() ?? "/tmp", "flint-files-demo")
+let file = path.join(dir, "notes.txt")
+
+fs.mkdir(dir)
+print(path.basename(file) + " in " + path.dirname(file))
+print("extension: " + path.ext(file))
+
+fs.write(file, "one\ntwo\n")
+print("exists: " + str(fs.exists(file)))
+print(fs.read(file))    # the trailing newline is part of the file
+
+fs.append(file, "three\n")
+print(fs.read(file))
+
+# remove takes a file, or a directory when it is empty
+print("removed file: " + str(fs.remove(file)))
+print("removed dir: " + str(fs.remove(dir)))
+print("still there: " + str(fs.exists(file)))

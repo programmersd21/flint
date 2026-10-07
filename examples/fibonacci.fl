@@ -1,0 +1,43 @@
+# fibonacci.fl -- the same number, three ways.
+#
+# run it:  ./flint examples/fibonacci.fl
+#
+# the loop is the one to write. the recursion is here to show what the cache
+# buys: fib_rec(20) calls itself 21891 times to compute 19 answers. numbers
+# are doubles, so the sequence is exact to n = 78 and quietly wrong after it.
+
+fn fib_loop(n) {
+    let a = 0
+    let b = 1
+    for i in 0..n {
+        let t = a + b
+        a = b
+        b = t
+    }
+    return a
+}
+
+fn fib_rec(n) {
+    if n < 2 { return n }
+    return fib_rec(n - 1) + fib_rec(n - 2)
+}
+
+# a table is the cache: keys are strings, so the key is str(n), and `in` is
+# the hit test. a table has no len() and cannot be iterated.
+let memo = {}
+
+fn fib_memo(n) {
+    if n < 2 { return n }
+    if str(n) in memo { return memo[str(n)] }
+    let v = fib_memo(n - 1) + fib_memo(n - 2)
+    memo[str(n)] = v
+    return v
+}
+
+print("n loop rec memo")
+let i = 0
+while i <= 10 {
+    print(str(i) + " " + str(fib_loop(i)) + " " + str(fib_rec(i)) + " " + str(fib_memo(i)))
+    i += 1
+}
+print("fib(20) = " + str(fib_loop(20)) + ", all three columns agree")

@@ -1,0 +1,31 @@
+# http.fl -- one GET, and only when you ask for it.
+#
+# run it:  ./flint examples/http.fl
+#           FLINT_HTTP_DEMO=1 ./flint examples/http.fl
+#
+# the request is behind FLINT_HTTP_DEMO on purpose. this file has to run in
+# ci, on a plane, and in a sandbox with no network, and a demo that blocks
+# until the dns timeout is worse than a line of output: set the variable to
+# opt in. override the target with FLINT_HTTP_URL.
+#
+# timeout is in milliseconds and defaults to 10000, which is a long wait for a
+# demo, so this one asks for 3000. a transport failure -- dns, refused,
+# timeout -- is not a runtime error: res.ok is false, res.status is 0, and
+# the reason is in res.error. check ok, not the absence of a crash.
+
+import http
+import env
+
+let url = env.string("FLINT_HTTP_URL", "https://example.com/")
+
+if env.string("FLINT_HTTP_DEMO", "") == "" {
+    print("offline by default: FLINT_HTTP_DEMO is not set, so no request.")
+    print("run FLINT_HTTP_DEMO=1 ./flint examples/http.fl to make one.")
+    print("it would GET " + url)
+} else {
+    let res = http.get(url, {timeout: 3000})
+    print("url: " + res.url)
+    print("ok: " + str(res.ok) + "  status: " + str(res.status) + " " + res.status_text)
+    print("error: " + res.error)
+    print("body: " + res.body)
+}

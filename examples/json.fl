@@ -1,0 +1,34 @@
+# json.fl -- one object, out to text and back again.
+#
+# run it:  ./flint examples/json.fl
+#
+# objects become tables, arrays lists, and json null becomes nil: those are
+# the only container types flint has, so there is nothing else json could
+# become. stringify is compact, pretty is the same thing indented, and the
+# round trip below is the part worth copying.
+
+import json
+
+let cfg = {
+    name: "flint",
+    tags: ["fast", "small"],
+    meta: {stars: 42, active: true, owner: nil}
+}
+
+print(json.stringify(cfg))
+print(json.pretty(cfg))
+
+# back again, which is the point
+let back = json.parse(json.stringify(cfg))
+print(back.name)        # "flint"
+print(back.tags[1])     # "small"
+print(back.meta.stars)  # 42
+print(back.meta.owner)  # nil, out of a json null
+print(back.meta.missing)  # nil, not an error: a table read of an absent key
+
+# malformed input is a runtime error naming the offset, so it catches
+try {
+    json.parse("{oops}")
+} catch e {
+    print("caught: " + e.message)
+}

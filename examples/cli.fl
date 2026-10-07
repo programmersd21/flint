@@ -1,0 +1,33 @@
+# cli.fl -- one flag, one default.
+#
+# run it:  ./flint examples/cli.fl
+#           ./flint examples/cli.fl --name Ada
+#           NAME=Grace ./flint examples/cli.fl
+#
+# the alias is required, not style: a bare `import args` binds `args` in your
+# globals and shadows the builtin args() the module itself calls. value()
+# answers nil for a flag nobody passed, so precedence is a question about
+# which of the three is non-nil, in the order you write them.
+
+import args as argv
+import env
+
+let name = argv.value("--name")
+let source = "the default"
+
+if name == nil {
+    name = env.string("NAME", "world")   # still nil? then it is "world"
+    source = "NAME"
+    if env.string("NAME", "") == "" {
+        source = "the literal default"
+    }
+} else {
+    source = "--name"
+}
+
+print("hello, " + name + "!")
+print("name came from: " + source)
+print("arguments: " + str(argv.count()))
+print(argv.all())          # print, not str(): str() on a list is "<object>"
+print("has --verbose: " + str(argv.has("--verbose")))
+print("value of --verbose: " + str(argv.value("--verbose")))

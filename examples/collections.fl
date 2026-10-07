@@ -1,0 +1,33 @@
+# collections.fl -- the list helpers that ship, so you stop writing them.
+#
+# run it:  ./flint examples/collections.fl
+#
+# data.fl builds map/filter/fold by hand; lib/collections.fl is the version
+# that comes with the language. each one returns a new list and leaves its
+# argument alone, which is what makes them safe to chain.
+
+import collections
+
+fn square(n) { return n * n }
+fn is_even(n) { return n % 2 == 0 }
+fn add(a, b) { return a + b }
+
+let nums = [1, 2, 3, 4, 5, 6]
+print(collections.map(nums, square))                 # [1, 4, 9, 16, 25, 36]
+print(collections.filter(nums, is_even))             # [2, 4, 6]
+print(collections.reduce(nums, add))                 # 21. no seed: it starts
+                                                   # at the first element.
+print(collections.sort([10, 2, 33, 4]))              # [2, 4, 10, 33]
+print(collections.reversed(nums))                    # [6, 5, 4, 3, 2, 1]
+
+# zip stops at the shorter list rather than padding or failing
+print(collections.zip([1, 2, 3], ["a", "b"]))        # [[1, "a"], [2, "b"]]
+
+# enumerate pairs each element with its index. the pair is a list, and a list
+# of pairs is read by index: the two-variable `for` form is for tables.
+for pair in collections.enumerate(["x", "y"]) {
+    print(str(pair[0]) + ": " + pair[1])
+}
+
+# the reason they take functions: the composition is the whole feature
+print(collections.reduce(collections.filter(collections.map(nums, square), is_even), add))  # 56
