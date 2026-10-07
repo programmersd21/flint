@@ -45,6 +45,12 @@ void register_sys_natives(VM *vm);
 void sys_set_source_dir(const char *dir);
 
 /*
+ * The current source directory, for saving across a module run. Borrowed:
+ * copy it if it must outlive the next set call, which frees it.
+ */
+const char *sys_source_dir(void);
+
+/*
  * Point the import resolver at the directory holding `file`, so `import
  * "y.fl"` from inside project/lib/x.fl finds project/lib/y.fl. A file with
  * no slash has no directory and leaves the resolver on the working directory.
@@ -74,6 +80,13 @@ char *sys_resolve_module(const char *path);
  * at a file nobody asked about.
  */
 bool sys_module_file_exists(const char *name);
+
+/*
+ * Whether the installed standard library answers to this bare name.
+ * `pkg add` refuses such names, so an installed package never shadows
+ * the library by accident.
+ */
+bool sys_stdlib_has(const char *name);
 
 /*
  * The directory `flint sync` installs into: $FLINT_STDLIB when set, else

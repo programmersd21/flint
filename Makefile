@@ -83,7 +83,7 @@ DBG_CFLAGS := -O0 -g3 -DFL_DEBUG_PRINT_CODE -DFL_DEBUG_TRACE_EXECUTION
 STR_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFL_GC_STRESS
 STR_LDFLAGS := -fsanitize=address,undefined
 
-.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto
+.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto fmt-test pkg-test
 .SUFFIXES:
 
 # If a compile fails partway, do not leave a truncated object behind. Make
@@ -284,6 +284,21 @@ check:
 	$(MAKE) release
 	$(MAKE) test
 	$(MAKE) unit
+	$(MAKE) fmt-test
+	$(MAKE) pkg-test
+
+# The formatter's contract: same input, same output, and one pass is
+# enough (fmt(fmt(source)) == fmt(source)). Checked over every source in
+# the tree plus a set of awkward shapes, so a canonical-style change
+# cannot leave the repository disagreeing with itself.
+fmt-test: flint
+	@sh tests/fmt_test.sh ./flint
+
+# The package manager, end to end against real fixtures: a path
+# dependency, a git dependency over file:// (no network, no registry),
+# lock pinning, update, and the failure messages.
+pkg-test: flint
+	@sh tests/pkg_test.sh ./flint
 
 # Static analysis. Reads .clang-tidy for the check list and the reason each
 # exclusion is there, so the policy lives in one reviewable place.

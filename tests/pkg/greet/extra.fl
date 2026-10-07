@@ -1,0 +1,5 @@
+import "main.fl" as base
+
+export fn loud(who) {
+    return upper(base.hello(who))
+}

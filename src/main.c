@@ -12,6 +12,7 @@
 #include "vm.h"
 #include "compiler.h"
 #include "fmt.h"
+#include "pkg.h"
 #include "diagnostic.h"
 #include "object.h"
 #include "debug.h"
@@ -52,14 +53,34 @@
  * makes, minus the colour, and the reason to bother is that the most
  * common way a new person meets a language is by typing at a prompt.
  */
+/* the cli's color decision, shared by the banner and the usage text.
+ * in AUTO it defers to the terminal: piped output stays plain, because
+ * a test comparing output must never see escape codes it did not ask for. */
+static FlColorMode g_cli_color = FL_COLOR_AUTO;
+
+static bool cli_color(FILE *out)
+{
+	return g_cli_color == FL_COLOR_ALWAYS ||
+	       (g_cli_color == FL_COLOR_AUTO && isatty(fileno(out)));
+}
+
 static void print_banner(VM *vm)
 {
 	if (vm->quiet)
 		return;
-	printf("flint %s\n", FLINT_VERSION);
-	printf("a small scripting language. type an expression and press "
-	       "enter.\n");
-	printf(":help for what works here, ctrl-d to leave.\n\n");
+	if (cli_color(stdout)) {
+		printf("\x1b[1;36mflint\x1b[0m \x1b[1m%s\x1b[0m\n",
+		        FLINT_VERSION);
+		printf("\x1b[2ma small scripting language. type an "
+		       "expression and press enter.\x1b[0m\n");
+		printf("\x1b[33m:help\x1b[0m for what works here, "
+		       "\x1b[33mctrl-d\x1b[0m to leave.\n\n");
+	} else {
+		printf("flint %s\n", FLINT_VERSION);
+		printf("a small scripting language. type an expression and "
+		       "press enter.\n");
+		printf(":help for what works here, ctrl-d to leave.\n\n");
+	}
 }
 
 /*
@@ -112,6 +133,8 @@ static void repl_help(void)
 	printf("\n");
 	printf("  :help      this text\n");
 	printf("  :history   what you typed this session and before\n");
+	printf("  :clear     clear the screen\n");
+	printf("  :load <f>  run a file in this session\n");
 	printf("  :quit      leave, same as ctrl-d\n");
 	printf("  !N        run history entry N again\n");
 	printf("\n");
@@ -222,6 +245,7 @@ static void repl_history_free(ReplHistory *history)
  * a repl that swallowed that would report success for a session that clearly
  * did not, and a shell has no other way to know.
  */
+static char *read_file_text(const char *path);
 static int repl(VM *vm)
 {
 	int worst = 0;
@@ -310,6 +334,59 @@ static int repl(VM *vm)
 				repl_history_list(&history);
 			else if (strncmp(typed, ":q", 2) == 0) {
 				break;
+			} else if (strncmp(typed, ":clear", 6) == 0 &&
+			           (typed[6] == '\n' || typed[6] == '\r' ||
+			                   typed[6] == ' ' ||
+			                   typed[6] == '\0')) {
+				/* scrollback clear, only where a
+				 * terminal would see it. piped
+				 * sessions get control bytes they
+				 * cannot use, so they get
+				 * silence. */
+				if (isatty(STDOUT_FILENO))
+					printf("\033[2J\033[H");
+				fflush(stdout);
+			} else if (strncmp(typed, ":load", 5) == 0 &&
+			           (typed[5] == ' ' || typed[5] == '\t')) {
+				const char *path = typed + 5;
+				while (*path == ' ' || *path == '\t')
+					path++;
+				size_t n = strlen(path);
+				while (n > 0 && (path[n - 1] == '\n' ||
+				                        path[n - 1] == '\r' ||
+				                        path[n - 1] == ' '))
+					n--;
+				char name[4096];
+				if (n >= sizeof(name)) {
+					printf("path too long\n");
+					continue;
+				}
+				memcpy(name, path, n);
+				name[n] = '\0';
+				char *src = read_file_text(name);
+				if (src == NULL)
+					printf("cannot read '%s'\n", name);
+				else {
+					const char *saved = sys_source_dir();
+					char *saved_copy =
+					        malloc(strlen(saved) + 1);
+					if (saved_copy != NULL)
+						memcpy(saved_copy,
+						        saved,
+						        strlen(saved) + 1);
+					sys_set_source_dir_for_file(name);
+					InterpretResult r =
+					        vm_interpret(vm, src);
+					if (saved_copy != NULL) {
+						sys_set_source_dir(saved_copy);
+						free(saved_copy);
+					}
+					free(src);
+					if (r == INTERPRET_RUNTIME_ERROR)
+						worst = 70;
+					else if (r == INTERPRET_COMPILE_ERROR)
+						worst = 65;
+				}
 			} else
 				printf("unknown command. try :help\n");
 			continue;
@@ -486,6 +563,53 @@ static int compile_and_maybe_run(
 }
 
 /* slurp a whole file. the caller frees the result. */
+/* a read_file for the repl: no exit on failure, the session lives on. */
+static char *read_file_text(const char *path)
+{
+	FILE *file = fopen(path, "rb");
+	if (file == NULL)
+		return NULL;
+	if (fseek(file, 0L, SEEK_END) != 0) {
+		fclose(file);
+		return NULL;
+	}
+	long length = ftell(file);
+	if (length < 0) {
+		fclose(file);
+		return NULL;
+	}
+	if ((unsigned long)length >= (unsigned long)-1) {
+		fclose(file);
+		return NULL;
+	}
+	size_t size = (size_t)length;
+	if (fseek(file, 0L, SEEK_SET) != 0) {
+		fclose(file);
+		return NULL;
+	}
+	char *text = malloc(size + 1);
+	if (text == NULL) {
+		fclose(file);
+		return NULL;
+	}
+	size_t got = fread(text, 1, size, file);
+	fclose(file);
+	if (got != size) {
+		free(text);
+		return NULL;
+	}
+	/*
+	 * In bounds: the allocation above is `size + 1`. The analyzer
+	 * cannot tie `size` back to it across the ftell/fseek sequence,
+	 * which is the same complaint it makes about the identical
+	 * read_file() below, where the same annotation is already in
+	 * place.
+	 */
+	/* NOLINTNEXTLINE(clang-analyzer-security.ArrayBound) */
+	text[size] = '\0';
+	return text;
+}
+
 static char *read_file(const char *path)
 {
 	FILE *file = fopen(path, "rb");
@@ -779,6 +903,14 @@ static char *read_stdin(void)
 	return buffer;
 }
 
+static void cli_section(FILE *stream, const char *title)
+{
+	if (cli_color(stream))
+		fprintf(stream, "\x1b[1;35m%s\x1b[0m\n", title);
+	else
+		fprintf(stream, "%s\n", title);
+}
+
 static void print_usage(FILE *stream)
 {
 	fprintf(stream, "Usage: flint [options] [script.fl] [args...]\n");
@@ -789,7 +921,7 @@ static void print_usage(FILE *stream)
 	        "Anything after the script path is passed to the script and\n");
 	fprintf(stream, "read back with args().\n");
 	fprintf(stream, "\n");
-	fprintf(stream, "Options:\n");
+	cli_section(stream, "Options:");
 	fprintf(stream, "\n");
 	fprintf(stream, "  -h, --help              show this help and exit\n");
 	fprintf(stream,
@@ -803,10 +935,13 @@ static void print_usage(FILE *stream)
 	        "  test                    run every *_test.fl under tests/\n");
 	fprintf(stream,
 	        "  fmt [--check] FILES     canonical layout for sources\n");
+	fprintf(stream, "  pkg install|add|update|list\n");
+	fprintf(stream,
+	        "                         dependencies in flint.toml\n");
 	fprintf(stream,
 	        "  test --filter P         only tests whose name has P\n");
 	fprintf(stream, "\n");
-	fprintf(stream, "Diagnostics:\n");
+	cli_section(stream, "Diagnostics:");
 	fprintf(stream, "\n");
 	fprintf(stream, "  --error-format=human   excerpt, caret and label\n");
 	fprintf(stream, "  --error-format=short   one location line\n");
@@ -820,7 +955,7 @@ static void print_usage(FILE *stream)
 	fprintf(stream,
 	        "  --fix                  apply machine-applicable fixes\n");
 	fprintf(stream, "\n");
-	fprintf(stream, "Inspection:\n");
+	cli_section(stream, "Inspection:");
 	fprintf(stream, "\n");
 	fprintf(stream,
 	        "  --check                compile and verify, do not run\n");
@@ -836,7 +971,7 @@ static void print_usage(FILE *stream)
 	        "                         constants, then run as normal\n");
 	fprintf(stream, "  --trace                print every instruction\n");
 	fprintf(stream, "\n");
-	fprintf(stream, "Output:\n");
+	cli_section(stream, "Output:");
 	fprintf(stream, "\n");
 	fprintf(stream, "  --quiet                no repl prompt\n");
 	fprintf(stream,
@@ -964,7 +1099,7 @@ static void print_sync_usage(FILE *stream)
 	        "Download the standard library and install it into the\n");
 	fprintf(stream, "directory `make install` uses.\n");
 	fprintf(stream, "\n");
-	fprintf(stream, "Options:\n");
+	cli_section(stream, "Options:");
 	fprintf(stream, "\n");
 	fprintf(stream,
 	        "  --dry-run        print what would be fetched, write "
@@ -1512,6 +1647,7 @@ int main(int argc, char *argv[])
 		free(kept);
 	}
 
+	g_cli_color = diag_color;
 	FlRunMode mode = {
 	        .check = check_only,
 	        .dump_bytecode = dump_bytecode,
@@ -1562,12 +1698,12 @@ int main(int argc, char *argv[])
 			if (arg + 1 < argc &&
 			        (strcmp(argv[arg + 1], "--verbose") == 0 ||
 			                strcmp(argv[arg + 1], "-v") == 0)) {
-				printf("  language version: 0.9.0\n");
-				printf("  runtime version: 0.9.0\n");
-				printf("  package format version: 0.9.0\n");
-				printf("  bytecode version: 0.9.0\n");
+				printf("  language version: 0.10.0\n");
+				printf("  runtime version: 0.10.0\n");
+				printf("  package format version: 0.10.0\n");
+				printf("  bytecode version: 0.10.0\n");
 				printf("  native ABI version: 1\n");
-				printf("  lockfile version: 0.9.0\n");
+				printf("  lockfile version: 0.10.0\n");
 			}
 			return 0;
 		}
@@ -1596,6 +1732,13 @@ int main(int argc, char *argv[])
 			 * check_only. for fmt that *is* the check mode:
 			 * `flint fmt --check f` lists without rewriting. */
 			return flint_fmt(argc, argv, arg + 1, check_only);
+		}
+		/*
+		 * `flint pkg`. Same rule as sync, test and fmt: only when
+		 * no such file exists, so a script named `pkg` still runs.
+		 */
+		if (strcmp(flag, "pkg") == 0 && access(flag, F_OK) != 0) {
+			return flint_pkg(argc, argv, arg + 1);
 		}
 		if (strcmp(flag, "test") == 0 && access(flag, F_OK) != 0) {
 			const char *filter = NULL;

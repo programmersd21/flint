@@ -99,6 +99,11 @@ void sys_free_args(void)
 	args_count = 0;
 }
 
+const char *sys_source_dir(void)
+{
+	return source_dir != NULL ? source_dir : "";
+}
+
 void sys_set_source_dir(const char *dir)
 {
 	free(source_dir);
@@ -243,6 +248,92 @@ static bool is_library_name(const char *path)
 	return strchr(path, '/') == NULL;
 }
 
+/*
+ * The project root: the nearest directory at or above `from` holding
+ * flint.toml or flint_modules/. A project is wherever its manifest or
+ * its installed dependencies are, which is the only definition that
+ * works when the script lives in a subdirectory. Stops at the
+ * filesystem root after a bounded climb. NULL when there is none, in
+ * which case package imports simply do not resolve.
+ */
+static const char *pkg_project_root(const char *from)
+{
+	static char root[4096];
+	if (from != NULL && from[0] != '\0' && from[0] != '/') {
+		char cwd[4096];
+		if (getcwd(cwd, sizeof(cwd)) == NULL)
+			return NULL;
+		if (snprintf(root, sizeof(root), "%s/%s", cwd, from) >=
+		        (int)sizeof(root))
+			return NULL;
+	} else if (from != NULL && from[0] != '\0') {
+		if (snprintf(root, sizeof(root), "%s", from) >=
+		        (int)sizeof(root))
+			return NULL;
+	} else {
+		if (getcwd(root, sizeof(root)) == NULL)
+			return NULL;
+	}
+	/* nearest directory at or above here holding flint.toml or
+	 * flint_modules/. a trailing slash trims to nothing, so drop
+	 * it first; the climb ends at the filesystem root. */
+	size_t len = strlen(root);
+	while (len > 1 && root[len - 1] == '/')
+		root[--len] = '\0';
+	for (int depth = 0; depth < 64; depth++) {
+		char probe[4352];
+		if (strlen(root) + 15 >= sizeof(probe))
+			return NULL;
+		snprintf(probe, sizeof(probe), "%s/flint.toml", root);
+		bool manifest = access(probe, F_OK) == 0;
+		snprintf(probe, sizeof(probe), "%s/flint_modules", root);
+		bool modules = access(probe, F_OK) == 0;
+		if (manifest || modules)
+			return root;
+		if (strcmp(root, "/") == 0)
+			return NULL;
+		char *slash = strrchr(root, '/');
+		if (slash == NULL)
+			return NULL;
+		if (slash == root)
+			root[1] = '\0';
+		else
+			*slash = '\0';
+	}
+	return NULL;
+}
+
+/* join three components with slashes. NULL on overflow. the caller frees. */
+static char *pkg_join3(const char *a, const char *b, const char *c)
+{
+	size_t alen = strlen(a);
+	size_t blen = strlen(b);
+	size_t clen = strlen(c);
+	if (alen > (size_t)-1 - blen - clen - 3)
+		return NULL;
+	size_t need = alen + 1 + blen + 1 + clen + 1;
+	char *out = malloc(need);
+	if (out == NULL)
+		return NULL;
+	if (snprintf(out, need, "%s/%s/%s", a, b, c) >= (int)need) {
+		free(out);
+		return NULL;
+	}
+	return out;
+}
+
+/* readable file, or NULL. access first so the error paths stay quiet. */
+static char *pkg_candidate(const char *path)
+{
+	if (access(path, R_OK) == 0) {
+		char *out = malloc(strlen(path) + 1);
+		if (out != NULL)
+			memcpy(out, path, strlen(path) + 1);
+		return out;
+	}
+	return NULL;
+}
+
 char *sys_resolve_module(const char *path)
 {
 	size_t pathlen = strlen(path);
@@ -257,11 +348,81 @@ char *sys_resolve_module(const char *path)
 	}
 
 	/*
+	 * Installed packages sit in front of the standard library, not
+	 * beside it, so there is one module loader and not two. A name
+	 * the project installed on purpose wins over the library: the
+	 * collision is the user's to notice, and `pkg add` refuses
+	 * names the installed library already answers to.
+	 *
+	 * `import "pkg"` is flint_modules/pkg/main.fl, or
+	 * flint_modules/pkg.fl for a one-file package.
+	 * `import "pkg/sub/file.fl"` reaches inside the package.
+	 * Anything else falls through to the rules below, so the
+	 * error still names the file the script asked for.
+	 */
+	{
+		const char *root = pkg_project_root(source_dir);
+		if (root != NULL) {
+			if (is_library_name(path)) {
+				char *dir_main =
+				        pkg_join3(root, "flint_modules", path);
+				char *found = NULL;
+				if (dir_main != NULL) {
+					size_t need = strlen(dir_main) + 9;
+					char *main_file = malloc(need);
+					if (main_file != NULL) {
+						snprintf(main_file,
+						        need,
+						        "%s/main.fl",
+						        dir_main);
+						found = pkg_candidate(
+						        main_file);
+						free(main_file);
+					}
+					if (found == NULL) {
+						size_t need2 =
+						        strlen(dir_main) + 4;
+						char *flat = malloc(need2);
+						if (flat != NULL) {
+							snprintf(flat,
+							        need2,
+							        "%s.fl",
+							        dir_main);
+							found = pkg_candidate(
+							        flat);
+							free(flat);
+						}
+					}
+					free(dir_main);
+				}
+				if (found != NULL)
+					return found;
+			} else {
+				/* `pkg/sub/file.fl` reaches inside an
+				 * installed package. when it is not there,
+				 * fall through: the relative rule below
+				 * reports the name the script asked for. */
+				const char *slash = strchr(path, '/');
+				if (slash != NULL && slash != path &&
+				        slash[1] != '\0') {
+					char *inside = pkg_join3(
+					        root, "flint_modules", path);
+					if (inside != NULL) {
+						char *found =
+						        pkg_candidate(inside);
+						free(inside);
+						if (found != NULL)
+							return found;
+					}
+				}
+			}
+		}
+	}
+
+	/*
 	 * A bare name is a library, not a relative path. This is the one
 	 * place the module loader learns that libraries exist, and it learns
-	 * exactly that: resolve a name to a file and get out. The package
-	 * manager, when there is one, will sit in front of this rather
-	 * than beside it, so there is one module loader and not two.
+	 * exactly that: resolve a name to a file and get out.
 	 */
 	if (is_library_name(path)) {
 		const char *dir = stdlib_dir();
@@ -304,11 +465,61 @@ char *sys_resolve_module(const char *path)
 	return out;
 }
 
+/* whether the installed standard library answers to this bare name.
+ * `pkg add` refuses such names, so an installed package never shadows
+ * the library by accident: the collision is caught at install time,
+ * where the message can name both sides. */
+bool sys_stdlib_has(const char *name)
+{
+	size_t namelen = strlen(name);
+	if (namelen == 0 || !is_library_name(name))
+		return false;
+	const char *dir = stdlib_dir();
+	if (dir[0] == '\0')
+		return false;
+	if (namelen > (size_t)-1 - strlen(dir) - 5)
+		return false;
+	size_t need = strlen(dir) + 1 + namelen + 3 + 1;
+	char *candidate = malloc(need);
+	if (candidate == NULL)
+		return false;
+	snprintf(candidate, need, "%s/%s.fl", dir, name);
+	bool found = access(candidate, R_OK) == 0;
+	free(candidate);
+	return found;
+}
+
 bool sys_module_file_exists(const char *name)
 {
 	size_t namelen = strlen(name);
 	if (namelen == 0 || !is_library_name(name))
 		return false;
+
+	/* flint_modules first, the same order the loader uses. */
+	{
+		const char *root = pkg_project_root(source_dir);
+		if (root != NULL) {
+			char *dir_main = pkg_join3(root, "flint_modules", name);
+			if (dir_main != NULL) {
+				size_t need = strlen(dir_main) + 9;
+				char *main_file = malloc(need);
+				if (main_file != NULL) {
+					snprintf(main_file,
+					        need,
+					        "%s/main.fl",
+					        dir_main);
+					bool found =
+					        access(main_file, R_OK) == 0;
+					free(main_file);
+					if (found) {
+						free(dir_main);
+						return true;
+					}
+				}
+				free(dir_main);
+			}
+		}
+	}
 
 	/* <stdlib>/<name>.fl. the same search order the loader uses, so the
 	 * suggestion and the import agree about where the file is. */

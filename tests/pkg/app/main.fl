@@ -1,0 +1,5 @@
+import "greet"
+import "greet/extra.fl" as ex
+
+print(greet.hello("sam"))
+print(ex.loud("sam"))
