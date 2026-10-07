@@ -1,0 +1,58 @@
+# the rest of the table reading api, and the guarantees around it.
+#
+# keys/values/items are the three shapes of one question: what does this
+# table hold? all three are insertion ordered, all three return fresh
+# lists, and mutating the result never touches the table.
+let t = {a: 1, b: 2, c: 3}
+
+print(keys(t))
+print(values(t))
+print(items(t))
+
+# values() and items() are the mirrors of keys(): same order, same
+# independence.
+let vs = values(t)
+vs[0] = 99
+print(values(t))
+let its = items(t)
+its[0][1] = 99
+print(values(t))
+push(values(t), 0)
+print(len(values(t)))
+
+# items() entries are two-element lists, so destructuring reads them.
+for entry in items(t) {
+    let [key, value] = entry
+    print(key + "=" + str(value))
+}
+
+# deleting shifts the rest down and keeps insertion order for what is
+# left; deleting again reports false, not an error.
+print(delete(t, "b"))
+print(keys(t))
+print(delete(t, "b"))
+print(delete(t, "nope"))
+
+# empty tables give empty lists, never nil.
+let empty = {}
+print(keys(empty))
+print(values(empty))
+print(items(empty))
+
+# `in` and has() ask the same question, and agree.
+print("a" in t)
+print(has(t, "a"))
+print("zz" in t)
+print(has(t, "zz"))
+
+# wrong types are errors, because a list has no keys to list.
+try {
+    print(keys([1, 2]))
+} catch e {
+    print(e.type)
+}
+try {
+    print(values("not a table"))
+} catch e {
+    print(e.type)
+}

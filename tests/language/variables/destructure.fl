@@ -1,0 +1,32 @@
+# list destructuring: let [a, b] = xs. flat names only, same rules as
+# table destructuring, and out-of-range means the ordinary index error
+# because lists know their length.
+let [first, second] = [10, 20]
+print(first)
+print(second)
+
+let [a, b] = [1, 2, 3]   # extra elements are ignored
+print(a + b)
+
+const [c, d] = [7, 8]
+print(c * d)
+
+fn split_two() {
+    return ["key", "value"]
+}
+let [k, v] = split_two()
+print(k + "=" + v)
+
+# short list: the second binding fails like any index would.
+try {
+    let [x, y] = [1]
+    print(y)
+} catch e {
+    print(e.type)
+}
+
+# table destructuring keeps its semantics: missing key is nil, not an error.
+let {host, port} = {host: "example.com", port: 8080}
+print(host + ":" + str(port))
+let {missing} = {}
+print(missing)

@@ -382,6 +382,72 @@ static Value keys_native(VM *vm, int argc, Value *argv)
 }
 
 /*
+ * values(t) -> the table's values in insertion order. keys() returns the
+ * key list; this is its mirror, so items() (below) can offer both in one
+ * result. Values are copied by reference into a fresh list: mutating the
+ * table leaves the returned list as it was, same contract as keys() and
+ * list()-style results elsewhere.
+ */
+static Value values_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_FLINT_TABLE(argv[0])) {
+		vm_runtime_error(vm, "argument to values() must be a table.");
+		return NIL_VAL;
+	}
+	ObjTable *t = AS_FLINT_TABLE(argv[0]);
+	ObjList *out = new_list(vm);
+	vm_push(vm, OBJ_VAL(out));
+	if (t->count > 0) {
+		out->items = ALLOCATE(vm, Value, t->count);
+		out->capacity = t->count;
+		for (int i = 0; i < t->count; i++)
+			out->items[i] = t->values[i];
+		out->count = t->count;
+	}
+	vm_pop(vm);
+	return OBJ_VAL(out);
+}
+
+/*
+ * items(t) -> [ [key, value], ... ] in insertion order. Each entry is a
+ * fresh two-element list rather than a table with invented key names: a
+ * pair is a pair, and {k: k, v: v} looked clever until every caller
+ * destructured it twice.
+ */
+static Value items_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_FLINT_TABLE(argv[0])) {
+		vm_runtime_error(vm, "argument to items() must be a table.");
+		return NIL_VAL;
+	}
+	ObjTable *t = AS_FLINT_TABLE(argv[0]);
+	ObjList *out = new_list(vm);
+	vm_push(vm, OBJ_VAL(out));
+	for (int i = 0; i < t->count; i++) {
+		ObjList *pair = new_list(vm);
+		vm_push(vm, OBJ_VAL(pair));
+		pair->items = ALLOCATE(vm, Value, 2);
+		pair->capacity = 2;
+		pair->items[0] = STR_VAL(t->keys[i]);
+		pair->items[1] = t->values[i];
+		pair->count = 2;
+		vm_pop(vm);
+		if (out->count == out->capacity) {
+			int grown = out->capacity < 4 ? 4 : out->capacity * 2;
+			Value *items = GROW_ARRAY(
+			        vm, Value, out->items, out->capacity, grown);
+			out->items = items;
+			out->capacity = grown;
+		}
+		out->items[out->count++] = OBJ_VAL(pair);
+	}
+	vm_pop(vm);
+	return OBJ_VAL(out);
+}
+
+/*
  * has(t, k) -> whether the table holds this key.
  *
  * Content comparison, because a computed key is a runtime string and may
@@ -948,7 +1014,25 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	vm->globals = vm->globals_envs[vm->globals_used - 1];
 	vm->globals_count++;
 
+	/*
+	 * Run the module with the resolver pointed at its own directory,
+	 * so `import "sibling.fl"` means beside this file no matter where
+	 * the entry script lives. Saved and restored like the globals
+	 * above: nested imports push and pop, and the importer never
+	 * notices the module was ever resolved anywhere else.
+	 */
+	const char *saved_dir = sys_source_dir();
+	char *dir_copy = malloc(strlen(saved_dir) + 1);
+	if (dir_copy != NULL)
+		memcpy(dir_copy, saved_dir, strlen(saved_dir) + 1);
+	sys_set_source_dir_for_file(path);
+
 	InterpretResult res = vm_interpret_named(vm, buffer, path);
+
+	if (dir_copy != NULL) {
+		sys_set_source_dir(dir_copy);
+		free(dir_copy);
+	}
 
 	/* always restore, on every path out. this is the transaction's
 	 * rollback: the importer's names are untouched by whatever the module
@@ -1109,6 +1193,8 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "insert", insert_native, 3);
 	vm_define_native(vm, "remove", remove_native, 2);
 	vm_define_native(vm, "keys", keys_native, 1);
+	vm_define_native(vm, "values", values_native, 1);
+	vm_define_native(vm, "items", items_native, 1);
 	vm_define_native(vm, "has", has_native, 2);
 	vm_define_native(vm, "delete", delete_native, 2);
 	vm_define_native(vm, "str", str_native, 1);
