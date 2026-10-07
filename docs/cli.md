@@ -75,6 +75,20 @@ updates the installed standard library in `~/.flint/stdlib` from the
 repository. `sync` only means the subcommand when no file of that name
 exists, so a script called `sync` still runs.
 
+## pkg
+
+```sh
+flint pkg install
+flint pkg add <path|url>
+flint pkg update [name]
+flint pkg list
+```
+
+resolves `flint.toml` into `flint.lock` and installs each dependency
+under `flint_modules/`. path dependencies copy live source; git
+dependencies clone once into `~/.flint/git` and pin the installed
+commit. there is no registry. see [packages.md](packages.md).
+
 ## diagnostics
 
 ```sh
@@ -102,6 +116,36 @@ $ printf '1+2\n:history\n' | flint --quiet
 3
   1  1+2
 ```
+
+## repl `:clear` and `:load`
+
+`:clear` wipes the screen. it writes nothing when the repl's output is not a
+terminal, so a piped session is not polluted by escape codes.
+
+`:load path` runs a file in the session you are already in, rather than in a
+fresh one. it is not a script run: it is the current repl state before and
+after, so what the file declares stays declared and what it defines is
+available to the next line.
+
+```sh
+$ cat /tmp/t.fl
+fn triple(n) { return n * 3 }
+let greeting = "from file"
+
+$ printf 'let x=5\n:load /tmp/t.fl\nx+1\ntriple(x)\n' | flint --quiet
+6
+15
+```
+
+`triple` and `greeting` came from the file, and `x` was already bound before
+the file ran, which is the whole difference between this and
+`flint /tmp/t.fl`. a file that does not parse is reported like any script and
+leaves the session alone, so the lines after it still run. a path that cannot
+be read reports `cannot read '<path>'` and the session continues; the repl
+does not exit.
+
+`:load` takes the rest of the line as the path. bare `:load` is not a command
+and reports `unknown command. try :help`.
 
 ## version
 

@@ -1,5 +1,113 @@
 # releases
 
+## v0.10.0
+
+the release that makes flint comfortable: safer expressions around missing
+data, a real package manager, and a plainer table api. the language grows
+by three small things, and nothing else grows at all -- no new keywords,
+no new subsystems, no jvm hiding behind the bytecode.
+
+### ?. reads through missing data
+
+`a?.b` is `a.b` when `a` is not nil, and nil when it is. the whole postfix
+chain is conditioned, not just the first link, and a call's arguments are
+only evaluated when the call happens:
+
+```flint
+let config = {server: {host: "example.com"}}
+
+print(config?.server?.host)      # example.com
+print(config?.missing?.deep)     # nil, no error
+print(config?.server?.host ?? "localhost")
+```
+
+assignment through `?.` does not compile. a statement that sometimes does
+nothing is a typo waiting for a production incident.
+
+### catch filters
+
+`catch e as TypeError` keeps only errors of that shape; anything else
+propagates outward to whoever handles it. the `type` field is data, so a
+package can filter on its own categories:
+
+```flint
+try {
+    risky()
+} catch e as ValueError {
+    print("bad value: " + e.message)
+} catch e as NetworkError {
+    print("try again later")
+}
+```
+
+one clause per try -- two `catch` clauses do not chain, they nest, because
+a filter that silently falls through to a second clause is a control-flow
+rule nobody remembers. a bare string thrown the old way never matches a
+filter; it propagates, which is what "catch only this" means.
+
+### list destructuring
+
+`let [first, second] = values`, the twin of the table form that already
+existed, with the same rules: flat names, every binding an ordinary
+declaration, `const` threading through. a short source list fails with the
+index error any index would hit, because a list knows its length and a
+table does not.
+
+### packages
+
+`flint pkg` and `flint.toml`. dependencies are declared once and installed
+into `flint_modules/`, where imports find them:
+
+```flint
+[package]
+name = "myapp"
+version = "0.1.0"
+
+[dependencies]
+utils = { path = "../utils", version = "^1.0.0" }
+shout = { git = "https://github.com/someone/shout.git" }
+```
+
+`pkg add` records and installs, `pkg install` re-resolves, `pkg update`
+moves the pins, `pkg list` shows what is there. a path dependency copies
+live source; a git dependency clones once into `~/.flint/git` and installs
+the commit `flint.lock` pins, so a second install needs no network and
+produces identical bytes. `pkg update` is the only thing that moves a
+pin. there is no registry, and `pkg add` says so rather than pretending:
+what exists is local dependencies, done properly.
+
+module imports also fixed along the way: a module's relative imports
+resolve against its own directory, which is what the documentation had
+always promised.
+
+### the table api finished
+
+`values(t)` and `items(t)` join `keys(t)`, all three insertion ordered and
+all three returning fresh lists. `items()` gives `[key, value]` pairs that
+destructuring reads directly:
+
+```flint
+for entry in items(config) {
+    let [key, value] = entry
+    print(key + "=" + str(value))
+}
+```
+
+### tooling and robustness
+
+`flint fmt` gained a contract and a test: `fmt(fmt(source)) == fmt(source)`,
+checked over every source in the repository plus a set of awkward shapes,
+so canonical style cannot drift. the verifier gained a fuzz sweep over
+random and structured malformed bytecode, and the runtime grew two opcodes
+with the same discipline as the rest: `OP_RETHROW` reports the fault's
+location rather than the landing pad's, and `OP_CHECK_CATCH` is the filter
+test.
+
+the repl grew `:clear` and `:load path`, and the cli grew color where a
+terminal will show it -- banner, help sections -- and stays plain when
+piped, because a test comparing output must never see escape codes it did
+not ask for.
+
 ## v0.9.0
 
 the release that finishes what 0.8.0 left open and sharpens the tools

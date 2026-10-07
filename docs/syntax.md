@@ -118,7 +118,7 @@ tightest binding first, which is the order you read them in:
 | 9 | `*`, `/`, `%` | |
 | 10 | `as` | type assertion |
 | 11 | `!`, `not`, `-` | prefix, unary |
-| 12 | `f()`, `a[i]`, `a.b` | postfix |
+| 12 | `f()`, `a[i]`, `a.b`, `a?.b` | postfix. `?.` short-circuits on nil, see below |
 | 13 | literals, names, `(...)`, `[...]`, `{...}` | |
 
 `and`, `or`, `not` and `else` are keywords, not operators. `&&`, `||` and `!`
@@ -170,6 +170,28 @@ is not evaluated before the left is known to need it.
 
 binds looser than `or` and tighter than `=`, which is the order C# uses and
 reads the way you expect: `a or b ?? c` is `a or (b ?? c)`.
+
+### optional chaining
+
+`a?.b` is nil when `a` is nil, and `a.b` otherwise. the `?.`
+conditions the whole chain after it: once a link is nil, everything
+after it is skipped and the result is nil.
+
+```flint
+let n = nil
+print(n?.a?.b)    # nil
+let t = {b: {c: 42}}
+print(t?.b.c)     # 42
+```
+
+arguments are lazy too. `n?.f(1/0)` never evaluates `1/0` when `n`
+is nil, and `n?.xs[0]` never indexes when `n` is nil.
+
+assignment through `?.` is a compile error:
+
+```flint
+u?.name = 1    # error: can't assign through '?'.
+```
 
 ### nil-coalescing assignment
 
@@ -230,6 +252,41 @@ inside a function and an overwrite at the top level, exactly as with plain
 let {missing} = config
 print(missing)   # nil
 ```
+
+`let [first, second] = xs` is the list form: the names bind by position,
+starting at 0.
+
+```flint
+let [first, second] = [10, 20]
+print(first + second)   # 30
+```
+
+the rules are the table's, plus the ones lists add:
+
+- flat names only, like the table form: `let [a.b, c] = xs` is a compile
+  error, not a nested read
+- at least one name. `let [] = xs` is a compile error
+- no trailing comma. `let [a, b,] = xs` is a compile error, which is where a
+  list literal differs, so the two forms are not interchangeable
+- extra elements are ignored. `let [a, b] = [1, 2, 3]` binds 1 and 2
+- `const` works the same way
+- the right side is indexed, not iterated, so a string works too, one byte
+  per name
+
+the difference from the table form is what happens when a name has nothing to
+bind. the right side is indexed rather than iterated, so a name past the end
+is the ordinary subscript error, a `ValueError` with the message any
+out-of-range index gives. it is not nil, the way a missing table key is. a
+list knows its length; a table does not know which key is missing.
+
+```flint
+let [x, y] = [1]
+print(y)   # error: list index 1 out of bounds (len 1).
+```
+
+the bindings follow the ordinary rules in every other respect: a duplicate is
+a redeclaration error inside a function and an overwrite at the top level,
+and both forms work at the top level, in a block, and inside a function.
 
 ### comparisons do not chain
 

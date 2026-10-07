@@ -251,6 +251,8 @@ loads.
 ```flint
 let t = {a: 1}
 print(keys(t))       # ["a"]. a fresh list, in insertion order.
+print(values(t))     # [1]. the values, in the same order.
+print(items(t))      # [["a", 1]]. [key, value] pairs, same order.
 print(has(t, "a"))   # true
 print(has(t, "zz"))  # false
 print(has(t, 42))    # false. only strings can be keys.
@@ -259,11 +261,28 @@ print(has(t, "a"))     # false
 print(delete(t, "a"))  # false. already gone is not an error.
 ```
 
-`keys()` returns a new list every call, so mutating the result never touches
-the table. `has()` with a non-string key is false rather than an error:
-asking about something that cannot be a key is a no. `delete()` on a missing
-key is false for the same reason "make sure this is gone" should not fail
-when it already is.
+`keys()`, `values()` and `items()` are the three answers to one question, and
+they agree with each other: same insertion order, a fresh list every call, and
+an empty list for an empty table rather than `nil`. mutating any of the three
+results never touches the table, including a write through an `items()` entry,
+because the pairs are fresh lists too. an entry is an ordinary list, so it
+destructures.
+
+```flint
+for entry in items({a: 1, b: 2}) {
+    let [key, value] = entry
+    print(key + "=" + str(value))
+}
+```
+
+the freshness is the outer list. a value that is itself a container is the
+table's own object, so writing into one reached through `values()` writes
+through to the table.
+
+`has()` with a non-string key is false rather than an error: asking about
+something that cannot be a key is a no. `delete()` on a missing key is false
+for the same reason "make sure this is gone" should not fail when it already
+is. anything other than a table is a `TypeError` naming the builtin.
 
 ### growth
 

@@ -130,3 +130,9 @@ fn copy_list(xs) {
 ```
 
 the same applies to tables, and the same fix works.
+
+three builtins hand back a new outer list because they have to: `keys(t)`,
+`values(t)` and `items(t)` each build one per call, so writing through the
+result leaves the table alone. the values inside are the table's own objects,
+so a container reached through `values(t)` is still shared. see
+[library.md](library.md).

@@ -197,6 +197,19 @@ program that branches on it says so.
 
 Rules:
 
+- `catch e as T` filters on the error's `type` field: the body runs only
+  when the caught value is an error table whose `type` is `T`. the filter
+  is a single type name. a bare thrown string (or number, ...) never
+  matches and propagates, and a mismatch propagates to the next enclosing
+  `try`. filters compose with `finally` in the ordinary way:
+
+```flint
+try {
+    throw TypeError("bad")
+} catch e as TypeError {
+    print(e.message)   # bad
+}
+```
 - an error no `catch` handles prints the message and trace, and the exit
   code is 70
 - `try` blocks nest; `break`/`continue`/`return` out of a `try` body drop
@@ -212,6 +225,7 @@ include source locations; the runtime currently maps an error to its executing
 line. See [diagnostics.md](diagnostics.md) for the span limits and supported
 fixes.
 
-there is no `finally`, no typed catch filters, and no stack-trace field on the
+there is no stack-trace field on the
 error table. the runtime reports one script-level trace when an error finally
-escapes.
+escapes. catch filters are the single-type `catch e as T` form; there is no
+multi-clause or predicate form.

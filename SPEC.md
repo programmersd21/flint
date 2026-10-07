@@ -1,6 +1,6 @@
-# flint language specification 0.9.0
+# flint language specification 0.10.0
 
-version 0.9.0. this is the authoritative grammar and semantics specification.
+version 0.10.0. this is the authoritative grammar and semantics specification.
 
 [docs/language.md](docs/language.md) is a prose version of this for people who
 want to read it rather than implement it. [docs/diagnostics.md](docs/diagnostics.md)
@@ -47,8 +47,9 @@ statements end at a `;` or a newline.
 program        = declaration* EOF ;
 declaration    = fnDecl | letDecl | constDecl | importDecl | exportDecl | statement ;
 
-letDecl        = "let" IDENTIFIER ( "=" expression )? terminator ;
-constDecl      = "const" IDENTIFIER "=" expression terminator ;
+letDecl        = "let" binding ( "=" expression )? terminator ;
+constDecl      = "const" binding "=" expression terminator ;
+binding        = IDENTIFIER | "{" IDENTIFIER ( "," IDENTIFIER )+ "}" | "[" IDENTIFIER ( "," IDENTIFIER )+ "]" ;
 fnDecl         = "fn" IDENTIFIER "(" parameters? ")" "{" block "}" ;
 fnExpr         = "fn" "(" parameters? ")" "{" block "}" ;
 importDecl     = "import" (STRING | IDENTIFIER) ("as" IDENTIFIER)? terminator ;
@@ -66,7 +67,7 @@ returnStmt     = "return" expression? terminator ;
 breakStmt      = "break" terminator ;
 continueStmt   = "continue" terminator ;
 throwStmt      = "throw" expression terminator ;
-tryStmt        = "try" block "catch" ( IDENTIFIER )? block ( "finally" block )? ;
+tryStmt        = "try" block "catch" ( IDENTIFIER )? ( "as" TypeName )? block ( "finally" block )? ;
                | "try" block "finally" block ;
 
 terminator     = ";" | newline | "}" | EOF ;
@@ -86,6 +87,13 @@ propagating after it, reporting the fault's location rather than the
 plumbing's: a rethrow is not a new error. `return` inside a `finally` body
 replaces a propagating error with the return, the same as any other block
 exit; there is no special casing, which is the point.
+
+A `catch` may carry a filter: `catch e as TypeError` runs its body
+only when the caught value is an error table whose `type` field is
+`"TypeError"`. the filter names a single type. a non-matching error,
+and any bare thrown value that is not an error table (a plain string,
+number, ...), skips the body and keeps propagating. filters compose
+with `finally` in the ordinary way.
 
 An error is a table with `type` (a string naming the category) and `message`
 (a string) fields. The constructors `Error`, `TypeError`, `ValueError`,
@@ -126,7 +134,7 @@ loosest to tightest:
 9. factor: `*`, `/`, `%`
 10. type assertion: `as`
 11. unary: `!`, `not`, `-`
-12. call, subscript, field: `()`, `[]`, `.`
+12. call, subscript, field, optional chain: `()`, `[]`, `.`, `?.`
 13. primary: literals, identifiers, grouping, list, table, function literal
 
 `<=` is not `!(>)`. `NaN` is unordered, so the two forms differ on NaN and the
@@ -165,6 +173,15 @@ and tighter than assignment.
 let port = config["port"] ?? 8080
 ```
 
+### optional chaining
+
+`a?.b` is nil when `a` is nil, and `a.b` otherwise. the `?.`
+conditions the whole chain after it: `a?.b.c`, `a?.f(x)` and
+`a?.xs[0]` all short-circuit to nil when the receiver is nil, and
+call arguments are not evaluated in that case
+(`n?.f(1/0)` is nil, not an error). assignment through `?.`
+is a compile error (`can't assign through '?.'.`).
+
 ### nil-coalescing assignment
 
 `a ??= b` evaluates `a`. when it is not nil nothing further happens and `b`
@@ -194,6 +211,34 @@ binding rules. flat names only: no nesting, no defaults, no renaming.
 
 ```flint
 let {host, port} = config
+```
+
+`let [a, b] = xs` binds each name by position, starting at 0. the same
+flat-names and `const` rules apply, and so do two of the table form's habits
+that a pattern inherits from plain `let`: duplicates are an error inside a
+function and an overwrite at the top level, and either form works at the top
+level, in a block, and inside a function.
+
+```flint
+let [first, second] = [10, 20]
+```
+
+the list form adds three rules of its own. a pattern names at least one
+identifier: `let [] = xs` and `let [a, b,] = xs` are compile errors, so a
+trailing comma is rejected even though a list literal accepts one. extra
+elements are ignored, so `let [a, b] = [1, 2, 3]` binds 1 and 2. the right
+side is indexed rather than iterated, so a string destructures one byte per
+name.
+
+indexing is what makes the last case a failure instead of a nil. a table does
+not know which key is missing and reads one as nil, but a list knows its
+length, so a name past the end raises the ordinary subscript error: a
+`ValueError` whose message is the one `xs[1]` on the same short list would
+give.
+
+```flint
+let [x, y] = [1]
+# error: list index 1 out of bounds (len 1).
 ```
 
 ## semantics

@@ -661,6 +661,60 @@ let t = {b: 1, a: 2}
 print(keys(t))   # ["b", "a"]
 ```
 
+## values
+
+the values of a table, in insertion order, as a fresh list. the mirror of
+`keys`: same order, same independence, so a write through the result leaves
+the table alone.
+
+```flint
+let t = {b: 1, a: 2}
+print(values(t))   # [1, 2]
+
+let vs = values(t)
+vs[0] = 99
+print(values(t))   # [1, 2]. vs is a different list.
+print(vs)          # [99, 2]
+```
+
+the values carry no keys, so two keys holding equal values produce two equal
+entries and there is no way to tell which was which. a value that is itself a
+container is the table's own object rather than a copy.
+
+## items
+
+the entries as two-element lists, `[key, value]`, in insertion order. the
+outer list is fresh and each pair is a fresh list, so a write through either
+leaves the table alone.
+
+```flint
+let t = {b: 1, a: 2}
+print(items(t))   # [["b", 1], ["a", 2]]
+
+let its = items(t)
+its[0][1] = 99
+print(values(t))  # [1, 2]
+print(its)        # [["b", 99], ["a", 2]]
+```
+
+an entry is an ordinary list, which means it destructures:
+
+```flint
+for entry in items(t) {
+    let [key, value] = entry
+    print(key + "=" + str(value))
+}
+```
+
+all three builtins return `[]` for an empty table, never `nil`, and each call
+builds a new list, so `values(t) == values(t)` is false. anything other than a
+table is a `TypeError` naming the builtin.
+
+```flint
+print(values({}))   # []
+print(items("ab"))  # error: argument to items() must be a table.
+```
+
 ## has
 
 whether the table holds the key. compares by content, so a key built at run

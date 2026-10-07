@@ -37,6 +37,18 @@ print(cfg.host)
 rejects assignment. A local duplicate in the same scope is a compile error;
 globals may be redeclared, subject to the const rule.
 
+Either form can destructure. `let {host, port} = cfg` binds names from table
+fields, and `let [first, second] = xs` binds them by position, from a list or
+a string. Names are flat, with no nesting, defaults, or renaming. `const`
+destructures the same way. A missing table key reads `nil`; a list name past
+the end raises the ordinary index error.
+
+```flint
+let [first, second] = [10, 20]
+print(first + second)   # 30
+let [a, b] = [1, 2, 3]  # 3. extra elements are ignored.
+```
+
 Only `nil` and `false` are falsy. `0`, `""`, and empty containers are true.
 This is where a C programmer's first `if (count)` port usually goes wrong.
 
@@ -56,7 +68,7 @@ and
 * / %
 as
 ! not -
-call, index, field
+call, index, field, ?.
 ```
 
 `and` and `or` short-circuit and return an operand. `+` adds two numbers or
@@ -65,12 +77,13 @@ joins two strings. There is no implicit conversion. Comparisons do not chain:
 
 `a ?? b` is `b` when `a` is nil, and `a` otherwise; only nil triggers, so
 `false`, `0` and `""` stay. `a ??= b` assigns `b` to `a` only when `a` is
-nil, and runs `b` only then. `x in y` is membership: a substring for
+nil, and runs `b` only then. `?.` short-circuits on nil: `n?.a?.b`
+is nil when `n` is nil, `n?.f(1/0)` never evaluates its arguments, and
+assignment through `?.` is a compile error. `x in y` is membership: a substring for
 strings, an element for lists, a key for tables, and a runtime error for
 anything else.
 
 `as` checks a value's type and leaves the value alone:
-
 ```flint
 print(4 as number)
 print(type("x"))

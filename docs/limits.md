@@ -20,6 +20,11 @@ nested. `a..b` is half-open, and `a..b..s` steps it; a zero step is an error.
 table keys are strings. a missing field reads as `nil`, so a typo looks like
 an unset field. tables iterate in insertion order.
 
+membership (`in`), nil-coalescing (`??`, `??=`) and optional chaining
+(`?.`) are implemented, not limits. `?.` covers field, call and subscript
+chains (`a?.b.c`, `a?.f(x)`, `a?.xs[0]`); there is no `?[` subscript
+operator or `?:` elvis beyond that.
+
 strings are byte sequences. indexing, iteration, length, and the string
 helpers count bytes. utf-8 is left alone, which means a byte index can land
 inside a multibyte character.
@@ -28,8 +33,9 @@ inside a multibyte character.
 
 `try`/`catch`/`throw` recover from runtime errors, and an uncaught error
 prints a trace and exits with status 70. errors are `{type, message}` tables.
-there is no `finally`, no catch filters, and the error carries no stack-trace
-field of its own.
+`finally` runs however the block completes, and `catch e as T` filters on
+the error's `type` field (a single type name; bare thrown strings never
+match). the error carries no stack-trace field of its own.
 
 ## modules
 
@@ -42,8 +48,8 @@ of retrying.
 ## runtime edges
 
 the repl compiles one line at a time. it cannot keep an unfinished block open
-for the next line. it also has no line editing or history; the prompt is not
-secretly an editor.
+for the next line. line history exists (`:history` lists entries, `!N`
+re-runs one, persisted in `~/.flint_history`); there is no line editing.
 
 string growth copies bytes. repeated concatenation in a loop can therefore
 copy the growing prefix on every pass. build a list of pieces and `join` it
@@ -64,12 +70,15 @@ permissions; flint adds no sandbox.
 ## toolchain
 
 the `flint` executable runs scripts, `-e` code, stdin and the repl, plus
-`flint sync`, `flint test`, `flint fmt` and the diagnostic flags. there are
-no `check`, `lint`, `build`, `debug`, `profile`, `doc`, `package`,
-`install` or `lsp` subcommands.
+`flint sync`, `flint test`, `flint fmt`, `flint pkg` and the diagnostic flags.
+`--check` compiles and verifies without running. there are no `lint`,
+`build`, `debug`, `profile`, `doc`, `install` or `lsp` subcommands.
 
-there is no package manager, no registry and no lockfile. `flint.toml` is
-not a source format. the only ways to get code into a script are
+packages come from path and git dependencies declared in `flint.toml`,
+pinned in `flint.lock` and installed under `flint_modules/`; imports
+resolve packages before the standard library. there is no registry and no
+version solving beyond the recorded pin. `flint.toml` is not a general
+source format. the other ways to get code into a script are
 `import "some/file.fl"`, an `import` of a standard-library module by name,
 and `flint sync` to refresh the installed library.
 
