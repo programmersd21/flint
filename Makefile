@@ -15,7 +15,12 @@ CC ?= cc
 STD  := -std=c11
 WARN := -Wall -Wextra -Wpedantic -Werror
 
-INCLUDES := -Isrc/core -Isrc/frontend -Isrc/runtime -Isrc/util
+# BUILD is declared before INCLUDES because the generated version header
+# lives in it, and an include path that is empty at expansion time is
+# an include path that silently finds nothing.
+BUILD := build
+
+INCLUDES := -Isrc/core -Isrc/frontend -Isrc/runtime -Isrc/util -I$(BUILD)
 
 # User flags go last so they can add to the baseline without being able to
 # quietly drop the parts that matter.
@@ -30,7 +35,7 @@ CFLAGS ?=
 # string literal. Without them -D hands the preprocessor a bare token and
 # the build fails in a way that looks nothing like a quoting problem.
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-ALL_CFLAGS := $(STD) $(WARN) $(INCLUDES) -D_POSIX_C_SOURCE=200809L $(CFLAGS) -DFLINT_VERSION="\"$(VERSION)\""
+ALL_CFLAGS := $(STD) $(WARN) $(INCLUDES) -D_POSIX_C_SOURCE=200809L $(CFLAGS)
 
 SRCDIRS := src src/core src/frontend src/runtime src/util
 
@@ -54,7 +59,21 @@ LIBS := -lm
 #
 # The trees mirror the source layout, so src/core/memory.c becomes
 # build/release/src/core/memory.o and no two files can collide on a basename.
-BUILD := build
+# The version is a build input, so moving a tag has to invalidate whatever
+# carries it. Without this, tagging a release and rebuilding without a
+# clean leaves the previous version string baked into the binary -- which
+# is how a release publishes the wrong version.
+#
+# A generated header, rewritten only when its contents change, so the
+# rebuild happens exactly when the version moves and never otherwise. A
+# phony prerequisite on every object would have been simpler and would
+# also recompile the world on every make, including the stress build.
+VERSION_HEADER := $(BUILD)/version.h
+$(shell mkdir -p $(BUILD) && \
+	printf '#define FLINT_VERSION "%s"\n' '$(VERSION)' > $(VERSION_HEADER).tmp && \
+	(cmp -s $(VERSION_HEADER).tmp $(VERSION_HEADER) || \
+	 mv $(VERSION_HEADER).tmp $(VERSION_HEADER)) && \
+	rm -f $(VERSION_HEADER).tmp)
 REL_DIR := $(BUILD)/release
 DBG_DIR := $(BUILD)/debug
 STR_DIR := $(BUILD)/stress
@@ -115,13 +134,21 @@ flint-stress: $(STR_OBJS)
 
 debug: flint-debug
 
+# main.o carries FLINT_VERSION, so the generated header is its dependency:
+# a new tag rebuilds that one object and relinks, nothing else.
+$(REL_DIR)/src/main.o: $(VERSION_HEADER)
+
 $(REL_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
+$(DBG_DIR)/src/main.o: $(VERSION_HEADER)
+
 $(DBG_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(ALL_CFLAGS) $(DBG_CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+$(STR_DIR)/src/main.o: $(VERSION_HEADER)
 
 $(STR_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)

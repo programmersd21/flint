@@ -18,6 +18,7 @@
 #include "debug.h"
 #include "profile.h"
 #include "verify.h"
+#include "version.h"
 
 #include <stdint.h>
 #include <stdio.h>
