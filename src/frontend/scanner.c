@@ -391,7 +391,9 @@ Token scan_token(void)
 			return make_token(TOKEN_DOT_DOT);
 		return make_token(TOKEN_DOT);
 	/* "??" is nil-coalescing, "??=" assigns the right side only when
-	 * the left is nil. a lone "?" is not valid flint. */
+	 * the left is nil, and "?." is nil-safe field access. the dot
+	 * must touch the question mark: "a? .b" is not an operator with
+	 * a space in it. a lone "?" is not valid flint. */
 	case '?':
 		if (match('?')) {
 			if (match('='))
@@ -399,6 +401,8 @@ Token scan_token(void)
 				        TOKEN_QUESTION_QUESTION_EQUAL);
 			return make_token(TOKEN_QUESTION_QUESTION);
 		}
+		if (match('.'))
+			return make_token(TOKEN_QUESTION_DOT);
 		return error_token("unexpected character '?'.");
 	case '-':
 		if (match('='))

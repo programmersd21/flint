@@ -243,6 +243,8 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return simple_instruction("OP_THROW", offset);
 	case OP_RETHROW:
 		return simple_instruction("OP_RETHROW", offset);
+	case OP_CHECK_CATCH:
+		return simple_instruction("OP_CHECK_CATCH", offset);
 	case OP_LOOP:
 		return jump_instruction("OP_LOOP", -1, chunk, offset);
 	case OP_CALL:

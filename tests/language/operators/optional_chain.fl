@@ -1,0 +1,42 @@
+# ?. reads through a value that may be nil: the field when it is not
+# nil, nil without touching it when it is. a missing field on a table
+# is still nil either way, because that is what tables do already.
+let u = {name: "ann", addr: {city: "springfield"}}
+print(u?.name)
+print(u?.missing)
+let n = nil
+print(n?.anything)
+
+# the chain short-circuits as a whole, not one link at a time.
+print(u?.addr?.city)
+print(n?.addr?.city)
+print(u?.missing?.deep)
+
+# calls run only when the receiver is there, and the arguments with
+# them: RAN must not print.
+let o = {greet: fn(who) { return "hi " + who }}
+print(o?.greet("bo"))
+print(n?.greet("bo"))
+fn called() {
+    print("RAN")
+    return 1
+}
+print(n?.f(called()))
+
+# subscripts ride the same chain.
+let t = {xs: [10, 20]}
+print(t?.xs[1])
+print(n?.xs[1])
+
+# only nil short-circuits. a present table with a bad index is an
+# error, and ?. does not swallow errors, it avoids dereferences.
+try {
+    print(t?.xs[5])
+} catch e {
+    print(e.type)
+}
+
+# assignment through ?. is a compile error, not a conditional store.
+# that lives in optional_chain_assign.fl: a file that does not compile
+# cannot share a test with code that must run.
+print(u.name)

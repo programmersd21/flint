@@ -90,6 +90,15 @@ typedef enum {
 	 */
 	OP_RETHROW,
 	/*
+	 * Catch-filter test. Stack: [error][type-name] -> [bool]. True
+	 * when the error is a table whose "type" field is a string equal
+	 * to the name. Anything else -- a bare string thrown the old
+	 * way, a table without that shape -- is false, not an error:
+	 * a filter that does not match propagates the error outward,
+	 * and judging the error's shape must not fail itself.
+	 */
+	OP_CHECK_CATCH,
+	/*
 	 * Check the value's type and pass it through unchanged, or fail.
 	 * Operands: u8 FlType.
 	 *

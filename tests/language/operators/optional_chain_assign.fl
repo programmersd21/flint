@@ -1,0 +1,5 @@
+# assignment through ?. does not compile. there is no conditional
+# store: a statement that sometimes does nothing is a typo waiting
+# for a production incident, so it is rejected up front.
+let u = {name: "ann"}
+u?.name = "bob"

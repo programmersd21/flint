@@ -2060,6 +2060,28 @@ dispatch_resume:;
 			RESUME_OR_RETURN_RUNTIME_ERROR();
 			break;
 		}
+		case OP_CHECK_CATCH: {
+			/* no breaks out of this loop: see OP_IN. */
+			Value want = vm_pop(vm);
+			Value error = vm_pop(vm);
+			bool match = false;
+			if (IS_FLINT_TABLE(error) && IS_STRING(want)) {
+				ObjTable *t = AS_FLINT_TABLE(error);
+				for (int i = 0; i < t->count && !match; i++) {
+					ObjString *k = t->keys[i];
+					if (k->length == 4 &&
+					        memcmp(k->chars, "type", 4) ==
+					                0 &&
+					        IS_STRING(t->values[i]) &&
+					        fl_strings_equal(
+					                AS_STRING(t->values[i]),
+					                AS_STRING(want)))
+						match = true;
+				}
+			}
+			vm_push(vm, BOOL_VAL(match));
+			break;
+		}
 		case OP_RETURN: {
 			/* save the result before unwinding: closing upvalues
 			 * moves stack values into the heap */

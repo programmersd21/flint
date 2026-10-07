@@ -181,6 +181,7 @@ int chunk_instruction_size(uint8_t opcode)
 	case OP_POP_HANDLER:
 	case OP_THROW:
 	case OP_RETHROW:
+	case OP_CHECK_CATCH:
 		return 1;
 
 	/*

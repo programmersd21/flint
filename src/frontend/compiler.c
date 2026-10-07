@@ -974,6 +974,7 @@ static void expression(void);
 static void statement(void);
 static void declaration(void);
 static void let_destructure(bool is_const);
+static void let_list_destructure(bool is_const);
 static void fn_declaration(void);
 static void anonymous_function(bool can_assign);
 static void block(void);
@@ -1506,6 +1507,87 @@ static void dot(bool can_assign)
 }
 
 /*
+ * `a?.b`: the field when a is not nil, nil without touching it when it is.
+ *
+ * The receiver stays on top of the stack the whole time, so either path
+ * leaves exactly one value. On the nil path it is popped and replaced by
+ * nil; on the other path the rest of the postfix chain compiles inside
+ * the not-nil branch: `a?.f(x)` never evaluates x for a call that will
+ * not happen, and `a?.b.c[0]` short-circuits the whole chain, not just
+ * the first link. No new opcode: the jumps are the whole implementation.
+ *
+ * Assignment anywhere in the chain is an error rather than a conditional
+ * store. `a?.b = x` would have to mean "sometimes an assignment", and a
+ * statement that sometimes does nothing is a typo waiting for a
+ * production incident.
+ */
+static void optional_dot(bool can_assign)
+{
+	consume(TOKEN_IDENTIFIER, "expect field name after '?.'.");
+	int name = identifier_constant(&state.parser.previous);
+
+	int not_nil = emit_jump(OP_JUMP_IF_NOT_NIL);
+	emit_byte(OP_POP);
+	emit_byte(OP_NIL);
+	int end = emit_jump(OP_JUMP);
+	patch_jump(not_nil);
+	emit_indexed(OP_GET_FIELD, OP_GET_FIELD_LONG, name);
+
+	for (;;) {
+		if (match(TOKEN_LEFT_PAREN)) {
+			uint8_t argc = argument_list();
+			emit_bytes(OP_CALL, argc);
+		} else if (match(TOKEN_LEFT_BRACKET)) {
+			expression();
+			consume(TOKEN_RIGHT_BRACKET, "expect ']' after index.");
+			if (can_assign && match(TOKEN_EQUAL)) {
+				error("can't assign through '?.'.");
+				return;
+			}
+			emit_byte(OP_GET_INDEX);
+		} else if (match(TOKEN_DOT)) {
+			consume(TOKEN_IDENTIFIER,
+			        "expect field name after '.'.");
+			int next = identifier_constant(&state.parser.previous);
+			if (can_assign && match(TOKEN_EQUAL)) {
+				error("can't assign through '?.'.");
+				return;
+			}
+			emit_indexed(OP_GET_FIELD, OP_GET_FIELD_LONG, next);
+		} else if (match(TOKEN_QUESTION_DOT)) {
+			consume(TOKEN_IDENTIFIER,
+			        "expect field name after '?.'.");
+			int next = identifier_constant(&state.parser.previous);
+			if (can_assign && match(TOKEN_EQUAL)) {
+				error("can't assign through '?.'.");
+				return;
+			}
+			/*
+			 * A second ?. nests its own nil check inside this
+			 * branch: the outer already established not-nil,
+			 * and the inner asks again about its own
+			 * receiver. Two jumps, no interaction.
+			 */
+			int inner = emit_jump(OP_JUMP_IF_NOT_NIL);
+			emit_byte(OP_POP);
+			emit_byte(OP_NIL);
+			int inner_end = emit_jump(OP_JUMP);
+			patch_jump(inner);
+			emit_indexed(OP_GET_FIELD, OP_GET_FIELD_LONG, next);
+			patch_jump(inner_end);
+		} else {
+			break;
+		}
+	}
+
+	if (can_assign && match(TOKEN_EQUAL)) {
+		error("can't assign through '?.'.");
+		return;
+	}
+	patch_jump(end);
+}
+
+/*
  * A table literal: an empty table, then one OP_SET_FIELD_TOP per pair.
  *
  * The hard part is that the field opcode has to leave the table on the
@@ -1609,6 +1691,7 @@ static ParseRule rules[] = {
         [TOKEN_NOT] = {unary, NULL, PREC_NONE},
         [TOKEN_OR] = {NULL, or_, PREC_OR},
         [TOKEN_QUESTION_QUESTION] = {NULL, coalesce, PREC_COALESCE},
+        [TOKEN_QUESTION_DOT] = {NULL, optional_dot, PREC_CALL},
         [TOKEN_PRINT] = {NULL, NULL, PREC_NONE},
         [TOKEN_RETURN] = {NULL, NULL, PREC_NONE},
         [TOKEN_TRUE] = {literal, NULL, PREC_NONE},
@@ -1733,15 +1816,59 @@ static void try_statement(void)
 		begin_scope();
 		bool have_binding = match(TOKEN_IDENTIFIER);
 		Token name = state.parser.previous;
-		if (!have_binding)
+		/*
+		 * `catch e as Type`: bind the error, then keep only
+		 * errors of that shape. A bare `catch as Type` binds
+		 * nothing and discards through a hidden local, the same
+		 * way a bare catch discards with a pop -- the filter
+		 * still needs the value on the stack to test it.
+		 */
+		Token err_name = token_string("__catch");
+		if (!have_binding && !check(TOKEN_AS)) {
 			emit_byte(OP_POP);
-		else {
-			add_local(name, false);
+		} else {
+			err_name =
+			        have_binding ? name : token_string("__catch");
+			add_local(err_name, false);
 			mark_initialized();
+		}
+		int filter_name = -1;
+		if (match(TOKEN_AS)) {
+			consume(TOKEN_IDENTIFIER,
+			        "expect a type name after 'as'.");
+			filter_name =
+			        identifier_constant(&state.parser.previous);
+		}
+		/*
+		 * The test runs before the body: error and wanted type
+		 * on the stack, OP_CHECK_CATCH, and a jump over the body
+		 * to a pad that rethrows with the fault's location when
+		 * they disagree. A bare string thrown the old way never
+		 * matches a filter -- it propagates, which is what
+		 * "catch only this" means.
+		 */
+		int mismatch = -1;
+		if (filter_name != -1) {
+			named_variable(err_name, false);
+			emit_indexed(
+			        OP_CONSTANT, OP_CONSTANT_LONG, filter_name);
+			emit_byte(OP_CHECK_CATCH);
+			mismatch = emit_jump(OP_JUMP_IF_FALSE);
+			emit_byte(OP_POP);
 		}
 		consume(TOKEN_LEFT_BRACE, "expect '{' after catch.");
 		block();
 		end_scope();
+		if (mismatch != -1) {
+			int done = emit_jump(OP_JUMP);
+			patch_jump(mismatch);
+			/* [error][false] here: the body's end_scope
+			 * pops never ran on this path, so drop the
+			 * verdict and rethrow the error underneath. */
+			emit_byte(OP_POP);
+			emit_byte(OP_RETHROW);
+			patch_jump(done);
+		}
 
 		state.current->try_depth--;
 		emit_byte(OP_POP_HANDLER);
@@ -2574,6 +2701,98 @@ static void anonymous_function(bool can_assign)
 }
 
 /* let, with or without an initializer. no initializer means nil. */
+/*
+ * List destructuring: `let [first, second] = values`. the twin of the
+ * table form, with the same rules: flat names only, every binding follows
+ * the ordinary declaration rules, const threads through. Values are read
+ * by index, so a short source list fails with the index error that any
+ * index would hit -- distinct from the table form, where a missing key
+ * reads nil, because lists know their length and tables do not.
+ */
+static void let_list_destructure(bool is_const)
+{
+	consume(TOKEN_LEFT_BRACKET, "expect '['.");
+
+	Token names[MAX_LOCALS];
+	int name_count = 0;
+	for (;;) {
+		consume(TOKEN_IDENTIFIER, "expect variable name in '[...]'.");
+		if (name_count >= MAX_LOCALS) {
+			error("too many names in destructuring.");
+			return;
+		}
+		names[name_count++] = state.parser.previous;
+		if (!match(TOKEN_COMMA))
+			break;
+	}
+	consume(TOKEN_RIGHT_BRACKET, "expect ']' after destructured names.");
+	consume(TOKEN_EQUAL, "expect '=' after destructured names.");
+
+	/* locals: pre-claim one NIL per name, same reason as the table
+	 * form -- stack slots, or they collide with working values. */
+	bool local = state.current->scope_depth > 0;
+	int first_slot = state.current->local_count;
+	if (local) {
+		for (int i = 0; i < name_count; i++) {
+			emit_byte(OP_NIL);
+			state.parser.previous = names[i];
+			declare_variable(is_const);
+			mark_initialized();
+		}
+	}
+
+	expression();
+	consume_terminator();
+
+	Token hidden = {TOKEN_IDENTIFIER,
+	        " list",
+	        5,
+	        names[0].line,
+	        false,
+	        names[0].offset};
+	add_local(hidden, false);
+	mark_initialized();
+	int list_slot = state.current->local_count - 1;
+
+	Token saved = state.parser.previous;
+	for (int i = 0; i < name_count; i++) {
+		emit_bytes(OP_GET_LOCAL, (uint8_t)list_slot);
+		emit_constant(NUMBER_VAL((double)i));
+		emit_byte(OP_GET_INDEX);
+
+		if (!local) {
+			state.parser.previous = names[i];
+			declare_variable(is_const);
+			int constant =
+			        identifier_constant(&state.parser.previous);
+			if (exporting) {
+				if (is_const) {
+					emit_indexed(
+					        OP_DEFINE_GLOBAL_CONST_EXPORT,
+					        OP_DEFINE_GLOBAL_CONST_EXPORT_LONG,
+					        constant);
+				} else {
+					emit_indexed(OP_DEFINE_GLOBAL_EXPORT,
+					        OP_DEFINE_GLOBAL_EXPORT_LONG,
+					        constant);
+				}
+			} else if (is_const) {
+				emit_indexed(OP_DEFINE_GLOBAL_CONST,
+				        OP_DEFINE_GLOBAL_CONST_LONG,
+				        constant);
+			} else {
+				emit_indexed(OP_DEFINE_GLOBAL,
+				        OP_DEFINE_GLOBAL_LONG,
+				        constant);
+			}
+		} else {
+			emit_bytes(OP_SET_LOCAL, (uint8_t)(first_slot + i));
+			emit_byte(OP_POP);
+		}
+	}
+	state.parser.previous = saved;
+}
+
 static void let_declaration(void)
 {
 	/*
@@ -2588,6 +2807,10 @@ static void let_declaration(void)
 	 */
 	if (check(TOKEN_LEFT_BRACE)) {
 		let_destructure(false);
+		return;
+	}
+	if (check(TOKEN_LEFT_BRACKET)) {
+		let_list_destructure(false);
 		return;
 	}
 
@@ -2746,6 +2969,10 @@ static void const_declaration(void)
 {
 	if (check(TOKEN_LEFT_BRACE)) {
 		let_destructure(true);
+		return;
+	}
+	if (check(TOKEN_LEFT_BRACKET)) {
+		let_list_destructure(true);
 		return;
 	}
 
