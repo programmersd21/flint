@@ -338,7 +338,8 @@ CLANG_TIDY ?= clang-tidy
 TIDY_FLAGS := --quiet --extra-arg=-std=c11 \
 	--extra-arg=-D_POSIX_C_SOURCE=200809L \
 	--extra-arg=-Isrc/core --extra-arg=-Isrc/frontend \
-	--extra-arg=-Isrc/runtime --extra-arg=-Isrc/util
+	--extra-arg=-Isrc/runtime --extra-arg=-Isrc/util \
+	--extra-arg=-I$(BUILD)
 
 # The debug-only macros, so the second lint pass sees the #ifdef arms that
 # the default configuration cannot see.
