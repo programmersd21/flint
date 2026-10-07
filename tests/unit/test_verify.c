@@ -193,11 +193,87 @@ static void test_rejects_malformed(void)
 	}
 }
 
+/* xorshift32, seeded fixed so a failure reproduces everywhere. */
+static unsigned long next_random(unsigned long state)
+{
+	state ^= state << 13;
+	state ^= state >> 7;
+	state ^= state << 17;
+	return state;
+}
+
+/*
+ * Random bytecode must be rejected, never trusted, and never crash.
+ *
+ * The invariant under test is the one the whole runtime rests on: a
+ * malformed chunk produces a diagnostic, not undefined behaviour. There
+ * is no corpus of known-bad bytecode to replay here -- the point is that
+ * nobody has thought of the next shape yet -- so this generates bytes
+ * itself: random opcodes, random operands, random truncations, over a
+ * deterministic seed so a failure is reproducible from the seed alone.
+ *
+ * A verifier that crashes shows up as a signal, not a failed check, which
+ * is exactly what the caller above notices.
+ */
+static void test_fuzz_random(void)
+{
+	/* xorshift32: deterministic, no rand() differences between
+	 * platforms, and one line. */
+	unsigned long state = 0x9E3779B9UL;
+	for (int iteration = 0; iteration < 4000; iteration++) {
+		Chunk chunk;
+		chunk_init(&chunk);
+		int length = 1 + (int)(state = next_random(state)) % 24;
+		for (int i = 0; i < length; i++) {
+			state = next_random(state);
+			chunk_write(
+			        NULL, &chunk, (uint8_t)(state & 0xFF), 1, 0);
+		}
+		FlVerifyError error;
+		/* the return value is deliberately unused: both answers
+		 * are acceptable, and only the absence of a crash and a
+		 * leak is the thing being asserted. */
+		(void)fl_verify_chunk_for_test(&chunk, "fuzz", &error);
+		chunk_free(NULL, &chunk);
+		checks++;
+	}
+
+	/* structured shapes an unstructured sweep rarely reaches: jump
+	 * operands that land on operand bytes, and truncated jump
+	 * instructions. */
+	for (int target = 0; target < 12; target++) {
+		Chunk chunk;
+		chunk_init(&chunk);
+		chunk_write(NULL, &chunk, OP_JUMP, 1, 0);
+		chunk_write(NULL, &chunk, (uint8_t)target, 1, 0);
+		chunk_write(NULL, &chunk, (uint8_t)0, 1, 0);
+		FlVerifyError error;
+		(void)fl_verify_chunk_for_test(&chunk, "jump-shape", &error);
+		chunk_free(NULL, &chunk);
+		checks++;
+	}
+
+	/* every single-byte opcode followed by a truncated operand, which is
+	 * what a chunk cut off mid-instruction looks like. */
+	for (int opcode = 0; opcode <= OP_THROW; opcode++) {
+		if (chunk_instruction_size((uint8_t)opcode) <= 1)
+			continue;
+		Chunk chunk;
+		chunk_init(&chunk);
+		chunk_write(NULL, &chunk, (uint8_t)opcode, 1, 0);
+		FlVerifyError error;
+		check(!fl_verify_chunk_for_test(&chunk, "cut", &error),
+		        "rejects an opcode cut off mid-instruction");
+		chunk_free(NULL, &chunk);
+	}
+}
+
 int main(void)
 {
 	test_every_opcode_has_a_width();
 	test_widths_agree_with_the_compiler();
 	test_rejects_malformed();
+	test_fuzz_random();
 
 	if (failures > 0) {
 		printf("verifier: %d checks, %d failed\n", checks, failures);
