@@ -1,0 +1,7 @@
+value: list index 5 out of bounds (len 1).
+typed: TypeError
+custom: mine
+fell through: plain string
+outer: ValueError
+finally ran
+after finally: pass

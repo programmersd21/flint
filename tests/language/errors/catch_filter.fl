@@ -1,0 +1,58 @@
+# catch e as Type keeps only errors of that shape: a table whose
+# "type" field names the type. anything else propagates outward.
+try {
+    let xs = [1]
+    print(xs[5])
+} catch e as ValueError {
+    print("value: " + e.message)
+}
+
+try {
+    (1)()
+} catch e as TypeError {
+    print("typed: " + e.type)
+}
+
+# custom shapes filter too: the type field is data, not a closed list.
+try {
+    throw {type: "Custom", message: "mine"}
+} catch e as Custom {
+    print("custom: " + e.message)
+}
+
+# a bare string thrown the old way never matches a filter. it falls
+# through to whoever catches everything.
+try {
+    try {
+        throw "plain string"
+    } catch e as ValueError {
+        print("should not print")
+    }
+} catch e {
+    print("fell through: " + str(e))
+}
+
+# the wrong type propagates with its location, not the pad's.
+try {
+    try {
+        let xs = [1]
+        print(xs[5])
+    } catch e as TypeError {
+        print("should not print")
+    }
+} catch e {
+    print("outer: " + e.type)
+}
+
+# a filter and a finally compose: the body runs, then the error moves on.
+try {
+    try {
+        throw {type: "Other", message: "pass"}
+    } catch e as ValueError {
+        print("should not print")
+    } finally {
+        print("finally ran")
+    }
+} catch e {
+    print("after finally: " + e.message)
+}
