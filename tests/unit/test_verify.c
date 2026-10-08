@@ -268,11 +268,149 @@ static void test_fuzz_random(void)
 	}
 }
 
+/*
+ * Upvalue bounds, at every boundary that has ever mattered.
+ *
+ * The bug: the check read `upvalue_count > 0 && operand >= (uint8_t)
+ * upvalue_count`, which is wrong at both ends. A function capturing nothing
+ * skipped the check entirely and any operand sailed through to a VM read
+ * outside the (empty) upvalue array. And 256 upvalues narrowed to a byte is
+ * zero, so a function at the maximum rejected *every* upvalue access
+ * including the valid ones -- a verifier refusing correct code.
+ *
+ * Neither end is reachable from Flint source, so these build the bytecode by
+ * hand. That is the point: the compiler being correct about these cases is
+ * what the verifier is being tested against.
+ */
+static void check_upvalue(uint8_t slot,
+        int upvalue_count,
+        bool accepted,
+        const char *what)
+{
+	for (int op = 0; op < 2; op++) {
+		Chunk chunk;
+		chunk_init(&chunk);
+		chunk_write(NULL,
+		        &chunk,
+		        op == 0 ? OP_GET_UPVALUE : OP_SET_UPVALUE,
+		        1,
+		        0);
+		chunk_write(NULL, &chunk, slot, 1, 0);
+		chunk_write(NULL, &chunk, OP_RETURN, 1, 0);
+		FlVerifyError error;
+		bool ok = fl_verify_function_for_test(
+		        &chunk, upvalue_count, "upvalue", &error);
+		char label[256];
+		snprintf(label,
+		        sizeof(label),
+		        "%s (%s %d, %d upvalues)",
+		        what,
+		        op == 0 ? "GET" : "SET",
+		        (int)slot,
+		        upvalue_count);
+		checks++;
+		if (ok != accepted) {
+			failures++;
+			printf("FAIL: %s: %s\n",
+			       label,
+			       ok ? "accepted" : "rejected");
+		}
+		chunk_free(NULL, &chunk);
+	}
+}
+
+static void test_upvalue_bounds(void)
+{
+	/*
+	 * A function that captures nothing may not read or write any
+	 * upvalue. Before the fix this was the whole check skipped, so
+	 * OP_GET_UPVALUE 0 reached the VM with nothing behind it.
+	 */
+	check_upvalue(0, 0, false, "zero-upvalue function rejects slot 0");
+	check_upvalue(7, 0, false, "zero-upvalue function rejects slot 7");
+	check_upvalue(255, 0, false, "zero-upvalue function rejects slot 255");
+
+	/* one upvalue: exactly one slot is real. */
+	check_upvalue(0, 1, true, "one upvalue accepts slot 0");
+	check_upvalue(1, 1, false, "one upvalue rejects slot 1");
+	check_upvalue(255, 1, false, "one upvalue rejects slot 255");
+
+	/* 255 upvalues: the last real slot is 254. */
+	check_upvalue(253, 255, true, "255 upvalues accepts slot 253");
+	check_upvalue(254, 255, true, "255 upvalues accepts its last slot");
+	check_upvalue(255, 255, false, "255 upvalues rejects one past the end");
+
+	/*
+	 * 256 upvalues, MAX_UPVALUES and the widest a byte operand can
+	 * reach. Slot 255 is valid, and the narrowing that made this
+	 * unusable turned it into zero and rejected the lot.
+	 */
+	check_upvalue(255, 256, true, "256 upvalues accepts slot 255");
+	check_upvalue(254, 256, true, "256 upvalues accepts slot 254");
+	check_upvalue(0, 256, true, "256 upvalues accepts slot 0");
+}
+
+static void test_bare_chunk_skips_upvalue_check(void)
+{
+	/*
+	 * The bare-chunk form is not a function with zero upvalues: there
+	 * is no function, so there is no count and nothing for the operand
+	 * to mean. The unit tests build malformed chunks this way, and
+	 * they have to keep working.
+	 */
+	Chunk chunk;
+	chunk_init(&chunk);
+	chunk_write(NULL, &chunk, OP_GET_UPVALUE, 1, 0);
+	chunk_write(NULL, &chunk, 200, 1, 0);
+	chunk_write(NULL, &chunk, OP_RETURN, 1, 0);
+	FlVerifyError error;
+	check(fl_verify_chunk_for_test(&chunk, "bare", &error),
+	        "a bare chunk has no upvalue count to check against");
+	chunk_free(NULL, &chunk);
+}
+
+/*
+ * Real closure bytecode still verifies.
+ *
+ * The complement of the bounds tests: a verifier that rejects valid
+ * bytecode is as broken as one that accepts invalid bytecode, and the
+ * compiler is the only authority on what valid looks like. This compiles
+ * nested captures and checks the result is accepted.
+ */
+static void test_real_closures_verify(void)
+{
+	static const char *const sources[] = {
+	        "let x = 1\nfn outer() {\n  let y = 2\n  fn inner() {\n"
+	        "    return x + y\n  }\n  return inner()\n}\n",
+	        "fn a() {\n  let v = 1\n  fn b() {\n    fn c() {\n"
+	        "      return v\n    }\n    return c()\n  }\n  return b()\n"
+	        "}\n",
+	        "fn no_capture() {\n  return 42\n}\n",
+	};
+	for (size_t i = 0; i < sizeof(sources) / sizeof(sources[0]); i++) {
+		VM vm;
+		vm_init(&vm);
+		bool ok;
+		ObjFunction *function =
+		        compile_and_verify(&vm, sources[i], &ok);
+		char message[128];
+		snprintf(message,
+		        sizeof message,
+		        "real closures verify: %.48s",
+		        sources[i]);
+		check(ok && function != NULL, message);
+		vm_free(&vm);
+	}
+}
+
 int main(void)
 {
 	test_every_opcode_has_a_width();
 	test_widths_agree_with_the_compiler();
 	test_rejects_malformed();
+	test_upvalue_bounds();
+	test_bare_chunk_skips_upvalue_check();
+	test_real_closures_verify();
 	test_fuzz_random();
 
 	if (failures > 0) {

@@ -49,4 +49,21 @@ bool fl_verify_function(const ObjFunction *function, FlVerifyError *error);
 bool fl_verify_chunk_for_test(
         const Chunk *chunk, const char *name, FlVerifyError *error);
 
+/*
+ * Verify a bare Chunk as though it were the body of a function with
+ * `upvalue_count` upvalues.
+ *
+ * This is the only way to reach the upvalue bounds directly. The compiler
+ * will not emit OP_GET_UPVALUE 0 into a function that captures nothing, and
+ * will not emit slot 7 into a function with two upvalues -- so a test that
+ * wants to know whether the verifier rejects those has to build them by
+ * hand. Without this the zero-upvalue and 256-upvalue boundaries could only
+ * be tested by trusting that the compiler is right about them, which is the
+ * thing in question.
+ */
+bool fl_verify_function_for_test(const Chunk *chunk,
+        int upvalue_count,
+        const char *name,
+        FlVerifyError *error);
+
 #endif /* FL_VERIFY_H */

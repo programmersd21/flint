@@ -158,13 +158,26 @@ static int closure_width(const Chunk *chunk, int offset, bool wide)
 /*
  * The core, over a bare Chunk.
  *
- * `upvalue_count` is the enclosing function's upvalue count, or 0 for a chunk
- * with no function around it (the unit tests). It bounds the OP_GET_UPVALUE
- * operand; 0 disables that check, which is correct for a bare chunk because
- * there is nothing for the operand to mean.
+ * `upvalue_count` bounds an OP_GET_UPVALUE operand, and `has_function` says
+ * whether that count means anything. The two are separate because a count of
+ * zero is a real value with a real answer: a function that captures nothing
+ * may not read any upvalue at all, and treating "no upvalues" as "no check"
+ * let exactly that bytecode through to the VM.
+ *
+ * has_function is false only for a bare Chunk with no function around it --
+ * the unit tests, where the malformed cases cannot be produced by the compiler
+ * and no function exists to carry a count. There, the upvalue operand is
+ * unchecked, because there is nothing for it to mean.
+ *
+ * The count is compared as an int, never narrowed to uint8_t. 256 upvalues
+ * narrowed to a byte is zero, and the comparison then rejects every operand
+ * including the valid one -- a verifier that refuses correct code is as
+ * broken as one that accepts incorrect code.
  */
-static bool verify_chunk(
-        const Chunk *chunk, int upvalue_count, FlVerifyError *error)
+static bool verify_chunk(const Chunk *chunk,
+        int upvalue_count,
+        bool has_function,
+        FlVerifyError *error)
 {
 	memset(error, 0, sizeof(*error));
 
@@ -331,8 +344,8 @@ static bool verify_chunk(
 			}
 		}
 		if (opcode == OP_GET_UPVALUE || opcode == OP_SET_UPVALUE) {
-			if (upvalue_count > 0 &&
-			        code[offset + 1] >= (uint8_t)upvalue_count) {
+			if (has_function &&
+			        (int)code[offset + 1] >= upvalue_count) {
 				fail(error,
 				        offset,
 				        "upvalue slot is out of range");
@@ -408,14 +421,26 @@ static bool verify_chunk(
 }
 bool fl_verify_function(const ObjFunction *function, FlVerifyError *error)
 {
-	return verify_chunk(&function->chunk, function->upvalue_count, error);
+	return verify_chunk(
+	        &function->chunk, function->upvalue_count, true, error);
 }
 
 bool fl_verify_chunk_for_test(
         const Chunk *chunk, const char *name, FlVerifyError *error)
 {
 	(void)name;
-	/* 0 upvalues: the upvalue check compares against this and skips
-	 * itself, which is what a bare chunk wants. */
-	return verify_chunk(chunk, 0, error);
+	/* no function around this chunk, so no upvalue count exists and the
+	 * upvalue operand is unchecked. This is the bare-chunk form, not a
+	 * function that captures nothing -- that one is checked, and rejects
+	 * every upvalue access. */
+	return verify_chunk(chunk, 0, false, error);
+}
+
+bool fl_verify_function_for_test(const Chunk *chunk,
+        int upvalue_count,
+        const char *name,
+        FlVerifyError *error)
+{
+	(void)name;
+	return verify_chunk(chunk, upvalue_count, true, error);
 }
