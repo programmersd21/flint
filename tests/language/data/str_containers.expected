@@ -1,0 +1,14 @@
+[1, 2, 3]
+[]
+[[1], [2, 3]]
+[nil, true, 3.5]
+{a: 1, b: 2}
+{}
+{n: {d: 1}}
+true
+6
+plain
+42
+true
+nil
+<object>

@@ -176,39 +176,28 @@ print(str(nil))    # nil
 print(str("s"))    # s
 ```
 
-`str` only converts scalars. a list, a table or a function gives `<object>`,
-because `str` is a native and has no access to the printing the `print`
-statement does.
+`str` renders containers the way `print` does. a list becomes `[1, 2, 3]`, a
+table becomes `{a: 1, b: 2}` in insertion order, and both nest.
 
 ```flint
-print(str([1, 2]))     # <object>
-print([1, 2])          # [1, 2]. the print statement is richer.
+print(str([1, 2]))      # [1, 2]
+print(str({a: 1}))      # {a: 1}
+print(str([[1], [2]]))  # [[1], [2]]
 ```
 
-that difference is real and it will surprise you the first time. `print` and
-`str` are two different code paths, and only `print` knows how to render a
-container. there is no way to get a string form of a list, so if you need one,
-build it yourself:
+this used to be `<object>` for anything structured, while `print` showed the
+contents -- so there was no way to turn a list into text and every caller
+built its own. the rendering is now the same code `print` uses, with a
+different output stream, so the two cannot drift apart.
 
-```flint
-fn join(xs, sep) {
-    let out = ""
-    let i = 0
-    while i < len(xs) {
-        if i > 0 { out = out + sep }
-        out = out + str(xs[i])
-        i += 1
-    }
-    return out
-}
-print(join([1, 2, 3], ", "))    # 1, 2, 3
-```
+a function or a native has no useful text form and still gives `<object>`.
 
-`print` does quote a string inside a list, so the two cases stay tellable apart:
+`print` quotes a string inside a container, so elements stay tellable apart:
 
 ```flint
 print(["a", "b"])    # ["a", "b"]
 print([1, "two"])    # [1, "two"]
+print(str(["a", "b"]))    # ["a", "b"]
 ```
 
 numbers are formatted as flint formats them at the `print` statement: integral
@@ -332,9 +321,9 @@ statement, and you should not call it yourself. see [modules.md](modules.md).
 
 ## missing pieces
 
-`str([1, 2])` is still `<object>`. `print` knows how to render containers;
-`str()` does not. sorting is not a built-in; use a comparison loop or reach
-for `collections` which has `min` and `max`.
+sorting is not a built-in; use a comparison loop or reach for `collections`,
+which has `sort`. a function or native has no useful text form, so
+`str(some_fn)` is `<object>` rather than a rendering of something.
 
 
 ## internal math

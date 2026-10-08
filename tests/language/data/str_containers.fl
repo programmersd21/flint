@@ -1,0 +1,36 @@
+# str() on containers, and print() on tables.
+#
+# str([1,2]) used to be the eight characters <object>, while
+# print([1,2]) showed the contents. The pair was inconsistent: there was
+# no way to turn a list into text, so every caller concatenated by hand
+# and every hand-rolled version disagreed with the next one.
+
+print(str([1, 2, 3]))
+print(str([]))
+print(str([[1], [2, 3]]))
+print(str([nil, true, 3.5]))
+
+# tables render too, in insertion order, keys and values both.
+print(str({a: 1, b: 2}))
+print(str({}))
+print(str({n: {d: 1}}))
+
+# and the round trip: str() of a container, sliced, is the same text
+# print() would have produced for the parts.
+let xs = [1, 2]
+let text = str(xs)
+print(text == "[1, 2]")
+print(len(text))
+
+# scalars are unchanged -- this is about containers only.
+print(str("plain"))
+print(str(42))
+print(str(true))
+print(str(nil))
+
+# a function still has no useful text form and says so, rather than
+# pretending to render one.
+fn helper() {
+    return 1
+}
+print(str(helper))

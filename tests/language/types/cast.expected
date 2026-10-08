@@ -5,7 +5,7 @@ true
 false
 nil
 [1, 2]
-<table>
+{a: 1}
 <fn helper>
 <native fn>
 <fn inner>

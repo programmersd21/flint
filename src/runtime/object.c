@@ -429,37 +429,78 @@ bool value_has_type(Value value, FlType type)
  * print() does at the top level, so a list and a bare value do not disagree
  * about how the same double is spelled.
  */
-void print_value(Value value)
+static void print_object_to(FILE *out, Value value);
+
+static void print_value_to(FILE *out, Value value)
 {
 	if (IS_NUMBER(value)) {
 		double d = AS_NUMBER(value);
 		if (fl_double_is_printable_int(d)) {
-			printf("%ld", fl_double_to_long(d));
+			fprintf(out, "%ld", fl_double_to_long(d));
 			return;
 		}
 		char buf[64];
 		snprintf(buf, sizeof(buf), "%.15g", d);
 		if (strtod(buf, NULL) == d) {
-			printf("%s", buf);
+			fprintf(out, "%s", buf);
 			return;
 		}
 		snprintf(buf, sizeof(buf), "%.17g", d);
-		printf("%s", buf);
+		fprintf(out, "%s", buf);
 		return;
 	}
 	if (IS_BOOL(value)) {
-		printf("%s", AS_BOOL(value) ? "true" : "false");
+		fprintf(out, "%s", AS_BOOL(value) ? "true" : "false");
 		return;
 	}
 	if (IS_NIL(value)) {
-		printf("nil");
+		fprintf(out, "nil");
 		return;
 	}
 	if (IS_OBJ(value)) {
-		print_object(value);
+		print_object_to(out, value);
 		return;
 	}
-	printf("<unknown>");
+	fprintf(out, "<unknown>");
+}
+
+void print_value(Value value) { print_value_to(stdout, value); }
+
+/*
+ * Render a value into a fresh string.
+ *
+ * Used by `str()` on containers, which is the one place a value has to
+ * become text without going to a stream. The output is byte-for-byte what
+ * print() would have written, because it *is* the same code with a
+ * different FILE*: a second renderer for one language disagrees with the
+ * first inside a release, and every caller then disagrees with every other
+ * caller.
+ *
+ * Returns NULL when the rendering did not fit in `capacity`, having
+ * reported it as a runtime error -- an unbounded grow-until-it-fits here
+ * would be a way to exhaust memory from a str() call.
+ */
+char *flint_value_to_string(VM *vm, Value value)
+{
+	(void)vm;
+	/*
+	 * open_memstream grows its own buffer as the stream writes, so there
+	 * is no capacity to guess and no retry loop: whatever print() would
+	 * emit, this captures exactly. The result is NUL-terminated by the
+	 * stream, so it can go straight to new_string.
+	 */
+	char *buf = NULL;
+	size_t len = 0;
+	FILE *out = open_memstream(&buf, &len);
+	if (out == NULL)
+		return NULL;
+	print_value_to(out, value);
+	fclose(out);
+	/* buf is non-NULL whenever open_memstream succeeded, even for an
+	 * empty write; only a failed allocation leaves it NULL. */
+	if (buf == NULL)
+		return NULL;
+	return buf;
 }
 
 /*
@@ -469,50 +510,67 @@ void print_value(Value value)
  * OBJ_TYPE() on one of those reads a pointer that does not exist, so a caller
  * holding a value of unknown kind has to go through print_value() instead.
  */
-void print_object(Value value)
+static void print_object_to(FILE *out, Value value)
 {
 	switch (OBJ_TYPE(value)) {
 	case OBJ_STRING:
-		printf("%s", AS_CSTRING(value));
+		fprintf(out, "%s", AS_CSTRING(value));
 		break;
 	case OBJ_FUNCTION:
 		print_function(AS_FUNCTION(value));
 		break;
 	case OBJ_NATIVE:
-		printf("<native fn>");
+		fprintf(out, "<native fn>");
 		break;
 	case OBJ_CLOSURE:
 		/* a closure prints as the function it wraps */
 		print_function(AS_CLOSURE(value)->function);
 		break;
 	case OBJ_UPVALUE:
-		printf("<upvalue>");
+		fprintf(out, "<upvalue>");
 		break;
 	case OBJ_LIST: {
 		ObjList *list = AS_LIST(value);
-		printf("[");
+		fprintf(out, "[");
 		for (int i = 0; i < list->count; i++) {
 			if (i > 0)
-				printf(", ");
+				fprintf(out, ", ");
 			/*
 			 * Strings get quoted here, at the list level, so a
 			 * list of them is distinguishable from a list of
 			 * bare words. Everything else goes through
-			 * print_value, which handles numbers, booleans, nil
-			 * and nested lists; print_object() would read a
+			 * print_value_to, which handles numbers, booleans, nil
+			 * and nested lists; print_object_to would read a
 			 * pointer out of a number and segfault.
 			 */
 			if (IS_STRING(list->items[i]))
-				printf("\"%s\"", AS_CSTRING(list->items[i]));
+				fprintf(out,
+				        "\"%s\"",
+				        AS_CSTRING(list->items[i]));
 			else
-				print_value(list->items[i]);
+				print_value_to(out, list->items[i]);
 		}
-		printf("]");
+		fprintf(out, "]");
 		break;
 	}
-	case OBJ_TABLE:
-		/* contents are not printed. add it if you are debugging a table. */
-		printf("<table>");
+	case OBJ_TABLE: {
+		/*
+		 * The contents, in insertion order. This used to print
+		 * `<table>`, which made `print(t)` useless for the one
+		 * thing people print tables to see.
+		 */
+		ObjTable *t = AS_FLINT_TABLE(value);
+		fprintf(out, "{");
+		for (int i = 0; i < t->count; i++) {
+			if (i > 0)
+				fprintf(out, ", ");
+			fprintf(out, "%s: ", t->keys[i]->chars);
+			print_value_to(out, t->values[i]);
+		}
+		fprintf(out, "}");
 		break;
+	}
 	}
 }
+
+void print_object(Value value) { print_object_to(stdout, value); }

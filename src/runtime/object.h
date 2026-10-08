@@ -299,4 +299,19 @@ void print_object(Value value);
  */
 void print_value(Value value);
 
+/*
+ * Render a value into a fresh string, byte-for-byte what print() would
+ * have written. The caller frees it.
+ *
+ * Exists so `str()` can render a container. It is the same code with a
+ * different FILE* rather than a second renderer: two renderers for one
+ * language disagree within a release, and then every caller disagrees
+ * with every other caller.
+ *
+ * NULL on allocation failure only. `vm` is unused and takes the argument
+ * so the signature can grow a root or a GC-safe path later without
+ * changing every call site.
+ */
+char *flint_value_to_string(VM *vm, Value value);
+
 #endif /* FL_OBJECT_H */

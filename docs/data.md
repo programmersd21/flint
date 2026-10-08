@@ -184,6 +184,16 @@ t.year = 2027
 print(t.year)
 ```
 
+`print` shows a table's contents in insertion order, and so does `str`:
+
+```flint
+print(t)          # {name: flint, year: 2027}
+print(str(t))     # {name: flint, year: 2027}
+```
+
+a table used to print as the single token `<table>`, which made `print` useless
+for the one thing a table is printed to see.
+
 like lists, a trailing comma is allowed:
 
 ```flint

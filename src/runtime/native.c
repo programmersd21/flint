@@ -542,7 +542,37 @@ static Value str_native(VM *vm, int argc, Value *argv)
 		        AS_BOOL(val) ? 4 : 5));
 	if (IS_NIL(val))
 		return STR_VAL(new_string(vm, "nil", 3));
-	/* no structure is rendered, so everything else is one opaque token */
+	/*
+	 * Containers used to render as one opaque `<object>`, which made
+	 * `str()` useless on anything structured: `print(xs)` showed the
+	 * contents while `str(xs)` did not, so building a string from a list
+	 * was impossible and every caller concatenated by hand.
+	 *
+	 * Rendered by routing through the same printer `print` uses, into a
+	 * captured buffer rather than to stdout. Reusing the printer is the
+	 * point -- two renderers for one language disagree within a release,
+	 * and then every `str(xs)` in the wild disagrees with the next one.
+	 */
+	if (IS_LIST(val) || IS_FLINT_TABLE(val)) {
+		char *rendered = flint_value_to_string(vm, val);
+		if (rendered == NULL) {
+			vm_runtime_error(vm, "out of memory rendering text.");
+			return NIL_VAL;
+		}
+		Value result = STR_VAL(
+		        new_string(vm, rendered, (int)strlen(rendered)));
+		/*
+		 * Rooted before the free: new_string can allocate, and the
+		 * collector does not scan a C local. `rendered` is plain
+		 * malloc memory, so it survives collection -- but the value
+		 * it became is a fresh string that has to be on the stack
+		 * before anything else can allocate.
+		 */
+		vm_push(vm, result);
+		free(rendered);
+		return vm_pop(vm);
+	}
+	/* a function, a native, or anything else with no useful text form */
 	return STR_VAL(new_string(vm, "<object>", 8));
 }
 

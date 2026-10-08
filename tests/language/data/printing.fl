@@ -52,7 +52,12 @@ print(len(big))
 print(big[0])
 print(big[199])
 
-# tables print as an opaque token, not by dumping their contents
+# tables print their contents in insertion order, keys and values both.
+# this used to print `<table>`, which made print(t) useless for the one
+# thing people print a table to see.
 let t = { a: 1, b: 2 }
 print(t)
 print(type(t))
+print({})
+print({n: {d: 1}})
+print({s: "text", nested: {k: 2}})
