@@ -102,7 +102,7 @@ DBG_CFLAGS := -O0 -g3 -DFL_DEBUG_PRINT_CODE -DFL_DEBUG_TRACE_EXECUTION
 STR_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFL_GC_STRESS
 STR_LDFLAGS := -fsanitize=address,undefined
 
-.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto fmt-test pkg-test
+.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto fmt-test pkg-test runner-test
 .SUFFIXES:
 
 # If a compile fails partway, do not leave a truncated object behind. Make
@@ -313,6 +313,7 @@ check:
 	$(MAKE) unit
 	$(MAKE) fmt-test
 	$(MAKE) pkg-test
+	$(MAKE) runner-test
 
 # The formatter's contract: same input, same output, and one pass is
 # enough (fmt(fmt(source)) == fmt(source)). Checked over every source in
@@ -320,6 +321,13 @@ check:
 # cannot leave the repository disagreeing with itself.
 fmt-test: flint
 	@sh tests/fmt_test.sh ./flint
+
+# The runner's own contract, built from throwaway fixtures: a suite with the
+# right output and the wrong exit status has to fail, a declared nonzero
+# status has to pass, and a malformed status file has to be reported rather
+# than defaulted. A runner that cannot fail is worse than no runner.
+runner-test: flint
+	@sh tests/runner_test.sh ./flint
 
 # The package manager, end to end against real fixtures: a path
 # dependency, a git dependency over file:// (no network, no registry),
