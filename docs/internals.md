@@ -78,6 +78,27 @@ base used by the next import in its caller. Path identity is the resolved
 string, not the filesystem's canonical identity. Symlink aliases can load a
 file twice.
 
+## compiler state
+
+The compiler keeps one `CompilerState` — parser position, the compiler chain,
+the VM, the enclosing loop — and `compile_named()` saves and restores it
+around every compilation. That is what makes the isolation a property rather
+than an argument: a nested compile starts from a clean slate and puts the
+outer state back exactly as it was, including the error count and the import
+list, whose entries hold malloc'd names freed at the end of the compile that
+recorded them. The unit tests compile a run of programs in which two fail on
+purpose and check that their neighbours are unaffected.
+
+**The scanner is still file-scope global, and the frontend is therefore not
+reentrant and not thread-safe.** Threading it through would mean passing a
+scanner through every scan call in the compiler, and the compiler is where
+that cost would be paid. A nested compile cannot happen today because
+compiling and executing are separate phases: `import` runs at execution time,
+so an outer compile has always finished before any execution nests. Making
+that an enforced property mattered more than making it true. If `import`
+ever becomes eager, the scanner is the thing that will break first, and it
+should break loudly rather than quietly.
+
 ## things that hurt
 
 - A value held only in a C local can die at the next allocating call.

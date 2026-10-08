@@ -535,6 +535,77 @@ static void test_real_closures_verify(void)
 	}
 }
 
+/*
+ * Compiler state does not leak between compilations.
+ *
+ * The frontend keeps one CompilerState, bundled and saved/restored around
+ * compile_named(). That makes the isolation an enforced property rather than
+ * an argument in a comment: a nested compile starts clean and puts the outer
+ * state back exactly. The scanner is still global and cannot be otherwise
+ * without a larger change -- that limitation is documented rather than
+ * half-refactored.
+ *
+ * These compile the same VM repeatedly, and also compile a failing program in
+ * between, because the interesting leaks are the ones a *failed* compile
+ * leaves behind: error counts, and the import list whose entries hold malloc'd
+ * names freed at the end of the compile that recorded them.
+ */
+static void test_compiler_state_isolation(void)
+{
+	static const char *const good[] = {
+	        "let x = 1\nprint(x)\n",
+	        "import \"nope.fl\"\n", /* fails to resolve */
+	        "let y = 2\nprint(y)\n",
+	        "fn f() {\n  syntax error here\n}\n", /* fails to parse */
+	        "print(\"still fine\")\n",
+	};
+
+	VM vm;
+	vm_init(&vm);
+	int expected_failures = 0;
+	for (size_t i = 0; i < sizeof(good) / sizeof(good[0]); i++) {
+		ObjFunction *function = compile_named(&vm, good[i], "<iso>");
+		if (function == NULL) {
+			expected_failures++;
+			continue;
+		}
+		FlVerifyError error;
+		char message[96];
+		snprintf(message,
+		        sizeof message,
+		        "program %zu compiles and verifies after its "
+		        "neighbours failed",
+		        i);
+		check(fl_verify_function(function, &error), message);
+	}
+	vm_free(&vm);
+
+	checks++;
+	if (expected_failures != 2) {
+		failures++;
+		printf("FAIL: expected 2 fixtures to fail to compile, got %d\n",
+		        expected_failures);
+	}
+
+	/* A clean compile after a failing one must not inherit its error
+	 * count. Compiling a program with a genuine error and then a valid
+	 * one is the case: if error_count survived, the valid one would be
+	 * reported as failing. */
+	VM vm2;
+	vm_init(&vm2);
+	ObjFunction *bad = compile_named(&vm2, "let = \n", "<bad>");
+	ObjFunction *good_fn = compile_named(&vm2, "print(1)\n", "<good>");
+	checks++;
+	if (bad != NULL || good_fn == NULL) {
+		failures++;
+		printf("FAIL: a failed compile affected the next one "
+		       "(bad=%s good=%s)\n",
+		        bad == NULL ? "null" : "compiled",
+		        good_fn == NULL ? "null" : "compiled");
+	}
+	vm_free(&vm2);
+}
+
 int main(void)
 {
 	test_every_opcode_has_a_width();
@@ -545,6 +616,7 @@ int main(void)
 	test_bare_chunk_skips_upvalue_check();
 	test_real_closures_verify();
 	test_fuzz_random();
+	test_compiler_state_isolation();
 
 	if (failures > 0) {
 		printf("verifier: %d checks, %d failed\n", checks, failures);
