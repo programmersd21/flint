@@ -1014,9 +1014,16 @@ static int explain_code(const char *code)
 	        {"E0102",
 	                "A required delimiter is missing. Add the delimiter "
 	                "named by the diagnostic."},
+	        {"E0201",
+	                "a name is declared twice in one scope. Remove one of "
+	                "the declarations, or rename one of them."},
 	        {"E0202",
 	                "A name is not defined in the current scope. Check its "
 	                "spelling or define it before use."},
+	        {"E0203",
+	                "an import is never read. Remove it, or use the name it "
+	                "binds. Aliasing to _ opts out when the import is only "
+	                "wanted for its side effect."},
 	        {"E0301",
 	                "an operator received incompatible operands. Check the "
 	                "operator and operand types."},

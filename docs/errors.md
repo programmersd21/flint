@@ -100,7 +100,9 @@ migrated.
 | `E0003` | unterminated string literal |
 | `E0100` | parser or compile error without a more specific code |
 | `E0102` | missing `)`, `]`, or `}` |
+| `E0201` | a name declared twice in one scope, including redefining a constant |
 | `E0202` | undefined variable or global name |
+| `E0203` | an import that is never read |
 | `E0301` | incompatible operator operands |
 | `E0302` | failed `as` type assertion |
 | `E0401` | call error, including wrong arity |

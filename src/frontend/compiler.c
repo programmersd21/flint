@@ -283,6 +283,25 @@ static const char *diagnostic_code(const Token *token, const char *message)
 	        strstr(message, "expect '}'") != NULL ||
 	        strstr(message, "expect ']'") != NULL)
 		return "E0102";
+	/*
+	 * Redeclaration and unused-import codes. Both used to be E0100,
+	 * the "no more specific code" bucket, which made --explain and the
+	 * JSON diagnostics useless for two mistakes that are common and
+	 * that people look up. They are compile-time facts about a name,
+	 * so E02 -- the same family as undefined-variable, which the runtime
+	 * already uses for exactly that question.
+	 *
+	 * Matching on the message text is how every other code here is
+	 * derived, and it is not great; it is fine here because these
+	 * messages are produced in this file, next to the code, and a
+	 * message that changes shape fails the tests that print it.
+	 */
+	if (strstr(message, "already declared") != NULL ||
+	        strstr(message, "already defined") != NULL ||
+	        strstr(message, "cannot redefine constant") != NULL)
+		return "E0201";
+	if (strstr(message, "but never used") != NULL)
+		return "E0203";
 	return "E0100";
 }
 
