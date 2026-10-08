@@ -244,7 +244,7 @@ static void test_rejects_malformed(void)
 		if (fl_verify_chunk_for_test(&chunk, "into-operand", &error)) {
 			failures++;
 			printf("FAIL: accepts a jump into operand byte %d\n",
-			       target);
+			        target);
 		}
 		chunk_free(NULL, &chunk);
 	}
@@ -357,10 +357,8 @@ static void test_fuzz_random(void)
  * hand. That is the point: the compiler being correct about these cases is
  * what the verifier is being tested against.
  */
-static void check_upvalue(uint8_t slot,
-        int upvalue_count,
-        bool accepted,
-        const char *what)
+static void check_upvalue(
+        uint8_t slot, int upvalue_count, bool accepted, const char *what)
 {
 	for (int op = 0; op < 2; op++) {
 		Chunk chunk;
@@ -387,8 +385,8 @@ static void check_upvalue(uint8_t slot,
 		if (ok != accepted) {
 			failures++;
 			printf("FAIL: %s: %s\n",
-			       label,
-			       ok ? "accepted" : "rejected");
+			        label,
+			        ok ? "accepted" : "rejected");
 		}
 		chunk_free(NULL, &chunk);
 	}
@@ -405,10 +403,8 @@ static void check_upvalue(uint8_t slot,
  * wrong rather than unsafe -- but a verifier that accepts a slot the
  * function does not have has stopped being able to say anything at all.
  */
-static void check_local(uint8_t slot,
-        int local_count,
-        bool accepted,
-        const char *what)
+static void check_local(
+        uint8_t slot, int local_count, bool accepted, const char *what)
 {
 	for (int op = 0; op < 2; op++) {
 		Chunk chunk;
@@ -422,8 +418,8 @@ static void check_local(uint8_t slot,
 		chunk_write(NULL, &chunk, slot, 1, 0);
 		chunk_write(NULL, &chunk, OP_RETURN, 1, 0);
 		FlVerifyError error;
-		bool ok = fl_verify_function_for_test(
-		        &chunk, 0, "local", &error);
+		bool ok =
+		        fl_verify_function_for_test(&chunk, 0, "local", &error);
 		char label[256];
 		snprintf(label,
 		        sizeof(label),
@@ -436,8 +432,8 @@ static void check_local(uint8_t slot,
 		if (ok != accepted) {
 			failures++;
 			printf("FAIL: %s: %s\n",
-			       label,
-			       ok ? "accepted" : "rejected");
+			        label,
+			        ok ? "accepted" : "rejected");
 		}
 		chunk_free(NULL, &chunk);
 	}

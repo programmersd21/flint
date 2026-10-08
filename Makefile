@@ -103,6 +103,7 @@ STR_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFL_G
 STR_LDFLAGS := -fsanitize=address,undefined
 
 .PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto fmt-test pkg-test runner-test
+.PHONY: quick validate
 .SUFFIXES:
 
 # If a compile fails partway, do not leave a truncated object behind. Make
@@ -303,17 +304,44 @@ bench: flint
 bench-goto: flint flint-goto
 	@sh bench/compare.sh ./flint ./flint-goto
 
-# Full gate: clean build then every test suite. The only target that proves the
-# tree is green from scratch. `make test` alone tests a possibly stale binary;
-# this one does not. Use it before pushing or tagging.
-check:
-	$(MAKE) clean
+# The fast local gate: everything that takes seconds. This is the loop for
+# working on the interpreter -- build, all four test suites, formatting,
+# static analysis.
+#
+#   make quick
+#
+# It reuses `flint` and the object trees rather than cleaning, so it runs
+# against the binary you just built. It is not the release gate: it does not
+# clean, and it does not run the sanitizer build, so it cannot prove the
+# tree is green from scratch. `make validate` is that.
+quick:
 	$(MAKE) release
 	$(MAKE) test
 	$(MAKE) unit
 	$(MAKE) fmt-test
 	$(MAKE) pkg-test
 	$(MAKE) runner-test
+	$(MAKE) fmt-check
+	$(MAKE) lint
+
+# The release gate: clean build, then everything, then the sanitizer and
+# computed-goto configurations the fast gate cannot stand in for.
+#
+#   make validate
+#
+# Ordered so the cheap failures come first: a compiler error in the release
+# build costs seconds, while `stress` costs minutes. Every target here is
+# required -- a failure stops the recipe rather than being reported at the
+# end, because a validation run that continues past a red gate has already
+# told you it is not a validation run.
+#
+# The stress build is a separate object tree (STR_DIR) and a separate binary,
+# so it neither replaces ./flint nor rebuilds the release objects. That
+# separation is what lets this run after `make release` without a clean.
+validate: release test unit diagnostic-test fmt-test pkg-test runner-test \
+	fmt-check lint stress flint-goto
+	@sh tests/run_tests.sh ./flint-goto
+	@echo "validate: every gate passed"
 
 # The formatter's contract: same input, same output, and one pass is
 # enough (fmt(fmt(source)) == fmt(source)). Checked over every source in
