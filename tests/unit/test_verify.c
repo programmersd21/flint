@@ -191,6 +191,81 @@ static void test_rejects_malformed(void)
 		        "rejects a truncated instruction");
 		chunk_free(NULL, &chunk);
 	}
+
+	/*
+	 * A cast tag above the last FlType. The VM's cast switch would fall
+	 * off the end of itself for one, so this is the check that keeps the
+	 * enum's last member meaning "the last one".
+	 */
+	for (int tag = FL_TYPE_FUNCTION + 1; tag <= 255; tag++) {
+		Chunk chunk;
+		chunk_init(&chunk);
+		chunk_write(NULL, &chunk, OP_CAST, 1, 0);
+		chunk_write(NULL, &chunk, (uint8_t)tag, 1, 0);
+		chunk_write(NULL, &chunk, OP_RETURN, 1, 0);
+		FlVerifyError error;
+		checks++;
+		if (fl_verify_chunk_for_test(&chunk, "cast", &error)) {
+			failures++;
+			printf("FAIL: accepts cast tag %d\n", tag);
+		}
+		chunk_free(NULL, &chunk);
+	}
+	/* and the last real one is still fine */
+	{
+		Chunk chunk;
+		chunk_init(&chunk);
+		chunk_write(NULL, &chunk, OP_CAST, 1, 0);
+		chunk_write(NULL, &chunk, (uint8_t)FL_TYPE_FUNCTION, 1, 0);
+		chunk_write(NULL, &chunk, OP_RETURN, 1, 0);
+		FlVerifyError error;
+		check(fl_verify_chunk_for_test(&chunk, "cast", &error),
+		        "accepts the last real cast tag");
+		chunk_free(NULL, &chunk);
+	}
+
+	/*
+	 * A jump into the middle of another instruction's operand. The byte
+	 * after OP_JUMP is an operand; landing there reads it as an opcode.
+	 */
+	for (int target = 1; target <= 5; target++) {
+		Chunk chunk;
+		chunk_init(&chunk);
+		chunk_write(NULL, &chunk, OP_JUMP, 1, 0);
+		chunk_write(NULL, &chunk, 0, 1, 0);
+		/* five bytes of operands that must never be a jump target */
+		chunk_write(NULL, &chunk, OP_CONSTANT, 1, 0);
+		chunk_write(NULL, &chunk, 1, 1, 0);
+		chunk_write(NULL, &chunk, OP_CONSTANT, 1, 0);
+		chunk_write(NULL, &chunk, 2, 1, 0);
+		chunk_write(NULL, &chunk, OP_RETURN, 1, 0);
+		FlVerifyError error;
+		checks++;
+		if (fl_verify_chunk_for_test(&chunk, "into-operand", &error)) {
+			failures++;
+			printf("FAIL: accepts a jump into operand byte %d\n",
+			       target);
+		}
+		chunk_free(NULL, &chunk);
+	}
+
+	/*
+	 * A jump that lands on a real instruction boundary is fine. The
+	 * delta is measured from the end of the instruction, so OP_RETURN
+	 * at offset 3 is a delta of 0 from a jump at offset 0.
+	 */
+	{
+		Chunk chunk;
+		chunk_init(&chunk);
+		chunk_write(NULL, &chunk, OP_JUMP, 1, 0);
+		chunk_write(NULL, &chunk, 0, 1, 0);
+		chunk_write(NULL, &chunk, 0, 1, 0);
+		chunk_write(NULL, &chunk, OP_RETURN, 1, 0);
+		FlVerifyError error;
+		check(fl_verify_chunk_for_test(&chunk, "boundary", &error),
+		        "accepts a jump onto an instruction boundary");
+		chunk_free(NULL, &chunk);
+	}
 }
 
 /* xorshift32, seeded fixed so a failure reproduces everywhere. */
@@ -319,6 +394,67 @@ static void check_upvalue(uint8_t slot,
 	}
 }
 
+/*
+ * Local slots, the same shape of question as upvalues and the same fix.
+ *
+ * A function with no locals is a real function with a real answer: it may
+ * not read or write any local slot. Before the fix, a zero local_count
+ * skipped the check the way a bare chunk does, so OP_GET_LOCAL 0 in a
+ * zero-local function reached the VM. Reading frame->slots[0] there reads
+ * the callee slot rather than memory outside the frame -- so this was
+ * wrong rather than unsafe -- but a verifier that accepts a slot the
+ * function does not have has stopped being able to say anything at all.
+ */
+static void check_local(uint8_t slot,
+        int local_count,
+        bool accepted,
+        const char *what)
+{
+	for (int op = 0; op < 2; op++) {
+		Chunk chunk;
+		chunk_init(&chunk);
+		chunk.local_count = local_count;
+		chunk_write(NULL,
+		        &chunk,
+		        op == 0 ? OP_GET_LOCAL : OP_SET_LOCAL,
+		        1,
+		        0);
+		chunk_write(NULL, &chunk, slot, 1, 0);
+		chunk_write(NULL, &chunk, OP_RETURN, 1, 0);
+		FlVerifyError error;
+		bool ok = fl_verify_function_for_test(
+		        &chunk, 0, "local", &error);
+		char label[256];
+		snprintf(label,
+		        sizeof(label),
+		        "%s (%s %d, %d locals)",
+		        what,
+		        op == 0 ? "GET" : "SET",
+		        (int)slot,
+		        local_count);
+		checks++;
+		if (ok != accepted) {
+			failures++;
+			printf("FAIL: %s: %s\n",
+			       label,
+			       ok ? "accepted" : "rejected");
+		}
+		chunk_free(NULL, &chunk);
+	}
+}
+
+static void test_local_bounds(void)
+{
+	check_local(0, 0, false, "zero-local function rejects slot 0");
+	check_local(9, 0, false, "zero-local function rejects slot 9");
+	check_local(0, 1, true, "one local accepts slot 0");
+	check_local(1, 1, false, "one local rejects slot 1");
+	check_local(254, 255, true, "255 locals accepts slot 254");
+	check_local(255, 255, false, "255 locals reject one past the end");
+	check_local(255, 256, true, "256 locals accept the last slot");
+	check_local(0, 256, true, "256 locals accept slot 0");
+}
+
 static void test_upvalue_bounds(void)
 {
 	/*
@@ -408,6 +544,7 @@ int main(void)
 	test_every_opcode_has_a_width();
 	test_widths_agree_with_the_compiler();
 	test_rejects_malformed();
+	test_local_bounds();
 	test_upvalue_bounds();
 	test_bare_chunk_skips_upvalue_check();
 	test_real_closures_verify();

@@ -329,12 +329,14 @@ static bool verify_chunk(const Chunk *chunk,
 		 * name a slot this function does not have, which reads whatever
 		 * the caller's frame happens to put there.
 		 *
-		 * A chunk with local_count of 0 was built by hand rather than by
-		 * the compiler, so the check is skipped rather than failed; see
-		 * Chunk.local_count.
+		 * has_function rather than local_count > 0, for the same
+		 * reason as the upvalue check below: a function with no locals
+		 * is a real function with a real answer, and it may not read
+		 * any local slot. A bare chunk has no count to check against, so
+		 * it skips.
 		 */
 		if (opcode == OP_GET_LOCAL || opcode == OP_SET_LOCAL) {
-			if (chunk->local_count > 0 &&
+			if (has_function &&
 			        (int)code[offset + 1] >= chunk->local_count) {
 				fail(error,
 				        offset,
@@ -354,11 +356,20 @@ static bool verify_chunk(const Chunk *chunk,
 			}
 		}
 
-		if (opcode == OP_CAST &&
-		        (int)code[offset + 1] > FL_TYPE_FUNCTION) {
-			fail(error, offset, "cast type tag is out of range");
-			ok = false;
-			break;
+		if (opcode == OP_CAST) {
+			/*
+			 * The tag is checked against the last enum member. That
+			 * member is deliberately the last one: a tag above it
+			 * would be a FlType the type() names cannot produce,
+			 * and the VM's cast switch would fall off the end.
+			 */
+			if ((int)code[offset + 1] > FL_TYPE_FUNCTION) {
+				fail(error,
+				        offset,
+				        "cast type tag is out of range");
+				ok = false;
+				break;
+			}
 		}
 
 		if (opcode == OP_JUMP || opcode == OP_JUMP_IF_FALSE ||
