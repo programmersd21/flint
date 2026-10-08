@@ -1021,7 +1021,8 @@ static int explain_code(const char *code)
 	                "A name is not defined in the current scope. Check its "
 	                "spelling or define it before use."},
 	        {"E0203",
-	                "an import is never read. Remove it, or use the name it "
+	                "an import is never read. Remove it, or use the name "
+			"it "
 	                "binds. Aliasing to _ opts out when the import is only "
 	                "wanted for its side effect."},
 	        {"E0301",
