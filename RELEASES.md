@@ -1,5 +1,77 @@
 # releases
 
+## v0.11.0
+
+the release that makes flint correct: a verifier that means what it says,
+a test runner that checks what it claims, and one rule for spelling a
+number. no new keywords, no new subsystems. the language grows by nothing
+at all this time -- 0.11.0 is about the code that was already there being
+right.
+
+### the verifier checks what it claims
+
+the upvalue bounds check read `count > 0 && operand >= (uint8_t)count`,
+which is wrong at both ends. a function capturing nothing skipped the
+check entirely, so any operand reached the VM with nothing behind it.
+and 256 upvalues narrowed to a byte is zero, so a function at the maximum
+rejected *every* access including all 256 valid ones. the local-slot check
+had the same shape of bug. "no function" is now distinct from "a function
+with nothing to capture": a bare chunk has no count to check against, a
+real function with none has an answer, and the answer is that no slot is
+readable.
+
+regression coverage to match: zero, one, 255 and 256 upvalues and locals,
+first and last valid slot, first invalid slot, GET and SET for each, every
+cast tag above the last enum member, jumps landing inside operands, and a
+truncation sweep over every multi-byte opcode. the new tests were confirmed
+to fail against the old condition before they were confirmed to pass
+against the new one.
+
+### the runner checks the exit status
+
+`run_tests.sh` compared stdout and discarded the status with `|| true`, so
+a script that printed exactly the right lines and then exited non-zero
+passed. 38 existing tests legitimately exit nonzero and had been relying
+on that tolerance; each now declares its status in a `name.status` file
+beside the test, absent meaning 0. `runner_test.sh` covers the runner's own
+contract from the other direction: right output with the wrong status
+fails, a declared nonzero status passes, a malformed status file is
+reported rather than defaulted.
+
+### one rule for spelling a double
+
+`print(1/3)` gave 16 digits, `print([1/3])` gave 17, and `str(1/3)` gave 17
+while losing digits on values needing 16. three copies of one rule, and
+the top-level one was the only one that re-read its output to check the
+digits round-tripped. `fl_double_to_text()` is the one rule now: the digit
+loop for small integers, then 15/16/17 widening until the text reads back
+identically. the measured fast path stays -- 19ms per 200k `str(i)` calls
+against 45ms through a stdio stream -- as an optimization with the same
+answer, not a second rule.
+
+along the way `str()` learned containers and tables learned to print:
+`str([1, 2])` is `[1, 2]` and `print({a: 1})` is `{a: 1}`, because the
+printer takes a FILE* now instead of writing to stdout, and `str` is the
+same code with a different stream.
+
+### two codes for two common mistakes
+
+redeclaring a name and leaving an import unread both fell into E0100, the
+"no more specific code" bucket, so `--explain` had nothing useful to say
+about either. E0201 (declared twice, including redefining a constant) and
+E0203 (import never read) join E0202, which the runtime already used for
+the same question from the other direction. matching on message text is
+how every code here is derived, and these two are produced in the same
+file as the code that assigns them.
+
+### the gates have names for what they cost
+
+`make quick` is the working loop -- build, all suites, fmt-check, lint --
+in seconds. `make validate` is the release gate: everything, ordered so
+the cheap failures come first, with the sanitizer build and computed-goto
+where they belong. `make check` is an alias for validate rather than a
+second, weaker gate. `make help` describes all of it truthfully now.
+
 ## v0.10.0
 
 the release that makes flint comfortable: safer expressions around missing
