@@ -12,7 +12,6 @@
 #include "value.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 void value_array_init(ValueArray *array)
 {
 	array->count = 0;
