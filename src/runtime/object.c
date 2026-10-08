@@ -434,18 +434,19 @@ static void print_object_to(FILE *out, Value value);
 static void print_value_to(FILE *out, Value value)
 {
 	if (IS_NUMBER(value)) {
-		double d = AS_NUMBER(value);
-		if (fl_double_is_printable_int(d)) {
-			fprintf(out, "%ld", fl_double_to_long(d));
-			return;
-		}
+		/*
+		 * fl_double_to_text() rather than a third copy of the rule.
+		 * print() at the top level and print() of a nested value each
+		 * had their own spelling of a double before, and they
+		 * disagreed: the top-level one tried 15, 16, then 17 digits
+		 * until the text read back identically, the nested one tried
+		 * 15 then jumped to 17. str(1/3) printed 17 digits while
+		 * print(1/3) printed 16.
+		 */
 		char buf[64];
-		snprintf(buf, sizeof(buf), "%.15g", d);
-		if (strtod(buf, NULL) == d) {
-			fprintf(out, "%s", buf);
-			return;
-		}
-		snprintf(buf, sizeof(buf), "%.17g", d);
+		int n = fl_double_to_text(AS_NUMBER(value), buf, sizeof(buf));
+		if (n > 0 && n < (int)sizeof(buf))
+			buf[n] = '\0';
 		fprintf(out, "%s", buf);
 		return;
 	}

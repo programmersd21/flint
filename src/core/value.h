@@ -14,8 +14,11 @@
 
 #include <assert.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef uint64_t Value;
@@ -158,18 +161,6 @@ static inline bool fl_double_is_printable_int(double d)
 /* the printable form of a double that passes the test above */
 static inline long fl_double_to_long(double d) { return (long)d; }
 
-/*
- * Write a small integer into buf as decimal, without snprintf.
- *
- * snprintf("%.15g") costs about 250ns per call, which sounds like nothing
- * until you notice a loop that builds a hundred thousand strings is then
- * dominated by it. Most values a script ever prints are small integers, and
- * for those the whole job is a digit loop and a reversal.
- *
- * Returns the number of bytes written, not counting the NUL. Returns 0 when
- * the value is out of the range this handles, and the caller is expected to
- * fall back to snprintf rather than print something wrong.
- */
 static inline int fl_itoa(long value, char *buf, size_t buflen)
 {
 	/* enough for "-9223372036854775808" and its NUL */
@@ -198,6 +189,74 @@ static inline int fl_itoa(long value, char *buf, size_t buflen)
 	buf[out] = '\0';
 	return (int)out;
 }
+
+/*
+ * Write a double into buf in the one way flint spells numbers. Returns the
+ * length written, not counting the NUL.
+ *
+ * "one way" is the whole point, and it was not true for a while: `print`
+ * at the top level and `print` of a list element each had their own rule
+ * and disagreed. The top-level one widened the precision until the text
+ * read back as the same double -- 15, then 16, then 17 -- while the
+ * nested one tried 15 and jumped straight to 17. So `print(1/3)` gave 16
+ * digits and `print([1/3])` gave 17, and `str` of a number had a third
+ * spelling again.
+ *
+ * The digit loop stays, because most values a script prints are small
+ * integers and snprintf dominates a loop that builds a hundred thousand
+ * strings. Past its range it falls back to the widening snprintf, so the
+ * fast path is an optimization and never a different answer.
+ *
+ * buf must be at least 32 bytes.
+ */
+static inline int fl_double_to_text(double d, char *buf, size_t buflen)
+{
+	if (buflen < 32)
+		return 0;
+	if (isnan(d)) {
+		snprintf(buf, buflen, "nan");
+		return 3;
+	}
+	if (isinf(d)) {
+		if (d < 0) {
+			snprintf(buf, buflen, "-inf");
+			return 4;
+		}
+		snprintf(buf, buflen, "inf");
+		return 3;
+	}
+	if (fl_double_is_printable_int(d)) {
+		int n = fl_itoa(fl_double_to_long(d), buf, buflen);
+		if (n > 0)
+			return n;
+		snprintf(buf, buflen, "%ld", fl_double_to_long(d));
+		return (int)strlen(buf);
+	}
+	/* 17 significant digits always round-trips a double, so the loop
+	 * always returns; the last write is a fallback that should be
+	 * unreachable, and is here so a rounding surprise cannot leave buf
+	 * holding something stale. */
+	int written = 0;
+	for (int precision = 15; precision <= 17; precision++) {
+		written = snprintf(buf, buflen, "%.*g", precision, d);
+		if (strtod(buf, NULL) == d)
+			return written;
+	}
+	return written;
+}
+
+/*
+ * Write a small integer into buf as decimal, without snprintf.
+ *
+ * snprintf("%.15g") costs about 250ns per call, which sounds like nothing
+ * until you notice a loop that builds a hundred thousand strings is then
+ * dominated by it. Most values a script ever prints are small integers, and
+ * for those the whole job is a digit loop and a reversal.
+ *
+ * Returns the number of bytes written, not counting the NUL. Returns 0 when
+ * the value is out of the range this handles, and the caller is expected to
+ * fall back to snprintf rather than print something wrong.
+ */
 
 /*
  * A NaN may carry a payload, and IEEE 754 declines to say whether the

@@ -1089,51 +1089,17 @@ void vm_free(VM *vm)
 static void print_flint_value(Value value)
 {
 	if (IS_NUMBER(value)) {
-		double d = AS_NUMBER(value);
-		if (isnan(d)) {
-			printf("nan\n");
-			return;
-		}
-		if (isinf(d)) {
-			if (d < 0)
-				printf("-inf\n");
-			else
-				printf("inf\n");
-			return;
-		}
-		/* exactly representable as an integer, and in range as a long.
-		 * the range test has to happen inside the helper, before the
-		 * cast: see the note on fl_double_is_printable_int. */
-		if (fl_double_is_printable_int(d)) {
-			/* the digit loop, not printf("%ld"). small integers
-			 * are the common case and a libc format call is
-			 * ~250ns for something this is twenty nanoseconds of. */
-			char small[24];
-			int n = fl_itoa(
-			        fl_double_to_long(d), small, sizeof(small));
-			if (n > 0) {
-				printf("%s\n", small);
-				return;
-			}
-			printf("%ld\n", fl_double_to_long(d));
-			return;
-		}
+		/*
+		 * fl_double_to_text(), the same rule the nested printer and
+		 * str() use. This used to be a third copy with its own
+		 * nan/inf spellings, its own digit loop and its own
+		 * precision ladder, which is why a number could print
+		 * differently depending on where it was.
+		 */
 		char buf[64];
-		double check;
-		snprintf(buf, sizeof(buf), "%.15g", d);
-		check = strtod(buf, NULL);
-		if (check == d) {
-			printf("%s\n", buf);
-			return;
-		}
-		snprintf(buf, sizeof(buf), "%.16g", d);
-		check = strtod(buf, NULL);
-		if (check == d) {
-			printf("%s\n", buf);
-			return;
-		}
-		/* 17 significant digits is always enough for a double */
-		snprintf(buf, sizeof(buf), "%.17g", d);
+		int n = fl_double_to_text(AS_NUMBER(value), buf, sizeof(buf));
+		if (n >= 0 && n < (int)sizeof(buf))
+			buf[n] = '\0';
 		printf("%s\n", buf);
 	} else if (IS_BOOL(value)) {
 		printf("%s\n", AS_BOOL(value) ? "true" : "false");
