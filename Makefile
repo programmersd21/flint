@@ -102,8 +102,7 @@ DBG_CFLAGS := -O0 -g3 -DFL_DEBUG_PRINT_CODE -DFL_DEBUG_TRACE_EXECUTION
 STR_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFL_GC_STRESS
 STR_LDFLAGS := -fsanitize=address,undefined
 
-.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto fmt-test pkg-test runner-test
-.PHONY: quick validate
+.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto fmt-test pkg-test runner-test quick validate
 .SUFFIXES:
 
 # If a compile fails partway, do not leave a truncated object behind. Make
@@ -438,6 +437,10 @@ fmt-check:
 	fi; \
 	echo "all $(words $(FMT_FILES)) files formatted"
 
+# `check` is what people type and what older notes cite. It is the full
+# gate, alias and all -- see validate.
+check: validate
+
 clean:
 	rm -rf $(BUILD) flint flint-debug flint-stress flint-goto \
 		test_value.bin test_chunk.bin test_verify.bin
@@ -447,13 +450,19 @@ help:
 	@echo "make debug      -O0, disassembly, trace -> ./flint-debug"
 	@echo "make stress     gc stress + asan/ubsan, runs the suite"
 	@echo "make test       release build, runs the language suite"
-	@echo "make unit       value and chunk unit tests"
-	@echo "make check      clean + build + test + unit (gate quality)"
-	@echo "make flint-goto computed-goto interpreter, 7-21% faster"
-	@echo "make install    flint + lib to ~/.local/bin and ~/.flint/stdlib"
-	@echo "make bench      benchmarks (bench/bench.py)"
-	@echo "make lint       clang-tidy, policy in .clang-tidy"
-	@echo "make clean      remove build/ and the binaries"
+	@echo "make unit       value, chunk and verifier unit tests"
+	@echo "make diagnostic-test  diagnostic rendering and exit codes"
+	@echo ""
+	@echo "gates:"
+	@echo "make quick      seconds: build, all suites, fmt-check, lint"
+	@echo "make validate   minutes: everything, incl. sanitizers and goto"
+	@echo ""
+	@echo "flint-goto      computed-goto interpreter, 7-21% faster"
+	@echo "install         flint + lib to ~/.local/bin and ~/.flint/stdlib"
+	@echo "bench           benchmarks (bench/bench.py)"
+	@echo "lint            clang-tidy, policy in .clang-tidy"
+	@echo "fmt / fmt-check reformat / verify formatting"
+	@echo "clean           remove build/ and the binaries"
 	@echo ""
 	@echo "add CFLAGS=... to override flags, CC=clang to change compiler."
-	@echo "every target works with -j. check does not (intentionally sequential)."
+	@echo "every target works with -j. validate does not (sequential by design)."
