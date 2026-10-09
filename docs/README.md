@@ -19,6 +19,7 @@ program you can run: `./flint -e 'print(1)'`.
 | [internals.md](internals.md) | how the compiler and the vm work |
 | [cli.md](cli.md) | commands, flags, exit codes, `flint test` |
 | [packages.md](packages.md) | `flint.toml`, `flint pkg`, `flint.lock` |
+| [native-abi.md](native-abi.md) | writing a native module in C |
 
 the formal grammar and semantics are in [../SPEC.md](../SPEC.md), and the
 measured performance is in [../bench/RESULTS.md](../bench/RESULTS.md).

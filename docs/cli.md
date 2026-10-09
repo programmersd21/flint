@@ -65,6 +65,23 @@ whitespace, a single trailing newline. the contents of multiline strings
 are left alone. `--check` lists the files that would change and exits 1
 when any would, rewriting nothing: the shape CI wants.
 
+## native
+
+```sh
+flint native <library.so> <module> [script.fl]
+```
+
+loads a compiled module through the public C ABI and makes its functions
+callable for the run. posix only; a windows build refuses with a message.
+the loaded library is never unloaded -- see
+[native-abi.md](native-abi.md).
+
+| exit | meaning |
+|---|---|
+| 0 | the module loaded and the script succeeded |
+| 64 | wrong arguments |
+| 65 | the library could not be loaded: no such file, no entry point, an unsupported ABI version, or initialisation failure |
+
 ## sync
 
 ```sh

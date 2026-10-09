@@ -939,6 +939,8 @@ static void print_usage(FILE *stream)
 	        "  fmt [--check] FILES     canonical layout for sources\n");
 	fprintf(stream, "  pkg install|add|update|list\n");
 	fprintf(stream,
+	        "  native LIB.so MOD [script]  load a C module, then run\n");
+	fprintf(stream,
 	        "                         dependencies in flint.toml\n");
 	fprintf(stream,
 	        "  test --filter P         only tests whose name has P\n");
