@@ -7,6 +7,12 @@ release later.
 
 ## in this release
 
+### enums and match
+
+a declared set of variants, some carrying a value, and a `match` that
+proves exhaustiveness where it can. see the section at the bottom for
+what is deliberately absent.
+
 ### structs
 
 named record types, declared and constructed the way a table literal is,
@@ -93,12 +99,21 @@ and are recorded as gaps rather than approximated.
 
 ### enums and pattern matching
 
-**still deferred.** the reason they are not shipped alongside structs is
-now sharper rather than weaker: a pattern matcher compiled over
-*open-ended dynamic values* cannot prove exhaustiveness, and one that
-cannot prove it must not claim to. the buildable form is exhaustiveness
-over enum variants only, which wants the same compiler pass structs use --
-not a second pattern system arriving beside the first one.
+**partly delivered.** an enum's variants and a `match` over them are in:
+`match value { arm ... }` takes variant arms, a wildcard and a bare
+binding, and exhaustiveness is checked at compile time *where it can be
+proved* -- over a declared enum, where the possible values are a closed
+set. that is the buildable form the earlier version of this file argued
+for: a matcher over open-ended dynamic values cannot promise
+exhaustiveness, and one that cannot prove it must not claim to. anywhere
+else the compiler knows nothing, so a wildcard is required and a value
+matching no arm is a runtime error rather than a promise it cannot keep.
+
+what is deliberately absent: binding a payload *by* an arm
+(`Colour.Blue(n)`), which is an error saying so rather than reading a slot
+the arm scope does not own; literal patterns (`1 { ... }`); nested
+patterns; and guards. each is a small step on the same machinery, and each
+is one this release did not need.
 
 ## the bar for adding anything else
 

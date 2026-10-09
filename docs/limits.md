@@ -23,9 +23,12 @@ an unset field. tables iterate in insertion order.
 structs declare a named shape and check it at construction, which is why a
 misspelled field is a message there rather than a `nil` later. their type
 annotations are descriptive: `port: number` documents and enforces nothing.
-there are no methods, no inheritance, no generics, and no enums or pattern
-matching yet -- `docs/roadmap-0.12.md` says why each is deferred rather
-than half-built.
+enums declare a set of variants and check their arity at construction;
+`match` reads one, and proves exhaustiveness at compile time where it can
+be -- over a declared enum, where the possible values are a closed set.
+anywhere else it needs a wildcard. a payload cannot be *bound* by an arm
+yet, a literal is not a pattern, and there are no methods, no inheritance
+and no generics. `docs/roadmap-0.12.md` says what each of those costs.
 
 membership (`in`), nil-coalescing (`??`, `??=`) and optional chaining
 (`?.`) are implemented, not limits. `?.` covers field, call and subscript
