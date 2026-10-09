@@ -70,6 +70,10 @@ throwStmt      = "throw" expression terminator ;
 tryStmt        = "try" block "catch" ( IDENTIFIER )? ( "as" TypeName )? block ( "finally" block )? ;
 structDecl     = "struct" IDENTIFIER "{" ( field ( "," field )* ","? )? "}" terminator ;
 field          = IDENTIFIER ( ":" typeName )? ;
+enumDecl       = "enum" IDENTIFIER "{" variant ( "," variant )* ","? "}" terminator ;
+variant        = IDENTIFIER ( "(" typeName ")" )? ;
+matchStmt      = "match" expression "{" matchArm+ "}" terminator ;
+matchArm       = ( IDENTIFIER "." IDENTIFIER "()" | "_" | IDENTIFIER ) block ;
                | "try" block "finally" block ;
 
 terminator     = ";" | newline | "}" | EOF ;
