@@ -925,6 +925,25 @@ void vm_define_native(VM *vm, const char *name, NativeFn function, int arity)
 	vm_pop(vm);
 }
 
+/*
+ * The same, for a native that carries private host state.
+ *
+ * A native function pointer has nowhere to put a binding, so the public
+ * ABI's trampoline has to learn which module and function it is serving.
+ * The ObjNative carries that privately and the VM publishes it for the
+ * duration of the call; see vm.h's current_native.
+ */
+void vm_define_native_with_data(
+        VM *vm, const char *name, NativeFn function, int arity, void *user_data)
+{
+	vm_push(vm, STR_VAL(copy_string(vm, name, (int)strlen(name))));
+	vm_push(vm,
+	        OBJ_VAL(new_native_with_data(vm, function, arity, user_data)));
+	table_set(vm, vm->globals, AS_STRING(vm->stack[0]), vm->stack[1]);
+	vm_pop(vm);
+	vm_pop(vm);
+}
+
 void vm_init(VM *vm)
 {
 	/*
@@ -1290,8 +1309,14 @@ static bool call_value(VM *vm, Value callee, int arg_count)
 				        arg_count);
 				return false;
 			}
+			/* published for the call, so a trampoline that
+			 * serves many functions can tell which one it is;
+			 * restored on the way out so nesting works. */
+			const ObjNative *previous_native = vm->current_native;
+			vm->current_native = native;
 			Value result = native->function(
 			        vm, arg_count, vm->stack_top - arg_count);
+			vm->current_native = previous_native;
 			/* a caught error replaced the stack before the native could
 			 * return a meaningful value; an uncaught one unwound inside
 			 * vm_throw_value and must not be "adjusted" either */
@@ -1868,7 +1893,7 @@ dispatch_resume:;
 			 * as a number that happens to be zero. With one,
 			 * the failure names the expression that was wrong.
 			 */
-			FlType want = (FlType)READ_BYTE();
+			FlTypeTag want = (FlTypeTag)READ_BYTE();
 			Value value = peek(vm, 0);
 
 			if (!value_has_type(value, want)) {
@@ -1885,10 +1910,11 @@ dispatch_resume:;
 				 * silent instead of guessing.
 				 */
 				const char *hint = NULL;
-				if (want == FL_TYPE_STRING && IS_NUMBER(value))
+				if (want == FL_INT_TYPE_STRING &&
+				        IS_NUMBER(value))
 					hint = "use str() to convert a number "
 					       "to a string.";
-				else if (want == FL_TYPE_NUMBER &&
+				else if (want == FL_INT_TYPE_NUMBER &&
 				         IS_STRING(value))
 					hint = "use num() to convert a string "
 					       "to a number.";

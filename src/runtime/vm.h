@@ -193,6 +193,18 @@ struct VM {
 	 * module run does not print before the rethrow can be caught */
 	int run_count;
 
+	/*
+	 * The native being executed, for the duration of its call.
+	 *
+	 * A native function pointer carries no user data, so this is how a
+	 * single trampoline serves every function a native module
+	 * registered: the callee carries the binding privately and the VM
+	 * publishes it here. Saved and restored around the call, so a
+	 * module that calls back into flint gets its own value rather
+	 * than its caller's.
+	 */
+	const ObjNative *current_native;
+
 	/* set by vm_throw_value when an error was routed to a handler;
 	 * the dispatch loop turns it back into resuming at the handler's
 	 * catch block, instead of returning to the caller */
@@ -316,5 +328,11 @@ bool vm_value_to_index(
         VM *vm, Value value, int count, int *out, const char *what);
 
 void vm_define_native(VM *vm, const char *name, NativeFn function, int arity);
+/* a native carrying private host-side state; see vm.h's current_native */
+void vm_define_native_with_data(VM *vm,
+        const char *name,
+        NativeFn function,
+        int arity,
+        void *user_data);
 
 #endif /* FL_VM_H */

@@ -107,6 +107,17 @@ typedef struct {
 	Obj obj;
 	NativeFn function;
 	int arity;
+	/*
+	 * Private to the runtime; a native module's trampoline finds its
+	 * own module through this. It is the one place the interpreter
+	 * stores something a function pointer cannot carry, and it is why
+	 * a trampoline can serve N registered functions without a
+	 * closure and without a lookup by name on every call.
+	 *
+	 * Never exposed through the public ABI, and never a pointer into
+	 * resizable storage.
+	 */
+	void *user_data;
 } ObjNative;
 
 /*
@@ -297,6 +308,9 @@ ObjString *take_string(VM *vm, char *chars, int length);
 
 ObjFunction *new_function(VM *vm);
 ObjNative *new_native(VM *vm, NativeFn function, int arity);
+/* a native with private host-side state, for the public ABI's trampolines */
+ObjNative *new_native_with_data(
+        VM *vm, NativeFn function, int arity, void *user_data);
 ObjStructCtor *new_struct_ctor(VM *vm, ObjString *name);
 ObjClosure *new_closure(VM *vm, ObjFunction *function);
 ObjUpvalue *new_upvalue(VM *vm, Value *slot);
@@ -326,7 +340,7 @@ ObjTable *new_flint_table(VM *vm);
 const char *flint_type_name(Value value);
 
 /* the name of a cast target, given the tag the compiler emitted. */
-const char *flint_type_name_of(FlType type);
+const char *flint_type_name_of(FlTypeTag type);
 
 /*
  * Does this value match the tag? The check behind `x as T`.
@@ -335,7 +349,7 @@ const char *flint_type_name_of(FlType type);
  * and having the mapping written down twice is how a cast ends up accepting
  * something `type()` would call something else.
  */
-bool value_has_type(Value value, FlType type);
+bool value_has_type(Value value, FlTypeTag type);
 
 /* debug printing. no trailing newline. */
 void print_object(Value value);

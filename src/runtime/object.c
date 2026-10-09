@@ -250,13 +250,20 @@ ObjFunction *new_function(VM *vm)
 	return function;
 }
 
-ObjNative *new_native(VM *vm, NativeFn function, int arity)
+ObjNative *new_native_with_data(
+        VM *vm, NativeFn function, int arity, void *user_data)
 {
 	ObjNative *native =
 	        (ObjNative *)allocate_object(vm, sizeof(ObjNative), OBJ_NATIVE);
 	native->function = function;
 	native->arity = arity;
+	native->user_data = user_data;
 	return native;
+}
+
+ObjNative *new_native(VM *vm, NativeFn function, int arity)
+{
+	return new_native_with_data(vm, function, arity, NULL);
 }
 
 /*
@@ -421,22 +428,22 @@ const char *flint_type_name(Value value)
 	return "unknown";
 }
 
-const char *flint_type_name_of(FlType type)
+const char *flint_type_name_of(FlTypeTag type)
 {
 	switch (type) {
-	case FL_TYPE_NUMBER:
+	case FL_INT_TYPE_NUMBER:
 		return "number";
-	case FL_TYPE_STRING:
+	case FL_INT_TYPE_STRING:
 		return "string";
-	case FL_TYPE_BOOL:
+	case FL_INT_TYPE_BOOL:
 		return "bool";
-	case FL_TYPE_NIL:
+	case FL_INT_TYPE_NIL:
 		return "nil";
-	case FL_TYPE_LIST:
+	case FL_INT_TYPE_LIST:
 		return "list";
-	case FL_TYPE_TABLE:
+	case FL_INT_TYPE_TABLE:
 		return "table";
-	case FL_TYPE_FUNCTION:
+	case FL_INT_TYPE_FUNCTION:
 		return "function";
 	}
 	/* unreachable: the compiler only emits tags from the enum. returning
@@ -452,22 +459,22 @@ const char *flint_type_name_of(FlType type)
  * exactly how a cast and a type() end up disagreeing about a value near a
  * boundary.
  */
-bool value_has_type(Value value, FlType type)
+bool value_has_type(Value value, FlTypeTag type)
 {
 	switch (type) {
-	case FL_TYPE_NUMBER:
+	case FL_INT_TYPE_NUMBER:
 		return IS_NUMBER(value);
-	case FL_TYPE_STRING:
+	case FL_INT_TYPE_STRING:
 		return IS_STRING(value);
-	case FL_TYPE_BOOL:
+	case FL_INT_TYPE_BOOL:
 		return IS_BOOL(value);
-	case FL_TYPE_NIL:
+	case FL_INT_TYPE_NIL:
 		return IS_NIL(value);
-	case FL_TYPE_LIST:
+	case FL_INT_TYPE_LIST:
 		return IS_LIST(value);
-	case FL_TYPE_TABLE:
+	case FL_INT_TYPE_TABLE:
 		return IS_FLINT_TABLE(value);
-	case FL_TYPE_FUNCTION:
+	case FL_INT_TYPE_FUNCTION:
 		return IS_FUNCTION(value) || IS_CLOSURE(value) ||
 		       IS_NATIVE(value);
 	}

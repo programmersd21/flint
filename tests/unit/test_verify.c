@@ -193,11 +193,11 @@ static void test_rejects_malformed(void)
 	}
 
 	/*
-	 * A cast tag above the last FlType. The VM's cast switch would fall
+	 * A cast tag above the last FlTypeTag. The VM's cast switch would fall
 	 * off the end of itself for one, so this is the check that keeps the
 	 * enum's last member meaning "the last one".
 	 */
-	for (int tag = FL_TYPE_FUNCTION + 1; tag <= 255; tag++) {
+	for (int tag = FL_INT_TYPE_FUNCTION + 1; tag <= 255; tag++) {
 		Chunk chunk;
 		chunk_init(&chunk);
 		chunk_write(NULL, &chunk, OP_CAST, 1, 0);
@@ -216,7 +216,7 @@ static void test_rejects_malformed(void)
 		Chunk chunk;
 		chunk_init(&chunk);
 		chunk_write(NULL, &chunk, OP_CAST, 1, 0);
-		chunk_write(NULL, &chunk, (uint8_t)FL_TYPE_FUNCTION, 1, 0);
+		chunk_write(NULL, &chunk, (uint8_t)FL_INT_TYPE_FUNCTION, 1, 0);
 		chunk_write(NULL, &chunk, OP_RETURN, 1, 0);
 		FlVerifyError error;
 		check(fl_verify_chunk_for_test(&chunk, "cast", &error),

@@ -20,7 +20,7 @@ WARN := -Wall -Wextra -Wpedantic -Werror
 # an include path that silently finds nothing.
 BUILD := build
 
-INCLUDES := -Isrc/core -Isrc/frontend -Isrc/runtime -Isrc/util -I$(BUILD)
+INCLUDES := -Iinclude -Isrc/core -Isrc/frontend -Isrc/runtime -Isrc/util -I$(BUILD)
 
 # User flags go last so they can add to the baseline without being able to
 # quietly drop the parts that matter.
@@ -102,7 +102,7 @@ DBG_CFLAGS := -O0 -g3 -DFL_DEBUG_PRINT_CODE -DFL_DEBUG_TRACE_EXECUTION
 STR_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFL_GC_STRESS
 STR_LDFLAGS := -fsanitize=address,undefined
 
-.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto fmt-test pkg-test runner-test quick validate
+.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto fmt-test pkg-test runner-test native-test quick validate
 .SUFFIXES:
 
 # If a compile fails partway, do not leave a truncated object behind. Make
@@ -123,8 +123,16 @@ release: flint
 # The three configurations. Identical structure on purpose: the difference
 # between them is the flags, and a difference in structure would mean
 # testing a different program than the one you ship.
+# -rdynamic exports the executable's symbols to the dynamic linker, which is
+# what lets a dlopened module resolve fl_module_func and the rest. Without it
+# the module loads and then fails on its first call to the host, which is a
+# confusing way to learn that the ABI needs it.
+#
+# The alternative -- linking each module against a shared libflint -- would
+# mean the runtime becomes a library, which changes how flint is built and
+# shipped for one feature. Exporting the ABI is the smaller change.
 flint: $(REL_OBJS)
-	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS)
+	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS) -rdynamic
 
 flint-debug: $(DBG_OBJS)
 	$(CC) $(ALL_CFLAGS) $(DBG_CFLAGS) $^ -o $@ $(LIBS)
@@ -338,7 +346,7 @@ quick:
 # so it neither replaces ./flint nor rebuilds the release objects. That
 # separation is what lets this run after `make release` without a clean.
 validate: release test unit diagnostic-test fmt-test pkg-test runner-test \
-	fmt-check lint stress flint-goto
+	native-test fmt-check lint stress flint-goto
 	@sh tests/run_tests.sh ./flint-goto
 	@echo "validate: every gate passed"
 
@@ -355,6 +363,13 @@ fmt-test: flint
 # than defaulted. A runner that cannot fail is worse than no runner.
 runner-test: flint
 	@sh tests/runner_test.sh ./flint
+
+# The public C ABI: real shared objects, built against include/flint.h and
+# loaded through dlopen. Needs a linker and a posix dynamic loader; the test
+# skips with a message rather than failing on a system without them, so it
+# does not turn a missing toolchain into a red build on an unrelated commit.
+native-test: flint
+	@sh tests/native_test.sh ./flint
 
 # The package manager, end to end against real fixtures: a path
 # dependency, a git dependency over file:// (no network, no registry),
@@ -374,7 +389,7 @@ TIDY_FLAGS := --quiet --extra-arg=-std=c11 \
 	--extra-arg=-D_POSIX_C_SOURCE=200809L \
 	--extra-arg=-Isrc/core --extra-arg=-Isrc/frontend \
 	--extra-arg=-Isrc/runtime --extra-arg=-Isrc/util \
-	--extra-arg=-I$(BUILD)
+	--extra-arg=-Iinclude --extra-arg=-I$(BUILD)
 
 # The debug-only macros, so the second lint pass sees the #ifdef arms that
 # the default configuration cannot see.

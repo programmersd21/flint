@@ -13,6 +13,7 @@
 #include "compiler.h"
 #include "fmt.h"
 #include "pkg.h"
+#include "ext.h"
 #include "diagnostic.h"
 #include "object.h"
 #include "debug.h"
@@ -1748,6 +1749,40 @@ int main(int argc, char *argv[])
 		 */
 		if (strcmp(flag, "pkg") == 0 && access(flag, F_OK) != 0) {
 			return flint_pkg(argc, argv, arg + 1);
+		}
+		/*
+		 * `flint native <lib> <module>` -- load a compiled module and
+		 * make its functions callable for this run. A test and a
+		 * development tool rather than something a script depends on:
+		 * the loader keeps the library for the life of the process,
+		 * so nothing here claims unloading.
+		 */
+		if (strcmp(flag, "native") == 0 && access(flag, F_OK) != 0) {
+			if (arg + 2 >= argc) {
+				fprintf(stderr,
+				        "flint native: needs a library path "
+				        "and a "
+				        "module name\n");
+				return 64;
+			}
+			VM vm;
+			vm_init(&vm);
+			vm.quiet = quiet;
+			char error[512] = {0};
+			if (!fl_ext_load_native(&vm,
+			            argv[arg + 1],
+			            argv[arg + 2],
+			            error,
+			            sizeof(error))) {
+				fprintf(stderr, "flint native: %s\n", error);
+				vm_free(&vm);
+				return 65;
+			}
+			int code = 0;
+			if (arg + 3 < argc)
+				code = run_file(&vm, argv[arg + 3], &mode);
+			vm_free(&vm);
+			return code;
 		}
 		if (strcmp(flag, "test") == 0 && access(flag, F_OK) != 0) {
 			const char *filter = NULL;

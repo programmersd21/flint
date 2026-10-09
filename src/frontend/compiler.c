@@ -1411,7 +1411,7 @@ static void as_(bool can_assign)
 	 * being a value in every other position.
 	 */
 	if (match(TOKEN_NIL)) {
-		emit_bytes(OP_CAST, (uint8_t)FL_TYPE_NIL);
+		emit_bytes(OP_CAST, (uint8_t)FL_INT_TYPE_NIL);
 		return;
 	}
 
@@ -1419,19 +1419,19 @@ static void as_(bool can_assign)
 
 	int tag = -1;
 	if (identifier_is("number"))
-		tag = FL_TYPE_NUMBER;
+		tag = FL_INT_TYPE_NUMBER;
 	else if (identifier_is("string"))
-		tag = FL_TYPE_STRING;
+		tag = FL_INT_TYPE_STRING;
 	else if (identifier_is("bool"))
-		tag = FL_TYPE_BOOL;
+		tag = FL_INT_TYPE_BOOL;
 	else if (identifier_is("nil"))
-		tag = FL_TYPE_NIL;
+		tag = FL_INT_TYPE_NIL;
 	else if (identifier_is("list"))
-		tag = FL_TYPE_LIST;
+		tag = FL_INT_TYPE_LIST;
 	else if (identifier_is("table"))
-		tag = FL_TYPE_TABLE;
+		tag = FL_INT_TYPE_TABLE;
 	else if (identifier_is("function"))
-		tag = FL_TYPE_FUNCTION;
+		tag = FL_INT_TYPE_FUNCTION;
 
 	if (tag < 0) {
 		error("unknown type name after 'as'. Expected one of: "

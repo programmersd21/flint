@@ -202,7 +202,7 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		uint8_t tag = chunk->code[offset + 1];
 		printf("%-20s %4s\n",
 		        "OP_CAST",
-		        flint_type_name_of((FlType)tag));
+		        flint_type_name_of((FlTypeTag)tag));
 		return offset + 2;
 	}
 	case OP_GREATER:

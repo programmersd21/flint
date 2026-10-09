@@ -28,7 +28,7 @@
  *   constant index is in range          the run loop would read the pool
  *   local slot is below the function's own slot count
  *   upvalue slot is below the function's own upvalue count
- *   cast type tag is a real FlType
+ *   cast type tag is a real FlTypeTag
  *   jump target is inside the code
  *   jump target is an instruction boundary
  *   nested functions, recursively
@@ -360,10 +360,10 @@ static bool verify_chunk(const Chunk *chunk,
 			/*
 			 * The tag is checked against the last enum member. That
 			 * member is deliberately the last one: a tag above it
-			 * would be a FlType the type() names cannot produce,
+			 * would be a FlTypeTag the type() names cannot produce,
 			 * and the VM's cast switch would fall off the end.
 			 */
-			if ((int)code[offset + 1] > FL_TYPE_FUNCTION) {
+			if ((int)code[offset + 1] > FL_INT_TYPE_FUNCTION) {
 				fail(error,
 				        offset,
 				        "cast type tag is out of range");

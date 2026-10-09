@@ -30,14 +30,14 @@ void value_array_free(VM *vm, ValueArray *array);
  * level. `str()` is the conversion; `as` is the assertion.
  */
 typedef enum {
-	FL_TYPE_NUMBER = 0,
-	FL_TYPE_STRING,
-	FL_TYPE_BOOL,
-	FL_TYPE_NIL,
-	FL_TYPE_LIST,
-	FL_TYPE_TABLE,
-	FL_TYPE_FUNCTION
-} FlType;
+	FL_INT_TYPE_NUMBER = 0,
+	FL_INT_TYPE_STRING,
+	FL_INT_TYPE_BOOL,
+	FL_INT_TYPE_NIL,
+	FL_INT_TYPE_LIST,
+	FL_INT_TYPE_TABLE,
+	FL_INT_TYPE_FUNCTION
+} FlTypeTag;
 
 /*
  * Operand sizes, which the disassembler and the run loop both switch on:
@@ -100,7 +100,7 @@ typedef enum {
 	OP_CHECK_CATCH,
 	/*
 	 * Check the value's type and pass it through unchanged, or fail.
-	 * Operands: u8 FlType.
+	 * Operands: u8 FlTypeTag.
 	 *
 	 * The value is left alone when the check passes. `as` is not a
 	 * conversion, so there is no opcode here that rewrites a value, and
