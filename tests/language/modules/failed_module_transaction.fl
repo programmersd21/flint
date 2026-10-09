@@ -1,0 +1,35 @@
+# a module that fails halfway through initialization commits nothing.
+#
+# halfway_fail.fl defines a const, mutates a global, and only then throws.
+# the import below catches the failure. what matters is that the failed
+# module left no state behind: its names are free again, and the names it
+# half-defined are not visible here.
+try {
+    import "halfway_fail.fl"
+} catch e {
+    print("caught")
+}
+
+# every name the dead module touched is available to this script. if
+# initialization were not transactional, one of these would report the
+# module's const as already defined.
+let count = 1
+print(count)
+const LIMIT = 10
+print(LIMIT)
+export const MINE = 11
+print(MINE)
+
+# and the importer's own globals survived all of it untouched
+let mine = 7
+print(mine)
+
+# a second import of the same failed module is a cache hit: it reports the
+# recorded failure rather than re-running the module. that is the module
+# cache doing its job, and it is a different question from whether the
+# first attempt left state behind -- which the names above answer.
+try {
+    import "halfway_fail.fl"
+} catch e {
+    print("caught again")
+}

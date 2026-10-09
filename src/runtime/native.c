@@ -1099,13 +1099,19 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 
 	if (res != INTERPRET_OK) {
 		/*
-		 * The module failed. Nothing it defined was bound anywhere --
-		 * it was never bound into the importer -- so the transaction
-		 * has already rolled back by the restore above, and the cache
-		 * entry is about to record the failure.
+		 * The module failed, and the environment it was running in --
+		 * the table `vm->globals` pointed at for the whole nested run --
+		 * is discarded by the restore above. Nothing it defined reaches
+		 * the importer: an export table is only built on the success
+		 * path below, and a failed module is recorded in the cache as
+		 * false rather than as its exports.
 		 *
-		 * The module's own environment is deliberately NOT freed, and
-		 * the slot is kept.
+		 * That is the whole of the transaction, and it is a
+		 * *discard*, not an undo. The distinction matters: the module's
+		 * own environment is left for the collector to reclaim rather
+		 * than freed here, because the module may have handed out
+		 * closures that something reachable still holds -- and those
+		 * closures carry a pointer to this very table.
 		 *
 		 * A failed module can still have handed out closures: it ran far
 		 * enough to build them, and it may have stored one somewhere the

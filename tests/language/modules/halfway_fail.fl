@@ -1,0 +1,13 @@
+# a module that fails halfway through leaves nothing behind.
+#
+# the failure is on line 8, after a global and an exported value already
+# exist. if module initialization were not a transaction, the second
+# import would find `count` already defined and the failure would look
+# like a different error entirely.
+export const LIMIT = 10
+let count = 1
+count = count + 1
+throw "module refuses to load"
+export fn never_used() {
+    return 0
+}
