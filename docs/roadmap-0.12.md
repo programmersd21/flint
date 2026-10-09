@@ -1,7 +1,9 @@
 # roadmap: 0.12.0
 
-what 0.12.0 sets out to do, in the order the work is being done, and what
-it is not doing.
+what 0.12.0 sets out to do, in the order the work was done, what shipped,
+and what did not. three of the four sections below are marked *delivered*;
+the fourth says why it was not, in terms that would still be true a
+release later.
 
 ## in this release
 
@@ -46,52 +48,57 @@ transaction, which it is not.
 
 ### docs and version
 
-`docs/roadmap-0.12.md` (this file), `SPEC.md` and `docs/language.md` for
-structs, `docs/internals.md` for the module transaction, `RELEASES.md` for
-the release, and version metadata to 0.12.0.
+`docs/roadmap-0.12.md` (this file), `docs/native-abi.md` for the C ABI,
+`SPEC.md` for structs, `docs/data.md` beside the tables structs extend,
+`docs/packages.md` for transitive resolution, `RELEASES.md` for the
+release, and version metadata to 0.12.0.
 
-## not in this release
+## not in this release, and why
 
 ### the native C ABI, Rust wrapper and Ratatui
 
-these are the stated goals of 0.12.0 and they are deferred. the reason is
-not effort: an ABI that is missing GC-safe handles, defensive argument
-validation, or a documented lifetime model is worse than no ABI, because a
-native package written against it would break at the first GC stress run --
-and a native package that breaks *silently* is indistinguishable from
-corruption. the work required is a header with version negotiation, a
-handle allocator whose lifetime survives allocation, registration and
-rollback for partial registration, a loader behind a platform abstraction
-with tested missing-symbol and bad-version paths, and tests that exercise
-each of those. that is a release of its own and it will not be finished by
-being rushed into the end of this one.
+**delivered.** `include/flint.h` is a versioned C ABI with opaque
+handles and no exposure of any runtime structure; `src/ext.c` is the host
+side and `docs/native-abi.md` is the contract. handles are values rather
+than pointers into the VM, so holding one past its call is the mistake the
+API is arranged to make you have to be explicit about -- `fl_retain` and
+`fl_release` for that, rooted against the collector.
 
-what is deferred exactly: `include/flint.h` (or `include/flint_extension.h`),
-`docs/native-abi.md`, `dlopen`-based loading with version checks, the
-`flint run main.fl` name for it, a Rust wrapper crate, and a Ratatui
-proof of concept. none of them are stubbed; there is no half-ABI in the
-tree for a package to accidentally build against.
+loading is `dlopen` behind a platform seam, refusing an unsupported ABI
+version before the entry point runs. `flint native LIB.so MOD script.fl`
+loads one. a loaded library is never unloaded, because its functions stay
+callable and a value it produced can outlive the call that made it --
+unloading would be a use-after-free waiting for the collector.
 
-### package manager hardening
+`rust/flint-sys` wraps the same header, and the two examples show what a
+C extension cannot: a contained panic and a retained handle. the ratatui
+example draws a real frame from a flint script. `make native-test` builds
+real shared objects and loads them.
 
-`flint pkg` handles path and git dependencies, pins commits in the
-lockfile, and is tested end to end. what it does not do: transitive
-resolution, version constraints across packages, content integrity
-checksums, and native-package platform/ABI metadata. transitive resolution
-in particular is a real gap, but it is a graph-search feature and doing it
-half-right -- resolving the first conflict it finds rather than the right
-one -- is the kind of thing that makes a lockfile untrustworthy. deferred
-with tests asserting the current, documented behavior.
+what is still open: unloading, non-POSIX loaders, and passing
+*pointers* into flint storage for zero-copy work -- which the handle
+design deliberately refuses to offer until the lifetime story is stronger.
+
+### package manager
+
+**transitive resolution delivered.** a dependency's own dependencies are
+followed recursively, with a nested path relative to the package that
+declares it. two packages reaching the same one install it once; two
+*versions* of one package is reported rather than resolved by picking.
+
+what is still open: version solving across packages (a requirement is
+checked against the single version being installed), content integrity
+checksums, and native-package platform/ABI metadata. those are real gaps
+and are recorded as gaps rather than approximated.
 
 ### enums and pattern matching
 
-specified but not implemented. the reason they are not shipped alongside
-structs rather than after: a pattern matcher compiled over *open-ended
-dynamic values* cannot prove exhaustiveness, and a matcher that cannot
-prove exhaustiveness should not claim to. what is buildable is
-compile-time exhaustiveness over enum variants only, which is worth doing
-in the same shape structs use -- not as a separate feature riding on a
-separate compiler pass.
+**still deferred.** the reason they are not shipped alongside structs is
+now sharper rather than weaker: a pattern matcher compiled over
+*open-ended dynamic values* cannot prove exhaustiveness, and one that
+cannot prove it must not claim to. the buildable form is exhaustiveness
+over enum variants only, which wants the same compiler pass structs use --
+not a second pattern system arriving beside the first one.
 
 ## the bar for adding anything else
 

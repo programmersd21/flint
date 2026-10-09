@@ -81,8 +81,24 @@ importing file, except `flint_modules/` is also searched, and packages
 resolve before the standard library. A bare name (`import math`) is the
 standard library.
 
+## transitive dependencies
+
+a dependency's own `[dependencies]` are followed, recursively. a nested
+path is written relative to the package that declares it, so in a project
+depending on `../mid`, `mid`'s own `base = { path = "../base" }` means
+`../base` relative to `../mid` -- not relative to the project. everything
+lands in the same flat `flint_modules/`, because imports are a flat name
+space; two packages reaching the same one by different routes install it
+once, and two *versions* of one package is a conflict, reported rather
+than resolved by picking.
+
+the resolver treats anything below a `flint_modules/` directory as being
+inside a project rather than being one, so a package's own `flint.toml`
+-- which is there because it was copied -- is not mistaken for the root.
+
 ## what is NOT supported
 
-No registry, no version solving across packages, no transitive version
-ranges beyond the recorded pin. The lockfile is the source of truth;
-delete `flint_modules/` and run `pkg install` to rebuild it.
+No registry, and no version solving across packages: a requirement is
+checked against the one version being installed, and two versions of one
+package is reported rather than merged. The lockfile is the source of
+truth; delete `flint_modules/` and run `pkg install` to rebuild it.

@@ -62,26 +62,63 @@ defined.
 the boundary is stated rather than papered over: external side effects --
 files written, processes started, requests sent -- are not rolled back.
 
-### deferred, and why
+### native modules, rust and ratatui
 
-the native C ABI, a Rust wrapper and a Ratatui proof of concept are the
-stated goals of 0.12.0 and they are not in it. an ABI missing gc-safe
-handles, defensive argument validation or a documented lifetime model is
-worse than no ABI: a native package written against it breaks at the first
-gc stress run, and a native package that breaks silently is
-indistinguishable from corruption. `docs/roadmap-0.12.md` lists exactly what
-remains. there is no half-abi in the tree for something to build against.
+`include/flint.h` is a versioned C ABI: opaque handles, no `Value`, no
+`Obj`, no VM. a module is refused before its entry point runs when the
+ABI version does not match. handles are not pointers into the VM, so a
+value that must outlive its call says so with `fl_retain`. errors go
+through the existing model -- `fl_raise` produces an error flint code
+catches with the same `catch e as` as anything else.
 
-package manager hardening is deferred the same way: transitive resolution,
-integrity checksums and native-package platform metadata are real gaps,
-but a resolver that takes the first conflict it finds rather than the
-right one makes a lockfile untrustworthy. the current, documented behavior
-is tested.
+loading is `dlopen` behind a documented platform seam, and a loaded
+library is never unloaded: its functions stay callable and a value it
+produced can outlive the call that made it, so unloading would be a
+use-after-free waiting for the collector.
+
+`rust/flint-sys` is a safe wrapper over that same header -- a wrapper,
+not a second interface -- and the examples show the two things a C
+extension cannot: a contained panic (`explode()` panics on purpose and
+flint catches an ordinary error) and a retained handle. the ratatui
+example is the shape the whole thing was aiming at: a flint script asks
+for a frame, ratatui draws one, and what comes back across the ABI is
+text.
+
+### transitive dependencies
+
+a package could declare dependencies and have them silently ignored.
+`mid` installed cleanly and then could not `import "base`: a green
+install and a broken program, which is the worst shape a package manager
+can fail in. a dependency's own `[dependencies]` are now followed,
+recursively, with a nested path resolved relative to the package that
+declares it.
+
+three bugs, and the third was the real one. a nested path needed joining
+and normalizing, or `../base` meant two different directories; the
+expansion reallocs, so reading the old array was a use-after-free that
+surfaced as `git: repository '<garbage>' does not exist`; and an
+installed package carries its own `flint.toml` -- it was copied there --
+which the resolver read as a project root, and then looked for
+`flint_modules/mid/flint_modules/base`. that one is fixed in the
+resolver: anything below a `flint_modules/` directory is inside a
+project, not one.
+
+two packages reaching the same one install it once. two *versions* of one
+package is reported rather than resolved by picking, because a lockfile
+that silently chose is not trustworthy.
+
+### still deferred
+
+enums and pattern matching, deliberately: a matcher over open-ended
+dynamic values cannot prove exhaustiveness, and one that cannot prove it
+should not claim to. integrity checksums and native-package platform
+metadata for the package manager, and a registry.
 
 ### version and gates
 
 version metadata moved to 0.12.0. `make quick` and `make validate` remain
-the two gates, and the release notes for 0.11.0 describe them.
+the two gates, and `make native-test` is a third: it builds real shared
+objects against the header and loads them.
 
 ## v0.11.0
 
