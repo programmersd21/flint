@@ -111,6 +111,69 @@ else
 	fail "include/flint.h compiles on its own, with no flint symbols"
 fi
 
+# --- a rust-backed module, through the same abi --------------------------
+# the point is that it crosses the identical boundary: #[repr(C)] and
+# extern "C" only, with the wrapper on top. it also shows the two things a C
+# example cannot: a contained panic, and a retained handle.
+if command -v cargo >/dev/null 2>&1; then
+	if cargo build --release --offline --quiet \
+		--manifest-path "$REPO/rust/examples/rust-native/Cargo.toml" \
+		>/dev/null 2>&1; then
+		ok
+		cat > "$WORK/rust.fl" <<'RFL'
+print(sum(5))
+print(words("the quick brown fox"))
+print(describe("text"))
+try {
+    shout("hello")
+} catch e {
+    print("caught: " + e.message)
+}
+try {
+    explode()
+} catch e {
+    print("contained")
+}
+RFL
+		out=$("$FLINT" native \
+			"$REPO/rust/examples/rust-native/target/release/librust_native.so" \
+			rust_native "$WORK/rust.fl" 2>/dev/null) || status=1
+		expect_eq "a rust module runs" "10
+[\"the\", \"quick\", \"brown\", \"fox\"]
+{kind: string, from_rust: true}
+caught: no module shouts for hello
+contained" "$out"
+	else
+		echo "native abi tests: rust module did not build, skipping"
+	fi
+else
+	echo "native abi tests: no cargo, skipping the rust module"
+fi
+
+# --- a ratatui module, proving the boundary carries a real ui library ----
+# the shape that matters: flint asks for a frame, ratatui draws one, and
+# what comes back across the abi is text. nothing of ratatui crosses.
+if command -v cargo >/dev/null 2>&1; then
+	if cargo build --release --offline --quiet \
+		--manifest-path "$REPO/rust/examples/tui-native/Cargo.toml" \
+		>/dev/null 2>&1; then
+		ok
+		cat > "$WORK/tui.fl" <<'TFL'
+let rows = render_frame("demo", ["one", "two"])
+for row in rows { print(row) }
+print(size())
+TFL
+		out=$("$FLINT" native \
+			"$REPO/rust/examples/tui-native/target/release/libtui_native.so" \
+			tui_native "$WORK/tui.fl" 2>/dev/null) || status=1
+		expect_contains "a ratatui frame comes back bordered" "│one" "$out"
+		expect_contains "with its title block" "demo" "$out"
+		expect_contains "and the size is reported" "[80, 24]" "$out"
+	else
+		echo "native abi tests: tui module did not build, skipping"
+	fi
+fi
+
 if [ "$failed" -ne 0 ]; then
 	echo "native abi tests: $checks checks, $failed failures"
 	exit 1

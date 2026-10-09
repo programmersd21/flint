@@ -1,0 +1,13 @@
+[package]
+name = "flint-sys"
+version = "0.1.0"
+edition = "2021"
+description = "Safe Rust bindings over the Flint native C ABI"
+license = "MIT"
+build = "build.rs"
+
+[lib]
+name = "flint_sys"
+path = "src/lib.rs"
+
+[dependencies]

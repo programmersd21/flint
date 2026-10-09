@@ -1,0 +1,13 @@
+[package]
+name = "tui-native"
+version = "0.1.0"
+edition = "2021"
+description = "A Ratatui terminal UI driven from a Flint script, through the C ABI"
+
+[lib]
+name = "tui_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+flint-sys = { path = "../../flint-sys" }
+ratatui = "0.30"

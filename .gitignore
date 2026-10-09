@@ -13,3 +13,4 @@ names.txt
 
 # release tarballs are built artifacts, not sources
 flint-v*.tar.gz
+rust/**/target/

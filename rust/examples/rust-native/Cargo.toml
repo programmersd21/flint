@@ -1,0 +1,13 @@
+[package]
+name = "rust-native"
+version = "0.1.0"
+edition = "2021"
+description = "A Flint native module written in Rust, through the C ABI"
+
+[lib]
+name = "rust_native"
+# cdylib: flint dlopens this, so it has to be a shared object.
+crate-type = ["cdylib"]
+
+[dependencies]
+flint-sys = { path = "../../flint-sys" }
