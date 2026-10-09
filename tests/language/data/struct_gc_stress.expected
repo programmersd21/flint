@@ -1,0 +1,8 @@
+500
+Point{x: 0, y: 0}
+Point{x: 499, y: 998}
+cluster
+500
+Point{x: 10, y: 20}
+Point{x: 499, y: 998}
+Point

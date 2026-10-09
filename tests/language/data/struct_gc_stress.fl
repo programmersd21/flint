@@ -1,0 +1,54 @@
+# structs under an aggressive collector.
+#
+# the shape registry holds field name strings and the constructor holds the
+# struct name; a struct value holds its name too. all three are references,
+# and a collector that misses any of them shows a plain table where a
+# struct was, or frees a name that is still in use -- which is why this
+# file exists rather than a comment saying it is fine.
+
+struct Point {
+    x,
+    y,
+}
+
+struct Named {
+    label,
+    points,
+}
+
+# churn first, so a collection is likely to be in flight when the structs
+# are built and when they are read back.
+let churn = []
+let i = 0
+while i < 4000 {
+    push(churn, "s" + str(i))
+    i += 1
+}
+
+let points = []
+let n = 0
+while n < 500 {
+    push(points, Point({x: n, y: n * 2}))
+    n += 1
+}
+
+print(len(points))
+print(points[0])
+print(points[499])
+
+# a struct whose fields are themselves structs, lists and closures, all
+# reached through the value rather than through a local.
+let made = Named({
+    label: "cluster",
+    points: points,
+})
+print(made.label)
+print(len(made.points))
+print(made.points[10])
+
+# keep the collection alive across more allocation, then read again: the
+# name is the only thing a struct value keeps, so a swept name shows up
+# here as `{x: 0, y: 0}` instead of `Point{...}`.
+churn = []
+print(made.points[499])
+print(type(made.points[499]))
