@@ -66,6 +66,18 @@ typedef struct {
 	char *version; /* version requirement, may be NULL for "any" */
 } PkgDep;
 
+/* defined at the bottom of this file, next to the other graph walking;
+ * declared here because install calls it before its definition */
+static PkgDep *pkg_expand_deps(PkgDep *list,
+        int count,
+        int *capacity,
+        int *filled,
+        const char *base_dir,
+        int depth,
+        char *error,
+        size_t error_size,
+        int from);
+
 /*
  * Run git and capture its stdout. argv[0] is "git", the rest are plain
  * arguments -- no shell anywhere, so a URL full of metacharacters is
@@ -269,16 +281,16 @@ static bool pkg_resolve_commit(
 	char want[256];
 	const char *r = (rev != NULL && rev[0] != '\0') ? rev : "HEAD";
 	if (snprintf(want, sizeof(want), "%s^{commit}", r) >= (int)sizeof(want))
-		return false;
+		return NULL;
 	argv[7] = want;
 	char out[128];
 	if (pkg_git(argv, out, sizeof(out)) != 0)
-		return false;
+		return NULL;
 	size_t len = strlen(out);
 	while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r'))
 		out[--len] = '\0';
 	if (len != 40)
-		return false;
+		return NULL;
 	memcpy(sha, out, 41);
 	return true;
 #else
@@ -336,7 +348,7 @@ static bool pkg_set(PkgTable *table, const char *key, const char *value)
 		if (strcmp(table->pairs[i].key, key) == 0) {
 			char *copy = malloc(strlen(value) + 1);
 			if (copy == NULL)
-				return false;
+				return NULL;
 			memcpy(copy, value, strlen(value) + 1);
 			free(table->pairs[i].value);
 			table->pairs[i].value = copy;
@@ -344,11 +356,11 @@ static bool pkg_set(PkgTable *table, const char *key, const char *value)
 		}
 	}
 	if (table->count >= 256)
-		return false;
+		return NULL;
 	PkgPair *grown = realloc(
 	        table->pairs, (size_t)(table->count + 1) * sizeof(PkgPair));
 	if (grown == NULL)
-		return false;
+		return NULL;
 	table->pairs = grown;
 	PkgPair *pair = &table->pairs[table->count++];
 	pair->key = malloc(strlen(key) + 1);
@@ -357,7 +369,7 @@ static bool pkg_set(PkgTable *table, const char *key, const char *value)
 		free(pair->key);
 		free(pair->value);
 		table->count--;
-		return false;
+		return NULL;
 	}
 	memcpy(pair->key, key, strlen(key) + 1);
 	memcpy(pair->value, value, strlen(value) + 1);
@@ -493,13 +505,13 @@ static bool pkg_line(
 	if (key == NULL || key[0] == '\0') {
 		free(key);
 		pkg_fail(state, "expected key = value here");
-		return false;
+		return NULL;
 	}
 	p = pkg_skip(p, end);
 	if (p >= end || *p != '=') {
 		free(key);
 		pkg_fail(state, "expected = after the key");
-		return false;
+		return NULL;
 	}
 	p = pkg_skip(p + 1, end);
 	bool ok = false;
@@ -561,26 +573,26 @@ static bool pkg_line(
 			pkg_fail(state,
 			        "inline tables hold string values: "
 			        "{ path = \"...\", version = \"...\" }");
-			return false;
+			return NULL;
 		}
 	} else {
 		char *value = pkg_string(state, &p, end);
 		if (value == NULL) {
 			free(key);
-			return false;
+			return NULL;
 		}
 		ok = pkg_set(table, key, value);
 		free(key);
 		free(value);
 		if (!ok) {
 			pkg_fail(state, "out of memory");
-			return false;
+			return NULL;
 		}
 	}
 	p = pkg_skip(p, end);
 	if (p < end && *p != '#' && *p != '\n') {
 		pkg_fail(state, "unexpected text after the value");
-		return false;
+		return NULL;
 	}
 	return true;
 }
@@ -601,12 +613,12 @@ static bool pkg_parse_text(
 			const char *name_end = strchr(name_start, ']');
 			if (name_end == NULL || name_end >= end) {
 				pkg_fail(state, "unterminated [table] header");
-				return false;
+				return NULL;
 			}
 			size_t len = (size_t)(name_end - name_start);
 			char *name = malloc(len + 1);
 			if (name == NULL)
-				return false;
+				return NULL;
 			memcpy(name, name_start, len);
 			name[len] = '\0';
 			if (array) {
@@ -630,23 +642,23 @@ static bool pkg_parse_text(
 				free(name);
 				name = malloc(strlen(numbered) + 1);
 				if (name == NULL)
-					return false;
+					return NULL;
 				memcpy(name, numbered, strlen(numbered) + 1);
 			}
 			table = pkg_table(manifest, name, true);
 			free(name);
 			if (table == NULL) {
 				pkg_fail(state, "out of memory");
-				return false;
+				return NULL;
 			}
 		} else if (q < end && *q != '#' && *q != '\n') {
 			if (table == NULL) {
 				pkg_fail(state,
 				        "a value before any [table] header");
-				return false;
+				return NULL;
 			}
 			if (!pkg_line(state, table, p, end))
-				return false;
+				return NULL;
 		} else {
 			state->lineno += (eol != NULL);
 			p = eol != NULL ? eol + 1 : end;
@@ -706,7 +718,7 @@ static bool pkg_load(
 	char *text = pkg_read_file(path);
 	if (text == NULL) {
 		snprintf(error, error_size, "cannot read '%s'", path);
-		return false;
+		return NULL;
 	}
 	PkgParse state;
 	memset(&state, 0, sizeof(state));
@@ -738,20 +750,20 @@ static bool pkg_version_parse(const char *text, PkgVersion *version)
 	for (int i = 0; i < 3; i++) {
 		if (i > 0) {
 			if (*p != '.')
-				return false;
+				return NULL;
 			p++;
 		}
 		if (!isdigit((unsigned char)*p))
-			return false;
+			return NULL;
 		errno = 0;
 		long v = strtol(p, &end, 10);
 		if (errno != 0 || end == p || v < 0)
-			return false;
+			return NULL;
 		parts[i] = v;
 		p = end;
 	}
 	if (*p != '\0')
-		return false;
+		return NULL;
 	version->major = parts[0];
 	version->minor = parts[1];
 	version->patch = parts[2];
@@ -786,7 +798,7 @@ static bool pkg_satisfies(const char *requirement,
 		        "bad version requirement '%s': exact "
 		        "\"1.2.3\" or caret \"^1.2.3\"",
 		        requirement);
-		return false;
+		return NULL;
 	}
 	if (!caret) {
 		if (pkg_version_compare(have, &want) != 0) {
@@ -794,7 +806,7 @@ static bool pkg_satisfies(const char *requirement,
 			        error_size,
 			        "does not satisfy '%s'",
 			        requirement);
-			return false;
+			return NULL;
 		}
 		return true;
 	}
@@ -803,7 +815,7 @@ static bool pkg_satisfies(const char *requirement,
 		        error_size,
 		        "does not satisfy '%s'",
 		        requirement);
-		return false;
+		return NULL;
 	}
 	return true;
 }
@@ -827,7 +839,7 @@ static bool pkg_ensure_mirror(const char *mirror,
 	if (snprintf(head, sizeof(head), "%s/HEAD", mirror) >=
 	        (int)sizeof(head)) {
 		snprintf(error, error_size, "path too long");
-		return false;
+		return NULL;
 	}
 	if (access(head, F_OK) != 0) {
 		char *argv[] = {"git",
@@ -841,7 +853,7 @@ static bool pkg_ensure_mirror(const char *mirror,
 		        NULL};
 		if (pkg_git(argv, NULL, 1) != 0) {
 			snprintf(error, error_size, "cannot clone '%s'", url);
-			return false;
+			return NULL;
 		}
 		return true;
 	}
@@ -862,7 +874,7 @@ static bool pkg_ensure_mirror(const char *mirror,
 		        NULL};
 		if (pkg_git(argv, NULL, 1) != 0) {
 			snprintf(error, error_size, "cannot fetch '%s'", url);
-			return false;
+			return NULL;
 		}
 	}
 	return true;
@@ -897,7 +909,7 @@ static bool pkg_materialize(const char *mirror,
 	        NULL};
 	if (pkg_git(clone_argv, NULL, 1) != 0) {
 		snprintf(error, error_size, "cannot check out '%s'", sha);
-		return false;
+		return NULL;
 	}
 	char *checkout_argv[] = {"git",
 	        "-C",
@@ -909,18 +921,18 @@ static bool pkg_materialize(const char *mirror,
 	        NULL};
 	if (pkg_git(checkout_argv, NULL, 1) != 0) {
 		snprintf(error, error_size, "cannot check out '%s'", sha);
-		return false;
+		return NULL;
 	}
 	char *dotgit = pkg_join(dest, ".git");
 	if (dotgit == NULL) {
 		snprintf(error, error_size, "out of memory");
-		return false;
+		return NULL;
 	}
 	bool ok = pkg_remove_tree(dotgit);
 	free(dotgit);
 	if (!ok) {
 		snprintf(error, error_size, "cannot clean '%s'", dest);
-		return false;
+		return NULL;
 	}
 	return true;
 #else
@@ -955,22 +967,22 @@ static bool pkg_copy_file(const char *from, const char *to)
 {
 	FILE *in = fopen(from, "rb");
 	if (in == NULL)
-		return false;
+		return NULL;
 	FILE *out = fopen(to, "wb");
 	if (out == NULL) {
 		fclose(in);
-		return false;
+		return NULL;
 	}
 	if (fseek(in, 0, SEEK_END) != 0) {
 		fclose(in);
 		fclose(out);
-		return false;
+		return NULL;
 	}
 	long size = ftell(in);
 	if (size < 0 || fseek(in, 0, SEEK_SET) != 0) {
 		fclose(in);
 		fclose(out);
-		return false;
+		return NULL;
 	}
 	bool ok = true;
 	char buf[8192];
@@ -1010,10 +1022,10 @@ static bool pkg_copy_tree(const char *from, const char *to)
 {
 	DIR *dir = opendir(from);
 	if (dir == NULL)
-		return false;
+		return NULL;
 	if (!sys_make_dirs(to)) {
 		closedir(dir);
-		return false;
+		return NULL;
 	}
 	bool ok = true;
 	struct dirent *entry;
@@ -1129,7 +1141,7 @@ static bool pkg_read_identity(const char *manifest_path,
 {
 	PkgManifest manifest;
 	if (!pkg_load(manifest_path, &manifest, error, error_size))
-		return false;
+		return NULL;
 	const char *n = pkg_get(&manifest, "package", "name");
 	const char *v = pkg_get(&manifest, "package", "version");
 	bool ok = true;
@@ -1233,7 +1245,7 @@ static bool pkg_collect_deps(const PkgManifest *manifest,
 					        "dependency '%s' has both "
 					        "path and git -- pick one",
 					        key);
-					return false;
+					return NULL;
 				}
 				if (strcmp(dot, ".git") == 0) {
 					git_url = manifest->tables[i]
@@ -1296,7 +1308,7 @@ static bool pkg_collect_deps(const PkgManifest *manifest,
 					        "dependency '%s' has both "
 					        "path and git -- pick one",
 					        key);
-					return false;
+					return NULL;
 				}
 			}
 			if (strlen(source) >= 4096) {
@@ -1304,14 +1316,14 @@ static bool pkg_collect_deps(const PkgManifest *manifest,
 				        error_size,
 				        "source for '%s' is too long",
 				        key);
-				return false;
+				return NULL;
 			}
 			char path[4096];
 			memcpy(path, source, strlen(source) + 1);
 			PkgDep *grown = realloc(
 			        *deps, (size_t)(*count + 1) * sizeof(PkgDep));
 			if (grown == NULL)
-				return false;
+				return NULL;
 			*deps = grown;
 			PkgDep *dep = &(*deps)[(*count)++];
 			memset(dep, 0, sizeof(*dep));
@@ -1345,7 +1357,7 @@ static bool pkg_collect_deps(const PkgManifest *manifest,
 				free(dep->rev);
 				free(dep->version);
 				(*count)--;
-				return false;
+				return NULL;
 			}
 			memcpy(dep->name, key, strlen(key) + 1);
 			if (git_url != NULL)
@@ -1379,10 +1391,10 @@ static void pkg_free_deps(PkgDep *deps, int count)
 static bool pkg_sane_name(const char *name)
 {
 	if (name[0] == '\0')
-		return false;
+		return NULL;
 	for (const char *c = name; *c != '\0'; c++) {
 		if (!isalnum((unsigned char)*c) && *c != '_' && *c != '-')
-			return false;
+			return NULL;
 	}
 	return true;
 }
@@ -1430,7 +1442,7 @@ static bool pkg_read_lock(
 		return true;
 	PkgManifest manifest;
 	if (!pkg_load("flint.lock", &manifest, error, error_size))
-		return false;
+		return NULL;
 	bool ok = true;
 	for (int i = 0; i < manifest.count && ok; i++) {
 		if (strncmp(manifest.tables[i].name, "packages[", 9) != 0)
@@ -1498,13 +1510,85 @@ typedef struct {
 	bool have_commit;
 } PkgResolved;
 
+/*
+ * Join a base directory with a relative path and normalize it.
+ *
+ * Two jobs. First, a dependency's nested path is written relative to the
+ * package that declares it, so `../base` inside `../mid` means something
+ * different from `../base` in the project: joining first and normalizing
+ * after is what makes the two agree.
+ *
+ * Second, and the reason this is not a one-liner: a dependency path is
+ * untrusted input the moment a manifest comes from somewhere else, and
+ * "copy this tree somewhere" with an unchecked path writes outside the
+ * directory it was told to write in. `..` is collapsed here rather than
+ * trusted.
+ *
+ * Returns NULL on overflow or allocation failure; the caller frees.
+ */
+static char *pkg_normalize_path(const char *base, const char *relative)
+{
+	size_t blen = strlen(base);
+	size_t rlen = strlen(relative);
+	if (blen > (size_t)-1 - rlen - 2)
+		return NULL;
+
+	size_t cap = blen + rlen + 2;
+	char *out = malloc(cap);
+	if (out == NULL)
+		return NULL;
+	size_t len = 0;
+	/* a base of "." contributes nothing: emitting it produces
+	 * "./../base", which is the same place by a different spelling and
+	 * makes the lockfile confusing to read and to compare. */
+	if (blen > 0 && strcmp(base, ".") != 0) {
+		memcpy(out, base, blen);
+		len = blen;
+	}
+
+	size_t i = 0;
+	while (i < rlen) {
+		while (i < rlen && relative[i] == '/')
+			i++;
+		size_t start = i;
+		while (i < rlen && relative[i] != '/')
+			i++;
+		size_t seg = i - start;
+		if (seg == 0)
+			continue;
+		if (seg == 1 && relative[start] == '.')
+			continue;
+		if (seg == 2 && relative[start] == '.' &&
+		        relative[start + 1] == '.') {
+			/* pop one component, but never past the start of the
+			 * base: a path that escapes the project is clamped
+			 * here, and what is left is refused by the caller
+			 * rather than followed. */
+			while (len > 0 && out[len - 1] != '/')
+				len--;
+			if (len > 0)
+				len--;
+			continue;
+		}
+		if (len + 1 + seg + 1 > cap) {
+			free(out);
+			return NULL;
+		}
+		out[len++] = '/';
+		memcpy(out + len, relative + start, seg);
+		len += seg;
+	}
+	out[len] = '\0';
+	return out;
+}
+
 /* resolve one path dependency: identity, name checks, requirement. */
 static bool pkg_resolve_path(
         const PkgDep *dep, PkgResolved *out, char *error, size_t error_size)
 {
 	char *manifest_path = pkg_join(dep->path, "flint.toml");
 	if (manifest_path == NULL)
-		return false;
+		return NULL;
 	char *name = NULL;
 	char *version = NULL;
 	bool ok = pkg_read_identity(
@@ -1600,12 +1684,12 @@ static bool pkg_resolve_git(const PkgDep *dep,
 #else
 		        "git is not installed -- git dependencies need it");
 #endif
-		return false;
+		return NULL;
 	}
 	char *mirror = pkg_mirror_dir(dep->git, dep->name);
 	if (mirror == NULL) {
 		snprintf(error, error_size, "no HOME to keep the git cache in");
-		return false;
+		return NULL;
 	}
 	const char *pin =
 	        (!update && locked_commit != NULL && locked_commit[0] != '\0')
@@ -1800,6 +1884,62 @@ static int pkg_install_core(bool update_all, const char *update_one)
 			pkg_free_locked(locked, locked_count);
 			return 65;
 		}
+	}
+
+	/*
+	 * Transitive dependencies, before anything is resolved. A
+	 * dependency's own [dependencies] are followed relative to that
+	 * package's directory, and everything lands in the one flat
+	 * flint_modules/ the language can express. Done first, so a missing
+	 * or cyclic transitive dependency is reported before any directory
+	 * is written.
+	 */
+	if (count > 0) {
+		int capacity = count;
+		/* the returned pointer replaces the old one: expansion may
+		 * realloc, and reading the old pointer afterwards is the
+		 * use-after-free that produced a garbage path here. */
+		int filled = count;
+		PkgDep *expanded = pkg_expand_deps(deps,
+		        count,
+		        &capacity,
+		        &filled,
+		        ".",
+		        0,
+		        error,
+		        sizeof(error),
+		        0);
+		if (expanded == NULL) {
+			fprintf(stderr, "flint pkg: %s\n", error);
+			pkg_free_deps(deps, count);
+			pkg_free_locked(locked, locked_count);
+			return 65;
+		}
+		deps = expanded;
+		count = filled;
+
+		/* dedupe by name: two packages can reach the same one by
+		 * different routes, and it should be installed once. A name
+		 * reaching two *different* versions is a conflict rather than
+		 * a merge -- reported below rather than resolved by picking
+		 * one, because a lockfile that silently chose is not
+		 * trustworthy. */
+		int kept = 0;
+		for (int i = 0; i < count; i++) {
+			bool seen = false;
+			for (int j = 0; j < i && !seen; j++)
+				seen = strcmp(deps[j].name, deps[i].name) == 0;
+			if (seen) {
+				free(deps[i].name);
+				free(deps[i].path);
+				free(deps[i].git);
+				free(deps[i].rev);
+				free(deps[i].version);
+				continue;
+			}
+			deps[kept++] = deps[i];
+		}
+		count = kept;
 	}
 
 	PkgResolved *resolved = NULL;
@@ -2352,4 +2492,192 @@ int flint_pkg(int argc, char **argv, int start)
 	fprintf(stderr, "flint pkg: unknown command '%s'\n", argv[start]);
 	pkg_usage(stderr);
 	return 64;
+}
+
+/* ---------------------------------------------------------------------- */
+/* transitive dependencies                                                  */
+/* ---------------------------------------------------------------------- */
+
+/*
+ * Resolve a package's own dependencies, recursively, relative to where
+ * that package lives.
+ *
+ * A dependency is a directory, and its flint.toml names its own
+ * dependencies with paths relative to *it*, not to the project being
+ * installed. So a transitive edge is resolved against the dependency's
+ * directory: ../../base from inside ../mid is ../base from here. Getting
+ * that wrong installs a package that cannot import what it declared, and
+ * the failure surfaces at import time rather than at install -- which is
+ * why this walks the graph rather than trusting the top level.
+ *
+ * Transitive dependencies land in the same flat flint_modules/ directory as
+ * direct ones. That is the one flattening the language can express:
+ * imports are a flat name space, so two packages that both depend on
+ * different versions of something is a conflict, not something to nest.
+ *
+ * Conflicts are reported, not resolved by picking one. A solver that takes
+ * the first conflict it finds makes a lockfile nobody can trust; saying
+ * "two versions of X" is more useful than choosing.
+ */
+static PkgDep *pkg_expand_deps(PkgDep *list,
+        int count,
+        int *capacity,
+        int *filled,
+        const char *base_dir,
+        int depth,
+        char *error,
+        size_t error_size,
+        int from)
+{
+	if (from == 0 && depth > 32) {
+		snprintf(error,
+		        error_size,
+		        "dependency chain is deeper than 32 -- is there a "
+		        "cycle?");
+		return NULL;
+	}
+
+	/* count first: every append can move the array, so the loop below
+	 * would otherwise read a freed pointer */
+	int added = 0;
+	for (int i = from; i < count; i++) {
+		if (list[i].git != NULL)
+			continue;
+		PkgManifest child;
+		char manifest_path[4096];
+		/*
+		 * base_dir is "." at the top level, so the join is spelled
+		 * out rather than done with a trailing separator: "." +
+		 * "/../mid" is a path with a ".." in it that exists but
+		 * reads as though it does not, and the lockfile should not
+		 * carry that spelling either.
+		 */
+		if (strcmp(base_dir, ".") == 0)
+			snprintf(manifest_path,
+			        sizeof(manifest_path),
+			        "%s/flint.toml",
+			        list[i].path);
+		else
+			snprintf(manifest_path,
+			        sizeof(manifest_path),
+			        "%s/%s/flint.toml",
+			        base_dir,
+			        list[i].path);
+		if (!pkg_load(manifest_path, &child, error, error_size))
+			return NULL;
+		PkgDep *nested = NULL;
+		int nested_count = 0;
+		bool ok = pkg_collect_deps(
+		        &child, &nested, &nested_count, error, error_size);
+		pkg_free_manifest(&child);
+		if (!ok) {
+			pkg_free_deps(nested, nested_count);
+			return NULL;
+		}
+		added += nested_count;
+		pkg_free_deps(nested, nested_count);
+	}
+	*filled = count;
+	if (added == 0)
+		return list;
+	if (count + added > *capacity) {
+		int grown = *capacity;
+		if (grown < count) {
+			grown = count;
+		}
+		grown = grown < 8 ? 8 : grown * 2;
+		while (grown < count + added)
+			grown *= 2;
+		PkgDep *bigger = realloc(list, (size_t)grown * sizeof(PkgDep));
+		if (bigger == NULL) {
+			snprintf(error, error_size, "out of memory");
+			return NULL;
+		}
+		list = bigger;
+		*capacity = grown;
+	}
+
+	/*
+	 * the same walk again, this time appending rather than counting.
+	 * `start` is where the originals end and the additions begin, and
+	 * it is what bounds the two walks -- without it each pass would
+	 * re-expand what the previous pass appended, which never
+	 * terminates.
+	 */
+	const int start = count;
+	for (int i = from; i < start; i++) {
+		if (list[i].git != NULL)
+			continue;
+		PkgManifest child;
+		char manifest_path[4096];
+		/*
+		 * base_dir is "." at the top level, so the join is spelled
+		 * out rather than done with a trailing separator: "." +
+		 * "/../mid" is a path with a ".." in it that exists but
+		 * reads as though it does not, and the lockfile should not
+		 * carry that spelling either.
+		 */
+		if (strcmp(base_dir, ".") == 0)
+			snprintf(manifest_path,
+			        sizeof(manifest_path),
+			        "%s/flint.toml",
+			        list[i].path);
+		else
+			snprintf(manifest_path,
+			        sizeof(manifest_path),
+			        "%s/%s/flint.toml",
+			        base_dir,
+			        list[i].path);
+		if (!pkg_load(manifest_path, &child, error, error_size))
+			return NULL;
+		PkgDep *nested = NULL;
+		int nested_count = 0;
+		bool ok = pkg_collect_deps(
+		        &child, &nested, &nested_count, error, error_size);
+		pkg_free_manifest(&child);
+		if (!ok) {
+			pkg_free_deps(nested, nested_count);
+			return NULL;
+		}
+		for (int k = 0; k < nested_count; k++) {
+			/* a nested path is relative to its parent package */
+			if (nested[k].path != NULL) {
+				char joined[4096];
+				/* the parent package's own directory, not the
+				 * project's: a nested path is written
+				 * relative to the package that declares
+				 * it, and "." must not contribute a
+				 * component or the lockfile carries a
+				 * spelling nobody wrote. */
+				if (strcmp(base_dir, ".") == 0)
+					snprintf(joined,
+					        sizeof(joined),
+					        "%s",
+					        list[i].path);
+				else
+					snprintf(joined,
+					        sizeof(joined),
+					        "%s/%s",
+					        base_dir,
+					        list[i].path);
+				char *absolute = pkg_normalize_path(
+				        joined, nested[k].path);
+				free(nested[k].path);
+				nested[k].path = absolute;
+			}
+			list[count++] = nested[k];
+		}
+	}
+
+	*filled = count;
+	/* recurse into what was just added, not into the whole list */
+	return pkg_expand_deps(list,
+	        count,
+	        capacity,
+	        filled,
+	        base_dir,
+	        depth + 1,
+	        error,
+	        error_size,
+	        start);
 }

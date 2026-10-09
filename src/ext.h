@@ -14,6 +14,7 @@
 
 #include <stdbool.h>
 
+#include "../include/flint.h"
 #include "runtime/vm.h"
 
 /* The vtable is installed by fl_ext_load_native() before an extension's

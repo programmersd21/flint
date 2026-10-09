@@ -284,11 +284,26 @@ static const char *pkg_project_root(const char *from)
 		char probe[4352];
 		if (strlen(root) + 15 >= sizeof(probe))
 			return NULL;
-		snprintf(probe, sizeof(probe), "%s/flint.toml", root);
-		bool manifest = access(probe, F_OK) == 0;
+		/*
+		 * A package installed under flint_modules/ carries its own
+		 * flint.toml -- it was copied there. Treating that as a
+		 * project root makes the lookup look for
+		 * flint_modules/<pkg>/flint_modules/<other>, which does
+		 * not exist, so a package that depends on another could
+		 * only import it when the order happened to suit. The
+		 * directory holding flint_modules is the project root;
+		 * nothing inside it is.
+		 */
+		/* anywhere below a flint_modules directory, not just in it */
+		const char *modules_marker = strstr(root, "/flint_modules/");
+		bool inside_modules = modules_marker != NULL;
 		snprintf(probe, sizeof(probe), "%s/flint_modules", root);
 		bool modules = access(probe, F_OK) == 0;
-		if (manifest || modules)
+		if (modules)
+			return root;
+		snprintf(probe, sizeof(probe), "%s/flint.toml", root);
+		bool manifest = access(probe, F_OK) == 0;
+		if (manifest && !inside_modules)
 			return root;
 		if (strcmp(root, "/") == 0)
 			return NULL;

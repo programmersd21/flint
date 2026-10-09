@@ -193,6 +193,65 @@ expect "its directory is gone" "no" \
 	"$([ -d flint_modules/shout ] && echo yes || echo no)"
 
 cd "$WORK" || exit 1
+# --- transitive dependencies --------------------------------------------
+# a package that depends on another, with the nested path written relative
+# to the package that declares it. this is the shape that used to install
+# `mid` and leave it unable to import `base`, because the dependency's own
+# flint.toml was mistaken for the project root.
+mkdir -p "$WORK/chain/base" "$WORK/chain/mid" "$WORK/chain/app"
+cat > "$WORK/chain/base/flint.toml" <<'EOF2'
+[package]
+name = "base"
+version = "1.0.0"
+EOF2
+cat > "$WORK/chain/base/main.fl" <<'EOF2'
+export fn ping() {
+    return "pong"
+}
+EOF2
+cat > "$WORK/chain/mid/flint.toml" <<'EOF2'
+[package]
+name = "mid"
+version = "1.0.0"
+
+[dependencies]
+base = { path = "../base" }
+EOF2
+cat > "$WORK/chain/mid/main.fl" <<'EOF2'
+import "base"
+
+export fn twice() {
+    return base.ping() + base.ping()
+}
+EOF2
+cat > "$WORK/chain/app/flint.toml" <<'EOF2'
+[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+mid = { path = "../mid" }
+EOF2
+printf 'import "mid"\nimport "base"\nprint(mid.twice())\nprint(base.ping())\n' \
+	> "$WORK/chain/app/run.fl"
+cd "$WORK/chain/app" || exit 1
+out=$("$FLINT" pkg install 2>&1)
+expect_contains "a transitive dependency installs" "installed base 1.0.0" "$out"
+expect "both packages are present" "base mid" \
+	"$(ls flint_modules | sort | tr '\n' ' ' | sed 's/ $//')"
+out=$("$FLINT" run.fl 2>&1) && status=0 || status=$?
+expect "a package can import what it depends on" 0 "$status"
+expect_contains "and the call works" "pongpong" "$out"
+expect_contains "the transitive package is importable directly" "pong" "$out"
+# the lockfile records the nested dependency with the path relative to the
+# project, not to whichever package mentioned it
+expect_contains "the lock records the nested source" "../base" \
+	"$(cat flint.lock)"
+# reinstalling is still idempotent
+"$FLINT" pkg install >/dev/null 2>&1
+expect "reinstalling the chain succeeds" 0 "$?"
+
+cd "$WORK" || exit 1
 if [ "$failed" -ne 0 ]; then
 	echo "pkg tests: $checks checks, $failed failures"
 	exit 1
