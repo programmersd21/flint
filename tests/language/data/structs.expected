@@ -1,0 +1,15 @@
+Point{x: 0, y: 0}
+0
+0
+Point
+table
+10
+Point{x: 10, y: 0}
+row
+3
+missing: Point is missing 1 field: y.
+unknown: Point has no field 'z'.
+1
+2
+[Counter{n: 2}, Point{x: 10, y: 0}]
+Counter{n: 2}

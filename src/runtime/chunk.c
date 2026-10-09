@@ -166,6 +166,7 @@ int chunk_instruction_size(uint8_t opcode)
 	case OP_GET_FIELD:
 	case OP_SET_FIELD:
 	case OP_SET_FIELD_TOP:
+	case OP_MAKE_STRUCT:
 		return 2;
 
 	/* three bytes: a u16 jump offset */

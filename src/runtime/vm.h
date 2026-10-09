@@ -148,6 +148,19 @@ struct VM {
 	Table strings; /* weak. the intern table. */
 
 	/*
+	 * Struct declarations, by name. Each entry is a table whose keys are
+	 * the field names and whose one value is the field count, so a
+	 * declaration outlives the compile that made it and a struct
+	 * declared in a module is usable by whoever imported it.
+	 *
+	 * Values are field names only. A struct *value* does not keep a
+	 * pointer here -- it keeps its name, and looks the shape up when
+	 * something needs it -- so a VM can be freed without leaving values
+	 * pointing into it.
+	 */
+	Table struct_types;
+
+	/*
 	 * Modules already loaded, keyed by resolved path.
 	 *
 	 * The value is a marker, not data: TRUE means loaded, NIL means

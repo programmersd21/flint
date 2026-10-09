@@ -1,0 +1,63 @@
+# structs: named shapes whose construction is checked.
+#
+# a struct is a table with a name and a declared shape. field access and
+# assignment are the same syntax a table already has -- a struct needed no
+# new opcode for that, which is why the whole feature fits in one object
+# type and one instruction.
+
+struct Point {
+    x,
+    y,
+}
+
+let origin = Point({x: 0, y: 0})
+print(origin)
+print(origin.x)
+print(origin.y)
+print(type(origin))
+print(type({x: 0, y: 0}))
+
+# field assignment is ordinary table assignment
+origin.x = 10
+print(origin.x)
+print(origin)
+
+# annotations are descriptive, so this declares the same shape
+struct Sized {
+    label: string,
+    count: number,
+}
+let sized = Sized({label: "row", count: 3})
+print(sized.label, sized.count)
+
+# a missing field is an error at construction, naming the field, rather
+# than a nil read three functions later.
+try {
+    let short = Point({x: 1})
+    print(short)
+} catch e {
+    print("missing: " + e.message)
+}
+
+# and an undeclared field is too
+try {
+    let extra = Point({x: 1, y: 2, z: 3})
+    print(extra)
+} catch e {
+    print("unknown: " + e.message)
+}
+
+# a struct is a value: it goes in lists, survives a function, and closes
+# over like anything else.
+struct Counter {
+    n,
+}
+let c = Counter({n: 0})
+let bump = fn() {
+    c.n = c.n + 1
+    return c.n
+}
+print(bump())
+print(bump())
+print([c, origin])
+print(c)

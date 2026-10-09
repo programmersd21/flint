@@ -157,6 +157,16 @@ static TokenType identifier_type(void)
 			}
 		}
 		break;
+	case 's':
+		/*
+		 * "struct", dispatched on its own first letter rather than
+		 * sharing the "as" case above. The two share a prefix but not a
+		 * second character, so they belong in different branches of this
+		 * trie. check_keyword() answers TOKEN_IDENTIFIER on a length
+		 * mismatch rather than falling through, which is why one case
+		 * could never have tried both and fallen back.
+		 */
+		return check_keyword(1, 5, "truct", TOKEN_STRUCT);
 	case 'b':
 		return check_keyword(1, 4, "reak", TOKEN_BREAK);
 	case 'c':

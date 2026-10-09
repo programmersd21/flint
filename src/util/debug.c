@@ -286,6 +286,8 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return constant_instruction("OP_SET_FIELD", chunk, offset);
 	case OP_SET_FIELD_TOP:
 		return constant_instruction("OP_SET_FIELD_TOP", chunk, offset);
+	case OP_MAKE_STRUCT:
+		return constant_instruction("OP_MAKE_STRUCT", chunk, offset);
 	case OP_IMPORT:
 		return constant_instruction("OP_IMPORT", chunk, offset);
 	case OP_EXPORT:

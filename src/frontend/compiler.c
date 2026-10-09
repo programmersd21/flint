@@ -3381,10 +3381,120 @@ static void export_declaration(void)
 	}
 }
 
+/*
+ * True for the tokens that can spell a type name.
+ *
+ * The seven names `type()` returns are number, string, bool, nil, list,
+ * table, function -- and four of them are not identifier tokens in
+ * flint's grammar. `string` is the literal token, and nil/true/false are
+ * keywords. A struct annotation that accepted only identifiers would
+ * therefore reject half the language's own type names, which is the kind
+ * of small wrongness nobody notices until they write `x: string`.
+ */
+static bool is_type_annotation_token(TokenType type)
+{
+	switch (type) {
+	case TOKEN_IDENTIFIER:
+	case TOKEN_STRING:
+	case TOKEN_TRUE:
+	case TOKEN_FALSE:
+	case TOKEN_NIL:
+	case TOKEN_FN:
+	case TOKEN_STRUCT:
+		return true;
+	default:
+		return false;
+	}
+}
+
+/*
+ * `struct Name { field, field, ... }`
+ *
+ * Declares a named shape and binds Name to a constructor, so
+ * `Name(field: v, ...)` builds one. The declaration itself is compile
+ * time only: what survives to run time is the registered shape on the VM
+ * and the name each value carries.
+ *
+ * Field annotations are descriptive. `port: number` documents intent and
+ * checks nothing. Flint has one numeric type, no inference and no
+ * generics, and making one annotation kind honest is a type system
+ * arriving one keyword at a time; making it *runtime*-checked instead
+ * would break programs that work today. The shape is checked for
+ * presence and spelling, which is the part that catches real typos.
+ */
+static void struct_declaration(void)
+{
+	consume(TOKEN_IDENTIFIER, "expect a struct name after 'struct'.");
+	Token name = state.parser.previous;
+	ObjString *struct_name = copy_string(state.vm, name.start, name.length);
+
+	consume(TOKEN_LEFT_BRACE, "expect '{' after the struct name.");
+
+	ObjString *fields[MAX_LOCALS];
+	int field_count = 0;
+	while (!check(TOKEN_RIGHT_BRACE)) {
+		consume(TOKEN_IDENTIFIER, "expect a field name.");
+		Token field = state.parser.previous;
+		if (field_count >= MAX_LOCALS) {
+			error("too many fields in one struct.");
+			return;
+		}
+		fields[field_count++] =
+		        copy_string(state.vm, field.start, field.length);
+		/* `name: type` is accepted and means "name". the annotation
+		 * is documentation; see the comment above.
+		 *
+		 * The type name is a word, not necessarily an identifier
+		 * token: `string` is flint's string-literal token and
+		 * `true`/`false`/`nil` are keywords, so accepting only
+		 * identifiers would reject three of the seven names
+		 * `type()` returns. Anything word-shaped is accepted and
+		 * nothing is checked, which is what a descriptive
+		 * annotation is.
+		 */
+		if (match(TOKEN_COLON)) {
+			if (is_type_annotation_token(state.parser.current.type))
+				advance();
+			else
+				error("expect a type name after ':'.");
+		}
+		if (!match(TOKEN_COMMA))
+			break;
+	}
+	consume(TOKEN_RIGHT_BRACE, "expect '}' after the struct body.");
+
+	/* the fields are rooted across the registration, which allocates */
+	for (int i = 0; i < field_count; i++)
+		vm_push(state.vm, STR_VAL(fields[i]));
+	ObjTable *shape = flint_register_struct(
+	        state.vm, struct_name, fields, field_count);
+	for (int i = 0; i < field_count; i++)
+		vm_pop(state.vm);
+	if (shape == NULL) {
+		Token at = name;
+		char message[128];
+		snprintf(message,
+		        sizeof(message),
+		        "struct `%.*s` is already declared.",
+		        name.length,
+		        name.start);
+		error_at(&at, message);
+		return;
+	}
+
+	/* bind Name to its constructor, so `Name(...)` is an ordinary call */
+	int slot = identifier_constant(&name);
+	emit_bytes(OP_MAKE_STRUCT, (uint8_t)slot);
+	emit_indexed(OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_LONG, slot);
+	consume_terminator();
+}
+
 static void declaration(void)
 {
 	if (match(TOKEN_IMPORT))
 		import_declaration();
+	else if (match(TOKEN_STRUCT))
+		struct_declaration();
 	else if (match(TOKEN_EXPORT))
 		export_declaration();
 	else if (match(TOKEN_FN))

@@ -1003,6 +1003,7 @@ void vm_init(VM *vm)
 	table_init(vm->globals_envs[0]);
 	vm->globals = vm->globals_envs[0];
 	table_init(&vm->strings);
+	table_init(&vm->struct_types);
 	table_init(&vm->modules);
 	compiler_set_diagnostics(NULL, vm->diag_format, vm->diag_color);
 
@@ -1074,6 +1075,7 @@ void vm_free(VM *vm)
 	}
 	FREE_ARRAY(vm, Table *, vm->globals_envs, (size_t)vm->globals_capacity);
 	table_free(vm, &vm->strings);
+	table_free(vm, &vm->struct_types);
 	table_free(vm, &vm->modules);
 }
 
@@ -1168,6 +1170,114 @@ static bool call_value(VM *vm, Value callee, int arg_count)
 			 */
 			closure->function->call_count++;
 			return call(vm, closure, arg_count);
+		}
+		case OBJ_STRUCT_CTOR: {
+			/*
+			 * `Name(field: v, ...)` -- one table argument, checked
+			 * against the registered shape.
+			 *
+			 * The check is the whole point of a struct: a field name
+			 * that is not declared, or a declared field the value does
+			 * not carry, is an error here rather than a nil read three
+			 * functions later. Missing is named, not counted, because
+			 * the count says something is wrong and the names say what.
+			 */
+			ObjString *ctor_name = AS_STRUCT_CTOR(callee)->name;
+			ObjTable *shape = flint_lookup_struct(vm, ctor_name);
+			if (shape == NULL) {
+				vm_runtime_error(vm,
+				        "struct '%s' is not declared.",
+				        ctor_name != NULL ? ctor_name->chars
+					                  : "?");
+				return false;
+			}
+			if (arg_count != 1) {
+				vm_runtime_error(vm,
+				        "%s takes one table of fields, got %d.",
+				        ctor_name->chars,
+				        arg_count);
+				return false;
+			}
+			if (!IS_FLINT_TABLE(vm->stack_top[-1])) {
+				vm_runtime_error(vm,
+				        "%s takes a table of fields.",
+				        ctor_name->chars);
+				return false;
+			}
+			ObjTable *given = AS_FLINT_TABLE(vm->stack_top[-1]);
+			for (int i = 0; i < given->count; i++) {
+				ObjString *key = given->keys[i];
+				if (key->length == 6 &&
+				        memcmp(key->chars, "*count", 6) == 0)
+					continue;
+				bool declared = false;
+				for (int k = 0; k < shape->count && !declared;
+				        k++) {
+					ObjString *field = shape->keys[k];
+					if (field->length == 6 &&
+					        memcmp(field->chars,
+					                "*count",
+					                6) == 0)
+						continue;
+					declared = fl_strings_equal(field, key);
+				}
+				if (!declared) {
+					vm_runtime_error(vm,
+					        "%s has no field '%s'.",
+					        ctor_name->chars,
+					        key->chars);
+					return false;
+				}
+			}
+			char missing[512];
+			size_t at = 0;
+			int missing_count = 0;
+			for (int k = 0; k < shape->count; k++) {
+				ObjString *field = shape->keys[k];
+				if (field->length == 6 &&
+				        memcmp(field->chars, "*count", 6) == 0)
+					continue;
+				bool present = false;
+				for (int i = 0; i < given->count && !present;
+				        i++)
+					present = fl_strings_equal(
+					        given->keys[i], field);
+				if (present)
+					continue;
+				missing_count++;
+				if (at + field->length + 2 >= sizeof(missing))
+					break;
+				at += (size_t)snprintf(missing + at,
+				        sizeof(missing) - at,
+				        "%s%s",
+				        at > 0 ? ", " : "",
+				        field->chars);
+			}
+			if (missing_count > 0) {
+				vm_runtime_error(vm,
+				        "%s is missing %d field%s: %s.",
+				        ctor_name->chars,
+				        missing_count,
+				        missing_count == 1 ? "" : "s",
+				        missing);
+				return false;
+			}
+			/*
+			 * Stamp the name and hand back the same table. The value *is*
+			 * the argument rather than a copy: a struct is a table with
+			 * a name, and copying it would make two ways for one value
+			 * to exist.
+			 */
+			given->struct_name = ctor_name;
+			vm->counters.primitives++;
+			/* the same stack discipline as a native: drop the
+			 * callee and the argument, leave the value. returning
+			 * without this left the constructor itself where the
+			 * result belonged, so `let p = P({x: 1})` bound p to
+			 * the constructor rather than to the struct. */
+			vm->stack_top -= arg_count + 1;
+			vm_push(vm, OBJ_VAL(given));
+			return true;
 		}
 		case OBJ_NATIVE: {
 			ObjNative *native = AS_NATIVE(callee);
@@ -2208,6 +2318,25 @@ dispatch_resume:;
 			 */
 			ObjTable *table = new_flint_table(vm);
 			vm_push(vm, OBJ_VAL(table));
+			break;
+		}
+		case OP_MAKE_STRUCT: {
+			/*
+			 * `struct Name { ... }` binds Name to a constructor.
+			 * The operand is the interned name; the shape it
+			 * validates against is in the VM's registry, looked
+			 * up when the constructor is *called* rather than
+			 * here, so a re-registered name is picked up.
+			 */
+			ObjString *name = READ_STRING();
+			/* the interned name, so two modules declaring the same
+			 * struct name produce equal values */
+			ObjString *interned =
+			        copy_string(vm, name->chars, name->length);
+			vm_push(vm, STR_VAL(interned));
+			ObjStructCtor *ctor = new_struct_ctor(vm, interned);
+			vm_pop(vm);
+			vm_push(vm, OBJ_VAL(ctor));
 			break;
 		}
 		case OP_GET_INDEX: {

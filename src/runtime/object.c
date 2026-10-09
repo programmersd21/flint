@@ -310,6 +310,54 @@ ObjList *new_list(VM *vm)
 	return list;
 }
 
+ObjStructCtor *new_struct_ctor(VM *vm, ObjString *name)
+{
+	ObjStructCtor *ctor = (ObjStructCtor *)allocate_object(
+	        vm, sizeof(ObjStructCtor), OBJ_STRUCT_CTOR);
+	ctor->name = name;
+	return ctor;
+}
+
+ObjTable *flint_register_struct(
+        VM *vm, ObjString *name, ObjString **fields, int field_count)
+{
+	Value existing;
+	if (table_get(&vm->struct_types, name, &existing))
+		return NULL;
+	ObjTable *shape = new_flint_table(vm);
+	table_set(vm, &vm->struct_types, name, OBJ_VAL(shape));
+	/* rooted across the field insertions below: growing the parallel
+	 * arrays allocates, and the collector does not scan a C local */
+	vm_push(vm, OBJ_VAL(shape));
+	ObjString *count_key = copy_string(vm, "*count", 6);
+	vm_push(vm, STR_VAL(count_key));
+	/* one entry per field plus the count, filled directly: a Flint-level
+	 * table is parallel arrays, not the internal Table this file's
+	 * table_set() writes. */
+	int total = field_count + 1;
+	shape->keys = ALLOCATE(vm, ObjString *, (size_t)total);
+	shape->values = ALLOCATE(vm, Value, (size_t)total);
+	shape->capacity = total;
+	for (int i = 0; i < field_count; i++) {
+		shape->keys[i] = fields[i];
+		shape->values[i] = NUMBER_VAL((double)i);
+	}
+	shape->keys[field_count] = count_key;
+	shape->values[field_count] = NUMBER_VAL((double)field_count);
+	shape->count = total;
+	vm_pop(vm);
+	vm_pop(vm);
+	return shape;
+}
+
+ObjTable *flint_lookup_struct(VM *vm, ObjString *name)
+{
+	Value shape;
+	if (!table_get(&vm->struct_types, name, &shape))
+		return NULL;
+	return AS_FLINT_TABLE(shape);
+}
+
 ObjTable *new_flint_table(VM *vm)
 {
 	ObjTable *table =
@@ -318,6 +366,8 @@ ObjTable *new_flint_table(VM *vm)
 	table->capacity = 0;
 	table->keys = NULL;
 	table->values = NULL;
+	/* a plain table until a struct constructor stamps it */
+	table->struct_name = NULL;
 	if (vm != NULL)
 		vm->counters.tables_created++;
 	return table;
@@ -355,8 +405,15 @@ const char *flint_type_name(Value value)
 		return "string";
 	if (IS_LIST(value))
 		return "list";
-	if (IS_FLINT_TABLE(value))
-		return "table";
+	if (IS_FLINT_TABLE(value)) {
+		/*
+		 * A struct reports its own name. `type(point)` is "Point" --
+		 * which is the question a script is asking when it calls type on
+		 * a struct, and "table" would answer a different one.
+		 */
+		ObjString *name = AS_FLINT_TABLE(value)->struct_name;
+		return name != NULL ? name->chars : "table";
+	}
 	/* a function, a closure and a native are all "function" to a script,
 	 * and a cast has no reason to be more particular than type() is */
 	if (IS_FUNCTION(value) || IS_CLOSURE(value) || IS_NATIVE(value))
@@ -554,6 +611,16 @@ static void print_object_to(FILE *out, Value value)
 		fprintf(out, "]");
 		break;
 	}
+	case OBJ_STRUCT_CTOR: {
+		/* the constructor prints as the name it binds, because that
+		 * is what a script writes to reach it. */
+		fprintf(out,
+		        "<struct %s>",
+		        AS_STRUCT_CTOR(value)->name != NULL
+		                ? AS_STRUCT_CTOR(value)->name->chars
+				: "?");
+		break;
+	}
 	case OBJ_TABLE: {
 		/*
 		 * The contents, in insertion order. This used to print
@@ -561,7 +628,16 @@ static void print_object_to(FILE *out, Value value)
 		 * thing people print tables to see.
 		 */
 		ObjTable *t = AS_FLINT_TABLE(value);
-		fprintf(out, "{");
+		/*
+		 * A struct names itself, so `print(point)` reads as the thing
+		 * it is rather than as an anonymous bag. The braces are kept
+		 * because a struct is a table and `str()` of one should still
+		 * be recognizable as text.
+		 */
+		if (t->struct_name != NULL)
+			fprintf(out, "%s{", t->struct_name->chars);
+		else
+			fprintf(out, "{");
 		for (int i = 0; i < t->count; i++) {
 			if (i > 0)
 				fprintf(out, ", ");

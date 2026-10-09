@@ -1,0 +1,3 @@
+[line 4] Error at 'Twice': struct `Twice` is already declared.
+
+error: could not compile due to 1 error

@@ -224,6 +224,18 @@ static void blacken_object(VM *vm, Obj *object)
 			mark_object(vm, (Obj *)table->keys[i]);
 			mark_value(vm, table->values[i]);
 		}
+		/* the struct name is a reference like any other. a struct
+		 * whose name was swept would print as a plain table and
+		 * report its type() as "table" -- a wrong answer that only
+		 * shows up under GC stress. */
+		if (table->struct_name != NULL)
+			mark_object(vm, (Obj *)table->struct_name);
+		break;
+	}
+	case OBJ_STRUCT_CTOR: {
+		ObjStructCtor *ctor = (ObjStructCtor *)object;
+		if (ctor->name != NULL)
+			mark_object(vm, (Obj *)ctor->name);
 		break;
 	}
 	}
@@ -410,6 +422,12 @@ void free_object(VM *vm, Obj *object)
 		ObjList *list = (ObjList *)object;
 		FREE_ARRAY(vm, Value, list->items, list->capacity);
 		fl_reallocate(vm, object, sizeof(ObjList), 0);
+		break;
+	}
+	/* a struct constructor owns nothing but its name, which is interned
+	 * and owned by the VM -- so freeing one is just the header. */
+	case OBJ_STRUCT_CTOR: {
+		fl_reallocate(vm, object, sizeof(ObjStructCtor), 0);
 		break;
 	}
 	case OBJ_TABLE: {

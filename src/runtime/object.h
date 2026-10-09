@@ -25,7 +25,8 @@ typedef enum {
 	OBJ_CLOSURE,
 	OBJ_UPVALUE,
 	OBJ_LIST,
-	OBJ_TABLE
+	OBJ_TABLE,
+	OBJ_STRUCT_CTOR
 } ObjType;
 
 struct Obj {
@@ -109,6 +110,24 @@ typedef struct {
 } ObjNative;
 
 /*
+ * A struct constructor: the callable `struct Name { ... }` binds.
+ *
+ * A NativeFn cannot be this, because a native has no place to keep the
+ * name it was made for -- the whole difference between two struct
+ * constructors is which shape they validate against. So a constructor is
+ * its own object holding the name and looking the shape up in the VM's
+ * registry when called.
+ *
+ * That is the whole design. It is an object rather than a new opcode
+ * because a value can be passed around, compared and printed; an opcode
+ * would have had to be reachable from a table field.
+ */
+typedef struct {
+	Obj obj;
+	ObjString *name;
+} ObjStructCtor;
+
+/*
  * A captured variable. location points into the value stack while the
  * enclosing frame is alive, then at closed once the frame returns. Reads and
  * writes go through location either way, so nothing else has to care.
@@ -166,6 +185,21 @@ typedef struct {
 	int capacity;
 	ObjString **keys; /* parallel arrays: insertion ordered */
 	Value *values;
+	/*
+	 * The struct this value was built as, or NULL for a plain table.
+	 *
+	 * A struct is a table with a name and a checked shape, not a new
+	 * object: field access, assignment, iteration, printing and the
+	 * collector all already work on tables, and a second representation
+	 * would mean a second implementation of every one of those. So the
+	 * value *is* an ObjTable and this field is what distinguishes it --
+	 * NULL for `{}`, the interned struct name for `Point { x: 1 }`.
+	 *
+	 * The declaration's field list lives on the VM, not here: one copy
+	 * per struct type rather than one per value. This is only the name,
+	 * which is what `type()` and printing read.
+	 */
+	ObjString *struct_name;
 } ObjTable;
 
 #define AS_OBJ(value)   ((Obj *)AS_OBJ_PTR(value))
@@ -196,6 +230,8 @@ static inline bool IS_STRING(Value v)
 #define AS_CSTRING(value)     (((ObjString *)AS_OBJ_PTR(value))->chars)
 #define AS_FUNCTION(value)    ((ObjFunction *)AS_OBJ_PTR(value))
 #define AS_NATIVE(value)      ((ObjNative *)AS_OBJ_PTR(value))
+#define IS_STRUCT_CTOR(value) is_obj_type(value, OBJ_STRUCT_CTOR)
+#define AS_STRUCT_CTOR(value) ((ObjStructCtor *)AS_OBJ_PTR(value))
 #define AS_CLOSURE(value)     ((ObjClosure *)AS_OBJ_PTR(value))
 #define AS_LIST(value)        ((ObjList *)AS_OBJ_PTR(value))
 #define AS_FLINT_TABLE(value) ((ObjTable *)AS_OBJ_PTR(value))
@@ -261,9 +297,24 @@ ObjString *take_string(VM *vm, char *chars, int length);
 
 ObjFunction *new_function(VM *vm);
 ObjNative *new_native(VM *vm, NativeFn function, int arity);
+ObjStructCtor *new_struct_ctor(VM *vm, ObjString *name);
 ObjClosure *new_closure(VM *vm, ObjFunction *function);
 ObjUpvalue *new_upvalue(VM *vm, Value *slot);
 ObjList *new_list(VM *vm);
+/*
+ * Register a struct declaration: a name, and its field names in the order
+ * the declaration gave them. Returns NULL when the name is already taken,
+ * which the caller reports as a redeclaration.
+ *
+ * The registry lives on the VM rather than on the compiler because a
+ * struct declared in a module is usable from the script that imported it:
+ * the shape has to outlive the compile that declared it, exactly as a
+ * function's does.
+ */
+ObjTable *flint_register_struct(
+        VM *vm, ObjString *name, ObjString **fields, int field_count);
+ObjTable *flint_lookup_struct(VM *vm, ObjString *name);
+
 ObjTable *new_flint_table(VM *vm);
 
 /*

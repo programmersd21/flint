@@ -52,6 +52,7 @@ typedef enum {
 	/* keywords */
 	TOKEN_AND,
 	TOKEN_AS,
+	TOKEN_STRUCT,
 	TOKEN_BREAK,
 	TOKEN_CONST,
 	TOKEN_CONTINUE,

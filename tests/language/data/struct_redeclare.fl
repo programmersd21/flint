@@ -1,0 +1,6 @@
+struct Twice {
+    a,
+}
+struct Twice {
+    b,
+}

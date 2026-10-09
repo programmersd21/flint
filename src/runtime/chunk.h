@@ -178,6 +178,18 @@ typedef enum {
 	 * there. That is what made `type({a:1})` set a field on the callee.
 	 */
 	OP_SET_FIELD_TOP,
+	/*
+	 * Make a struct constructor. Stack: [] -> [value]. Operand: u8 index
+	 * of the interned struct name.
+	 *
+	 * The name is the whole of what this pushes: a constructor that
+	 * validates a table argument against the registered shape, and a
+	 * value carrying the name so `type()` and printing can say which
+	 * struct it is. This exists because `struct Name { ... }` has to bind
+	 * a *callable* `Name`, and the compiler cannot make a closure over a
+	 * table constant without one instruction for it.
+	 */
+	OP_MAKE_STRUCT,
 	OP_GET_INDEX,
 	OP_SET_INDEX,
 	OP_GET_FIELD,
