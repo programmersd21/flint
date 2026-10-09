@@ -20,6 +20,13 @@ nested. `a..b` is half-open, and `a..b..s` steps it; a zero step is an error.
 table keys are strings. a missing field reads as `nil`, so a typo looks like
 an unset field. tables iterate in insertion order.
 
+structs declare a named shape and check it at construction, which is why a
+misspelled field is a message there rather than a `nil` later. their type
+annotations are descriptive: `port: number` documents and enforces nothing.
+there are no methods, no inheritance, no generics, and no enums or pattern
+matching yet -- `docs/roadmap-0.12.md` says why each is deferred rather
+than half-built.
+
 membership (`in`), nil-coalescing (`??`, `??=`) and optional chaining
 (`?.`) are implemented, not limits. `?.` covers field, call and subscript
 chains (`a?.b.c`, `a?.f(x)`, `a?.xs[0]`); there is no `?[` subscript

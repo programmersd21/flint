@@ -1,5 +1,88 @@
 # releases
 
+## v0.12.0
+
+the release that adds the first user-defined kind of value. structs are
+named shapes whose construction is checked, so a misspelled field is a
+message where the value was built rather than a nil three functions later.
+alongside it, a failed module import has a contract and a test, and the
+roadmap says plainly what is not in this release and why.
+
+### structs
+
+`struct Point { x, y }` declares a shape and binds `Point` to a
+constructor:
+
+```flint
+struct Point {
+    x,
+    y,
+}
+
+let p = Point({x: 1, y: 2})
+print(p)          # Point{x: 1, y: 2}
+p.x = 10
+print(type(p))    # Point
+```
+
+construction checks the fields in both directions and names what is wrong:
+`Point({x: 1})` says which field is missing, `Point({x: 1, y: 2, z: 3})`
+says `z` is not a field. both errors land on the line that built the value,
+which is the whole reason to declare a shape.
+
+a struct value is a table with a name. field access, assignment, `in`,
+iteration, `keys`, indexing and printing were already table code, so the
+feature needed no new opcode for any of them -- which is why it fits in one
+object type and one instruction, and why `type()` says `Point` rather than
+`table`.
+
+**the annotations are descriptive.** `x: number` documents and checks
+nothing. flint has one numeric type, no inference and no generics; the only
+question an annotation can honestly answer today is which one you meant,
+and that is what it answers. making it enforce anything would be a type
+system arriving one keyword at a time, and enforcing it at runtime would
+break programs that work today.
+
+there are no methods, no inheritance, no enums and no pattern matching. each
+is named in `docs/roadmap-0.12.md` with the reason it was deferred rather
+than shipped half-built.
+
+### modules: a failed import commits nothing
+
+a module that fails halfway through initialization discards its
+environment and never builds its export table, so nothing it defined
+reaches the importer. that was already true; `docs/internals.md` had
+claimed a rollback, which is a different and stronger claim than what
+happens -- nothing is undone, state is never committed. the behaviour now
+has a test that imports a module which defines a const, mutates a global
+and only then throws, then defines every one of those names itself. if any
+of it survived, one of them would report a dead module's const as already
+defined.
+
+the boundary is stated rather than papered over: external side effects --
+files written, processes started, requests sent -- are not rolled back.
+
+### deferred, and why
+
+the native C ABI, a Rust wrapper and a Ratatui proof of concept are the
+stated goals of 0.12.0 and they are not in it. an ABI missing gc-safe
+handles, defensive argument validation or a documented lifetime model is
+worse than no ABI: a native package written against it breaks at the first
+gc stress run, and a native package that breaks silently is
+indistinguishable from corruption. `docs/roadmap-0.12.md` lists exactly what
+remains. there is no half-abi in the tree for something to build against.
+
+package manager hardening is deferred the same way: transitive resolution,
+integrity checksums and native-package platform metadata are real gaps,
+but a resolver that takes the first conflict it finds rather than the
+right one makes a lockfile untrustworthy. the current, documented behavior
+is tested.
+
+### version and gates
+
+version metadata moved to 0.12.0. `make quick` and `make validate` remain
+the two gates, and the release notes for 0.11.0 describe them.
+
 ## v0.11.0
 
 the release that makes flint correct: a verifier that means what it says,

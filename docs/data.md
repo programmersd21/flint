@@ -194,6 +194,54 @@ print(str(t))     # {name: flint, year: 2027}
 a table used to print as the single token `<table>`, which made `print` useless
 for the one thing a table is printed to see.
 
+## structs
+
+a named shape. declare one and it binds a constructor:
+
+```flint
+struct Point {
+    x,
+    y,
+}
+
+let p = Point({x: 1, y: 2})
+print(p)          # Point{x: 1, y: 2}
+print(p.x)        # 1
+p.x = 10          # field assignment is ordinary
+print(type(p))    # Point
+```
+
+a struct value is a table with a name, so everything a table does, it
+does: `in`, iteration, `keys`, indexing, `delete`, destructuring.
+
+construction checks the fields, in both directions, and names what is
+wrong:
+
+```flint
+try {
+    let bad = Point({x: 1})
+} catch e {
+    print(e.message)     # Point is missing 1 field: y.
+}
+```
+
+annotations are descriptive and checked by nothing:
+
+```flint
+struct Config {
+    host: string,
+    port: number,
+}
+```
+
+`host: string` is a comment. flint has one numeric type and no inference,
+so the only question an annotation can honestly answer today is which one
+you meant -- and that is what it is for. The shape is checked; the types
+are not.
+
+declaring the same name twice is an error, and a struct declared in a
+module is usable by whoever imports it.
+
 like lists, a trailing comma is allowed:
 
 ```flint

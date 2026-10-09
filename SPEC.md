@@ -1,6 +1,6 @@
-# flint language specification 0.11.0
+# flint language specification 0.12.0
 
-version 0.11.0. this is the authoritative grammar and semantics specification.
+version 0.12.0. this is the authoritative grammar and semantics specification.
 
 [docs/language.md](docs/language.md) is a prose version of this for people who
 want to read it rather than implement it. [docs/diagnostics.md](docs/diagnostics.md)
@@ -68,6 +68,8 @@ breakStmt      = "break" terminator ;
 continueStmt   = "continue" terminator ;
 throwStmt      = "throw" expression terminator ;
 tryStmt        = "try" block "catch" ( IDENTIFIER )? ( "as" TypeName )? block ( "finally" block )? ;
+structDecl     = "struct" IDENTIFIER "{" ( field ( "," field )* ","? )? "}" terminator ;
+field          = IDENTIFIER ( ":" typeName )? ;
                | "try" block "finally" block ;
 
 terminator     = ";" | newline | "}" | EOF ;
@@ -432,6 +434,54 @@ shell's convention.
 and a file whose size is an exact power of two is read without a one-byte
 overflow. `write_file` treats a failed `fclose` as a failure, because a close
 that fails after a successful write means the data may not have landed.
+
+## structs
+
+a struct is a named shape. `struct Point { x, y }` declares one and binds
+`Point` to a constructor, so `Point({x: 1, y: 2})` builds a value whose
+fields are checked at construction.
+
+```flint
+struct Point {
+    x,
+    y,
+}
+
+let origin = Point({x: 0, y: 0})
+print(origin.x)      # 0
+origin.x = 10
+print(type(origin))  # Point
+```
+
+a struct value is a table with a name. field access, assignment, indexing,
+`in`, iteration and printing are the table operations that already existed,
+which is why the feature needed no new opcode for any of them. `type()`
+reports the struct's name, and printing prefixes it: `Point{x: 10, y: 0}`.
+
+construction validates both directions. a field the struct does not
+declare names itself, and a declared field the value does not carry is
+listed by name:
+
+```flint
+Point({x: 1})               # Point is missing 1 field: y.
+Point({x: 1, y: 2, z: 3})   # Point has no field 'z'.
+```
+
+both are errors at the construction, which is the entire reason to declare
+a shape: a misspelled field is a message at the line that built the value
+rather than a nil read three functions later.
+
+**Annotations are descriptive.** `x: number` documents intent and checks
+nothing. flint has one numeric type, no inference and no generics, so the
+only honest reading of an annotation today is a comment. Making one
+annotation kind enforced would be a type system arriving one keyword at a
+time, and enforcing it at runtime would break programs that work today.
+The shape is checked; the types are not.
+
+declaring the same name twice is an error. a struct declared in a module is
+usable by whatever imports that module, and its shape is not visible to a
+module that did not. there is no inheritance, no methods, and no second
+record system.
 
 ## modules
 
