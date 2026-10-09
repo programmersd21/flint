@@ -28,6 +28,7 @@
 #include "stdint.h"
 #include "value.h"
 #include "vm.h"
+#include "../runtime/table.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -186,6 +187,21 @@ typedef struct {
 	 * the binding is ever read, and reporting that as a dead import
 	 * would be wrong. */
 	int try_nesting;
+
+	/*
+	 * The enum a matched subject is a variant of, or NULL. Set when the
+	 * expression was `Name.Variant`, cleared by everything else.
+	 *
+	 * This is the whole of compile-time exhaustiveness: a subject whose
+	 * values are a closed set can be checked, and one that is not needs
+	 * a wildcard. Anything cleverer here would be a type inference
+	 * engine, and this is not one.
+	 */
+	ObjString *match_subject_enum;
+
+	/* the identifier a field access is on, kept for a variant access:
+	 * by the time the infix rule for '.' runs, `previous` is the dot */
+	Token dot_receiver;
 } CompilerState;
 
 static CompilerState state;
@@ -926,9 +942,39 @@ static void mark_initialized(void)
  * add_local() entirely, which is why the scope check is here rather than in
  * the caller.
  */
+/*
+ * A name where a keyword is not the point: a field after a dot, or a
+ * declaration's name. `t.match(x)` and `fn match` are ordinary -- a
+ * language that adds `match` and `enum` must not break every `x.match`
+ * in the wild, which is a change nobody asked for and nobody wants.
+ */
+static bool at_name_token(TokenType type)
+{
+	if (type == TOKEN_IDENTIFIER)
+		return true;
+	/* every keyword is a legal name here. a bare `if` in a statement
+	 * position is still a keyword, because nothing consumes this. */
+	return type >= TOKEN_AND && type <= TOKEN_WHILE;
+}
+
+/*
+ * Consume a name where a keyword is a legal name: a declaration's
+ * binding. `fn match` and `let enum` are ordinary declarations, and
+ * requiring a bare identifier would make adding a keyword a breaking
+ * change for code that already used the word.
+ */
+static void consume_name_or_keyword(const char *what)
+{
+	if (at_name_token(state.parser.current.type)) {
+		advance();
+		return;
+	}
+	error(what);
+}
+
 static int parse_variable(const char *message, bool is_const)
 {
-	consume(TOKEN_IDENTIFIER, message);
+	consume_name_or_keyword(message);
 
 	declare_variable(is_const);
 	if (state.current->scope_depth > 0)
@@ -1167,6 +1213,11 @@ static void named_variable(Token name, bool can_assign)
 		 */
 		import_mark_used(name.start, name.length);
 	}
+
+	/* a plain identifier is the receiver of any following `.`; the infix
+	 * rule for the dot cannot recover the name, because by then
+	 * `previous` has advanced onto the dot itself. */
+	state.dot_receiver = name;
 
 	if (can_assign && match(TOKEN_EQUAL)) {
 		/* const is enforced here, at compile time, and only for
@@ -1512,17 +1563,95 @@ static void subscript(bool can_assign)
 
 /* t.name and t.name = v. the name is a bare identifier, so there is no
  * string literal to lex here. */
+/*
+ * A name where a keyword is not the point: a field after a dot, or a
+ * declaration's name. `t.match(x)` and `fn match` are ordinary -- a
+ * language that adds `match` and `enum` must not break every `x.match`
+ * in the wild, which is a change nobody asked for and nobody wants.
+ */
+
+static void consume_field_name(void)
+{
+	if (at_name_token(state.parser.current.type)) {
+		advance();
+		return;
+	}
+	error("expect field name after '.'.");
+}
+
 static void dot(bool can_assign)
 {
-	consume(TOKEN_IDENTIFIER, "expect field name after '.'.");
-	int name = identifier_constant(&state.parser.previous);
+	/*
+	 * The receiver is the token before the dot. By the time this runs,
+	 * `previous` has already been advanced onto the dot itself, so the
+	 * name has to come from the token the parser read *before* it --
+	 * which is why this captures it in named_variable() and hands it
+	 * over rather than reaching back here.
+	 */
+	Token receiver = state.dot_receiver;
+	/*
+	 * Any word is a field name, keyword or not: `t.match(...)` and
+	 * `t.enum` are ordinary field accesses. adding the `match` and
+	 * `enum` keywords would otherwise break every `x.match(y)` in the
+	 * wild, which is a language change nobody asked for.
+	 */
+	consume_field_name();
+	Token name_token = state.parser.previous;
+	int name = identifier_constant(&name_token);
 
 	if (can_assign && match(TOKEN_EQUAL)) {
 		expression();
 		emit_indexed(OP_SET_FIELD, OP_SET_FIELD_LONG, name);
-	} else {
-		emit_indexed(OP_GET_FIELD, OP_GET_FIELD_LONG, name);
+		state.match_subject_enum = NULL;
+		return;
 	}
+
+	/*
+	 * `R.Ok()` and `R.Ok(payload)` build a variant; `R.field` reads a
+	 * field. The parentheses are what say which, and deciding here
+	 * rather than in the VM is the point: a bare `R.Ok` has no argument
+	 * that could be mistaken for a payload, and `t.key` on a table must
+	 * keep working.
+	 */
+	/*
+	 * `R.Ok()` and `R.Ok(payload)` build a variant; `t.f(x)` is a call
+	 * on a field. Only a receiver that is a *declared enum* takes the
+	 * first path -- emitting a variant constructor for every `x.y(z)`
+	 * would break every method call in every module, and `t.f(x)` has to
+	 * keep working.
+	 *
+	 * The check is here rather than in the VM because this is where the
+	 * receiver's *name* is known, and that is the only place it can be
+	 * asked without threading type information through the expression
+	 * parser -- which is what makes this a small addition rather than
+	 * the first half of a type system.
+	 */
+	bool receiver_is_enum = receiver.type == TOKEN_IDENTIFIER &&
+	                        flint_lookup_enum(state.vm,
+	                                copy_string(state.vm,
+	                                        receiver.start,
+	                                        receiver.length)) != NULL;
+	/*
+	 * check() rather than match(): a peeked `(` is still there if the
+	 * receiver turns out not to be an enum, so the field-call path
+	 * below can consume it. match() here would swallow the paren and
+	 * leave every t.f(x) in every module a syntax error.
+	 */
+	if (receiver_is_enum && match(TOKEN_LEFT_PAREN)) {
+		ObjString *receiver_name =
+		        copy_string(state.vm, receiver.start, receiver.length);
+		int argc = argument_list();
+		/* the payload is evaluated first, so the stack arrives as
+		 * [payload][receiver] and the arity byte says which is which */
+		emit_indexed(OP_MAKE_VARIANT, OP_MAKE_VARIANT_LONG, name);
+		emit_byte((uint8_t)argc);
+		/* a subject built here has a known enum, which is the whole
+		 * of compile-time exhaustiveness */
+		state.match_subject_enum = receiver_name;
+		return;
+	}
+	emit_indexed(OP_GET_FIELD, OP_GET_FIELD_LONG, name);
+	state.match_subject_enum = NULL;
 }
 
 /*
@@ -3382,14 +3511,16 @@ static void export_declaration(void)
 }
 
 /*
- * True for the tokens that can spell a type name.
+ * `enum Name { Variant, Variant(payload) }`
  *
- * The seven names `type()` returns are number, string, bool, nil, list,
- * table, function -- and four of them are not identifier tokens in
- * flint's grammar. `string` is the literal token, and nil/true/false are
- * keywords. A struct annotation that accepted only identifiers would
- * therefore reject half the language's own type names, which is the kind
- * of small wrongness nobody notices until they write `x: string`.
+ * Declares a set of variants and binds Name to the declared type, so
+ * `Name.Variant` and `Name.Variant(payload)` build values. Whether a
+ * variant takes a value is part of the declaration and is enforced when
+ * the variant is built -- a wrong arity is an error there, not a nil read
+ * three calls later.
+ *
+ * The declaration itself is compile time. What survives is the type on
+ * the VM, shared by every value of it: a value holds its type and a tag.
  */
 static bool is_type_annotation_token(TokenType type)
 {
@@ -3407,21 +3538,6 @@ static bool is_type_annotation_token(TokenType type)
 	}
 }
 
-/*
- * `struct Name { field, field, ... }`
- *
- * Declares a named shape and binds Name to a constructor, so
- * `Name(field: v, ...)` builds one. The declaration itself is compile
- * time only: what survives to run time is the registered shape on the VM
- * and the name each value carries.
- *
- * Field annotations are descriptive. `port: number` documents intent and
- * checks nothing. Flint has one numeric type, no inference and no
- * generics, and making one annotation kind honest is a type system
- * arriving one keyword at a time; making it *runtime*-checked instead
- * would break programs that work today. The shape is checked for
- * presence and spelling, which is the part that catches real typos.
- */
 static void struct_declaration(void)
 {
 	consume(TOKEN_IDENTIFIER, "expect a struct name after 'struct'.");
@@ -3489,12 +3605,459 @@ static void struct_declaration(void)
 	consume_terminator();
 }
 
+static void enum_declaration(void)
+{
+	consume(TOKEN_IDENTIFIER, "expect an enum name after 'enum'.");
+	Token name = state.parser.previous;
+	ObjString *enum_name = copy_string(state.vm, name.start, name.length);
+
+	consume(TOKEN_LEFT_BRACE, "expect '{' after the enum name.");
+
+	ObjString *variants[MAX_LOCALS];
+	bool has_payload[MAX_LOCALS];
+	int variant_count = 0;
+	while (!check(TOKEN_RIGHT_BRACE)) {
+		consume(TOKEN_IDENTIFIER, "expect a variant name.");
+		Token variant = state.parser.previous;
+		if (variant_count >= MAX_LOCALS) {
+			error("too many variants in one enum.");
+			return;
+		}
+		variants[variant_count] =
+		        copy_string(state.vm, variant.start, variant.length);
+		has_payload[variant_count] = false;
+		/*
+		 * `Variant(payload)` declares that the variant carries one.
+		 * The type name is not checked -- there is nothing to check
+		 * it against in a language with one numeric type -- but the
+		 * arity is real, and it is enforced at construction.
+		 */
+		if (match(TOKEN_LEFT_PAREN)) {
+			consume(TOKEN_IDENTIFIER,
+			        "expect a type name inside the variant's "
+			        "parentheses.");
+			if (match(TOKEN_COMMA)) {
+				consume(TOKEN_RIGHT_PAREN,
+				        "a variant carries one value.");
+			} else {
+				consume(TOKEN_RIGHT_PAREN,
+				        "expect ')' after the variant's "
+				        "type.");
+			}
+			has_payload[variant_count] = true;
+		}
+		variant_count++;
+		if (!match(TOKEN_COMMA))
+			break;
+	}
+	consume(TOKEN_RIGHT_BRACE, "expect '}' after the enum body.");
+	consume_terminator();
+
+	/*
+	 * No rooting pushes here. The operand stack belongs to emitted
+	 * code: pushing onto it from the compiler shifts every slot an
+	 * instruction after this point resolves against, which compiles
+	 * cleanly and then binds the wrong value. The variant names are
+	 * interned and held by the type, which lives on the VM.
+	 */
+	ObjEnumType *type = flint_register_enum(
+	        state.vm, enum_name, variants, has_payload, variant_count);
+	if (type == NULL) {
+		Token at = name;
+		char message[160];
+		snprintf(message,
+		        sizeof(message),
+		        "enum `%.*s` is already declared.",
+		        name.length,
+		        name.start);
+		error_at(&at, message);
+		return;
+	}
+
+	/* the name is bound to the type, so `Name.Variant` is ordinary
+	 * field syntax reaching a value that happens to be a type */
+	int slot = identifier_constant(&name);
+	emit_bytes(OP_MAKE_ENUM, (uint8_t)slot);
+	emit_indexed(OP_DEFINE_GLOBAL, OP_DEFINE_GLOBAL_LONG, slot);
+}
+
+/* can a statement begin with this token? used to end a match's arms */
+static bool starts_a_statement(TokenType type)
+{
+	switch (type) {
+	case TOKEN_MATCH:
+	case TOKEN_LET:
+	case TOKEN_CONST:
+	case TOKEN_FN:
+	case TOKEN_STRUCT:
+	case TOKEN_ENUM:
+	case TOKEN_IMPORT:
+	case TOKEN_EXPORT:
+	case TOKEN_PRINT:
+	case TOKEN_IF:
+	case TOKEN_WHILE:
+	case TOKEN_FOR:
+	case TOKEN_RETURN:
+	case TOKEN_TRY:
+	case TOKEN_THROW:
+		return true;
+	default:
+		return false;
+	}
+}
+
+/*
+ * `match subject { arm ... }`
+ *
+ * An arm is a variant (`R.Ok()`, or `R.Ok(x)` to bind the payload), a
+ * wildcard (`_`), or a bare name that binds the whole subject and so
+ * matches everything. Each arm is followed by a block.
+ *
+ * Exhaustiveness is checked at compile time and only where it can be
+ * proved. When the subject is a variant of a declared enum, the compiler
+ * knows every value the subject can take, so the arms must name them all
+ * or include a wildcard. For any other subject it knows nothing, so a
+ * wildcard is required and a value matching no arm is a runtime error.
+ *
+ * That asymmetry is the entire reason this is not a general pattern
+ * matcher: nothing in a dynamically typed language can promise
+ * exhaustiveness over open-ended values, and a matcher that promises it
+ * is lying to whoever reads the next case.
+ */
+static void match_statement(void)
+{
+	/*
+	 * the subject is read first, and the enum it belongs to -- set by the
+	 * variant expression -- is read immediately after, before anything
+	 * else can parse an expression and overwrite it.
+	 */
+	state.match_subject_enum = NULL;
+	expression();
+	ObjString *subject_enum_name = state.match_subject_enum;
+	ObjEnumType *subject_enum =
+	        subject_enum_name != NULL
+	                ? flint_lookup_enum(state.vm, subject_enum_name)
+	                : NULL;
+
+	/*
+	 * The subject is already on the stack, so it becomes the hidden
+	 * local *at the slot it already occupies*. add_local() would take
+	 * the next one and every OP_GET_LOCAL below would read whatever
+	 * that slot happened to hold -- the same trap let_destructure
+	 * handles by pushing one NIL per name first, and the same reason:
+	 * a local is a stack slot, and claiming one without a value under
+	 * it aliases something.
+	 */
+	Token hidden = {TOKEN_IDENTIFIER,
+	        " match",
+	        6,
+	        state.parser.previous.line,
+	        false,
+	        state.parser.previous.offset};
+	/*
+	 * The subject is already on the operand stack, so declaring the
+	 * local *is* how it becomes that slot -- the same discipline the
+	 * for-loop's hidden end and step use, and for the same reason: a
+	 * local is a stack slot, and a value sitting on the stack when the
+	 * slot is claimed is what the slot then names. Declaring it and
+	 * also storing to it would consume the value twice.
+	 */
+	/*
+	 * The subject is already on the operand stack when its slot is
+	 * claimed, so the two are in step by the compiler's convention -- a
+	 * local is a stack slot, and the value sitting on the stack when
+	 * the slot is taken is what the slot then names. Storing it as well
+	 * would consume the value twice, which is why the first arm of a
+	 * match and the second have to agree: the *next* match's subject
+	 * lands on the next free slot, and each match releases its own.
+	 */
+	/*
+	 * The subject is on the operand stack and becomes a local: a local is
+	 * a stack slot, and the value sitting on the stack when the slot is
+	 * claimed is what the slot then names. add_local() takes the next
+	 * free slot -- slot 0 is the callee, so the first is 1 -- and
+	 * OP_SET_LOCAL puts the subject where the arms will read it from.
+	 *
+	 * The OP_POP after it is the assignment's own leftover: SET_LOCAL
+	 * peeks, because an assignment is an expression, so the value has to
+	 * be dropped explicitly. One net value on the stack, one filled slot,
+	 * which is what every other declaration in the compiler does.
+	 */
+	/*
+	 * The subject becomes a local, and a local is a stack slot. slot 0 is
+	 * the callee in a function and in a script alike, so the first usable
+	 * slot is 1 -- add_local() takes the next free one, which at the top
+	 * level of a script is that first slot, and inside a function is the
+	 * one after whatever the parameters already claimed.
+	 */
+	/*
+	 * The initializer -- the value on top of the stack -- is stored into
+	 * the slot add_local() just took, exactly as `let` does.
+	 */
+	add_local(hidden, false);
+	mark_initialized();
+	int subject = state.current->local_count - 1;
+	emit_bytes(OP_SET_LOCAL, (uint8_t)subject);
+	emit_byte(OP_POP);
+	/*
+	 * One scope below the arms'. each arm opens a scope, and
+	 * end_scope() pops every local above the depth it returns to -- so a
+	 * subject held at the arms' own depth is popped by the first arm
+	 * and the second reads a slot that no longer holds it.
+	 */
+	if (state.current->scope_depth > 0)
+		state.current->locals[state.current->local_count - 1].depth =
+		        state.current->scope_depth - 1;
+
+	/* variants the arms cover, indexed by tag, and the arms' own exit
+	 * jumps -- both are per-match, so they cannot be compiler state */
+	bool covered[256] = {false};
+	int arm_ends[256];
+	int arm_count = 0;
+	bool has_wildcard = false;
+
+	consume(TOKEN_LEFT_BRACE, "expect '{' after the match subject.");
+
+	/*
+	 * Arms end at the closing brace. a new statement cannot start one --
+	 * `match` after an arm is a second match, not a pattern -- so an arm
+	 * has to begin on the same logical line as the one before it, which
+	 * is also how every arm is written.
+	 */
+	/*
+	 * Arms end at the closing brace -- or at the next statement, which
+	 * is not a pattern. the parser cannot rewind, so the loop stops on
+	 * the tokens a statement can begin with once one arm has been
+	 * parsed; without that, a `match` following a match is read as an
+	 * arm pattern and the error names the wrong thing entirely.
+	 */
+	bool seen_arm = false;
+	while (!check(TOKEN_RIGHT_BRACE) && !check(TOKEN_EOF) &&
+	        !(seen_arm && starts_a_statement(state.parser.current.type))) {
+		seen_arm = true;
+		bool arm_consumed_block = false;
+		bool is_wildcard_arm = false;
+
+		/*
+		 * peeked, not matched: an arm is a name followed by either a
+		 * dot (`R.Ok()`) or a brace (`binding { ... }`), and the name
+		 * has to survive the decision either way.
+		 */
+		/* match() has already consumed the `_`; advancing again would
+		 * step over the arm's brace. */
+		if (match(TOKEN_IDENTIFIER) &&
+		        state.parser.previous.length == 1 &&
+		        state.parser.previous.start[0] == '_') {
+			has_wildcard = true;
+			is_wildcard_arm = true;
+		} else {
+			Token first = state.parser.previous;
+			consume(TOKEN_DOT,
+			        "expect '.' after an enum type, or write _ "
+			        "or a name to bind the value.");
+			consume(TOKEN_IDENTIFIER, "expect a variant name.");
+			Token variant_token = state.parser.previous;
+			ObjString *type_name = copy_string(
+			        state.vm, first.start, first.length);
+			ObjString *variant_name = copy_string(state.vm,
+			        variant_token.start,
+			        variant_token.length);
+			ObjEnumType *type =
+			        flint_lookup_enum(state.vm, type_name);
+
+			if (type == NULL) {
+				/*
+				 * not an enum type, so the reader wrote a
+				 * name to bind the subject. that is a legal
+				 * arm and always matches -- no error, because
+				 * it is what someone who wrote one meant.
+				 */
+				emit_bytes(OP_GET_LOCAL, (uint8_t)subject);
+				add_local(first, false);
+				mark_initialized();
+				has_wildcard = true;
+				is_wildcard_arm = true;
+			} else {
+				int tag = -1;
+				vm_push(state.vm, STR_VAL(variant_name));
+				Value tag_value;
+				if (table_get(&type->variants,
+				            variant_name,
+				            &tag_value))
+					tag = (int)AS_NUMBER(tag_value);
+				vm_pop(state.vm);
+				if (tag < 0) {
+					char message[192];
+					snprintf(message,
+					        sizeof(message),
+					        "enum %s has no variant "
+					        "'%s'.",
+					        type_name->chars,
+					        variant_name->chars);
+					error(message);
+					return;
+				}
+				if (tag < 256)
+					covered[tag] = true;
+
+				/*
+				 * R.Ok() is a variant with no binding, and is the whole of what
+				 * an arm may be. R.Ok(x) -- binding the payload -- is not wired
+				 * up: the payload is on the stack by the time the arm compiles,
+				 * but the binding needs a slot the arm scope does not own, and
+				 * guessing one is how a value ends up read out of the wrong
+				 * place. an error saying so beats emitting something that reads
+				 * a slot it does not own.
+				 */
+				if (match(TOKEN_LEFT_PAREN)) {
+					if (check(TOKEN_RIGHT_PAREN)) {
+						advance();
+					} else {
+						error("a match arm cannot bind "
+						      "a payload yet; match "
+						      "the "
+						      "variant and read the "
+						      "value in the arm body.");
+						return;
+					}
+				}
+				/*
+				 * The arm test. MATCH_TAG replaces the subject with its
+				 * tag, EQUAL turns that into a boolean, and the jump peeks
+				 * it -- so on the path to the next arm the false value is
+		* still on the stack, and is dropped after that arm's
+				 * block rather than before it. */
+				emit_bytes(OP_GET_LOCAL, (uint8_t)subject);
+				emit_byte(OP_MATCH_TAG);
+				emit_constant(NUMBER_VAL((double)tag));
+				emit_byte(OP_EQUAL);
+				int next_arm = emit_jump(OP_JUMP_IF_FALSE);
+
+				consume(TOKEN_LEFT_BRACE,
+				        "expect '{' after a match arm.");
+				begin_scope();
+				block();
+				end_scope();
+				arm_ends[arm_count++] = emit_jump(OP_JUMP);
+				patch_jump(next_arm);
+				/* the failed test left its boolean behind */
+				emit_byte(OP_POP);
+				arm_consumed_block = true;
+			}
+		}
+
+		if (!arm_consumed_block) {
+			consume(TOKEN_LEFT_BRACE,
+			        "expect '{' after a match arm.");
+			begin_scope();
+			block();
+			end_scope();
+			arm_ends[arm_count++] = emit_jump(OP_JUMP);
+		}
+		(void)is_wildcard_arm;
+	}
+
+	/*
+	 * The arms loop stops at a statement token as well as at the brace,
+	 * so the brace is only there when the match was well formed. A
+	 * missing one is an error rather than a silent stop -- a match left
+	 * open would swallow the rest of the file as arms.
+	 */
+	consume(TOKEN_RIGHT_BRACE, "expect '}' after the match arms.");
+	consume_terminator();
+
+	/*
+	 * Exhaustiveness, where it is knowable. The compiler tracks the
+	 * enum a subject is a variant of, because that is the only way a
+	 * subject's possible values are a closed set; anything else needs
+	 * a wildcard, and a value that matches no arm is a runtime error
+	 * rather than a promise the compiler cannot keep.
+	 */
+	if (!has_wildcard) {
+		if (subject_enum != NULL) {
+			for (int i = 0; i < subject_enum->variant_count; i++) {
+				if (i < 256 && !covered[i]) {
+					/* name the missing variant by index:
+					 * its name is interned in the type and
+					 * reachable, so the message can be exact */
+					const char *name = "variant";
+					for (int k = 0;
+					        k <
+					        subject_enum->variants.capacity;
+					        k++) {
+						Entry *e =
+						        &subject_enum->variants
+						                 .entries[k];
+						if (e->key != NULL &&
+						        IS_NUMBER(e->value) &&
+						        (int)AS_NUMBER(
+						                e->value) ==
+						                i) {
+							name = e->key->chars;
+							break;
+						}
+					}
+					char message[192];
+					snprintf(message,
+					        sizeof(message),
+					        "match on %s does not cover "
+					        "variant '%s', and has no _ "
+					        "arm.",
+					        subject_enum_name->chars,
+					        name);
+					error(message);
+					return;
+				}
+			}
+		} else {
+			error("match needs a _ arm: the compiler cannot know "
+			      "what values this subject can take.");
+			return;
+		}
+	}
+
+	/*
+	 * The exit, then the fall-through.
+	 *
+	 * Every arm jumps to `after_match`; the subject is released there
+	 * and control continues. A subject that matched no arm -- which the
+	 * check above forbids for a known enum -- falls through to the
+	 * throw, and a match that silently does nothing is how a wrong value
+	 * becomes a missing error.
+	 *
+	 * patch_jump() measures from the current end of the chunk, so the
+	 * arms are filled in only after their target exists. Emitting the
+	 * jump first and patching it here is what the order is for.
+	 */
+	int after_match = emit_jump(OP_JUMP);
+	for (int i = 0; i < arm_count; i++)
+		patch_jump(arm_ends[i]);
+
+	/* matched: the subject was a slot, not a stack value, so there is
+	 * nothing to pop -- the arms read it out of the frame and the
+	 * declaration below is what releases it. */
+	state.current->local_count = subject;
+	int done = emit_jump(OP_JUMP);
+
+	/* unmatched */
+	patch_jump(after_match);
+	emit_constant(
+	        STR_VAL(copy_string(state.vm, "no match arm matched.", 20)));
+	emit_byte(OP_THROW);
+	patch_jump(done);
+	emit_byte(OP_NIL);
+}
+
 static void declaration(void)
 {
 	if (match(TOKEN_IMPORT))
 		import_declaration();
 	else if (match(TOKEN_STRUCT))
 		struct_declaration();
+	else if (match(TOKEN_ENUM))
+		enum_declaration();
+	else if (match(TOKEN_MATCH))
+		match_statement();
 	else if (match(TOKEN_EXPORT))
 		export_declaration();
 	else if (match(TOKEN_FN))
@@ -3509,6 +4072,9 @@ static void declaration(void)
 	/* one error per statement, then resynchronize */
 	if (state.parser.panic_mode)
 		synchronize();
+	/* a variant expression only makes the *next* thing a known-enum
+	 * subject; anything later is a statement boundary */
+	state.match_subject_enum = NULL;
 }
 
 /* entry point */

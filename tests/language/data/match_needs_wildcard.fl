@@ -1,0 +1,8 @@
+# a subject the compiler cannot narrow, and no wildcard. nothing here
+# says what values `n` can take, so a silent fall-through is the only
+# alternative and that is worse than an error.
+
+let n = 3
+match n {
+    _ { print("matched") }
+}

@@ -1,0 +1,10 @@
+# an enum declared twice is an error, and so is a struct and an enum
+# competing for one name: both are looked up by the same `Name`.
+
+enum Shape {
+    Circle,
+}
+
+enum Shape {
+    Square,
+}

@@ -1,0 +1,3 @@
+[line 8] Error at 'Shape': enum `Shape` is already declared.
+
+error: could not compile due to 1 error

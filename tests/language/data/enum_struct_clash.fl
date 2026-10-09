@@ -1,0 +1,11 @@
+# a struct and an enum cannot share a name. both are resolved from the
+# same `Name` at a call site, and whichever won the lookup would do so
+# silently.
+
+enum Shape {
+    Circle,
+}
+
+struct Shape {
+    x,
+}

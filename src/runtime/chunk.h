@@ -190,6 +190,31 @@ typedef enum {
 	 * table constant without one instruction for it.
 	 */
 	OP_MAKE_STRUCT,
+	/*
+	 * Push the enum type a declaration binds. Operand: u8 index of the
+	 * interned enum name.
+	 *
+	 * A declaration emits code the way `let` does -- it binds a name --
+	 * but its value is a registered type rather than something the
+	 * expression parser left on the stack. this puts it there, so the
+	 * definition that follows is an ordinary one.
+	 */
+	OP_MAKE_ENUM,
+	/*
+	 * Build a variant value. Stack: [receiver] or [payload][receiver]
+	 * -> [value]. Operands: u8 index of the variant name, u8 arity.
+	 *
+	 * The arity is explicit because the stack alone cannot say whether
+	 * a value above the receiver is a payload or the tail of a
+	 * neighbouring expression -- and a variant built from the wrong one
+	 * is silent. The compiler knows the arity because it parsed the
+	 * call.
+	 */
+	OP_MAKE_VARIANT,
+	/* the same instruction with a 24-bit variant name */
+	OP_MAKE_VARIANT_LONG,
+	OP_MATCH_TAG, /* [enum-value] -> [tag] */
+	OP_MATCH_PAYLOAD, /* [enum-value] -> [payload] */
 	OP_GET_INDEX,
 	OP_SET_INDEX,
 	OP_GET_FIELD,

@@ -1,0 +1,53 @@
+# enums: a declared set of variants, some carrying a value.
+#
+# a value is a tag plus an optional payload. the declaration is the
+# shape; construction is where the arity is enforced, so a wrong one is an
+# error where the value is built rather than a nil read later.
+
+enum Shape {
+    Circle(number),
+    Square(number),
+    Point,
+}
+
+# building and printing
+let c = Shape.Circle(2)
+print(c)
+print(Shape.Square(3))
+print(Shape.Point())
+
+# type() names the enum, and printing names the variant
+print(type(c))
+print(type(Shape.Point()))
+
+# equality is by tag and payload
+print(Shape.Circle(2) == Shape.Circle(2))
+print(Shape.Circle(2) == Shape.Circle(3))
+print(Shape.Point() == Shape.Point())
+print(Shape.Circle(2) == Shape.Square(2))
+
+# a payload can be any value, including a container
+let named = Shape.Circle("r")
+print(named)
+
+# variants are values: they go in lists and compare there
+let shapes = [Shape.Point(), Shape.Circle(1)]
+print(shapes[0])
+print(shapes[1])
+
+# wrong arity is an error at construction
+try {
+    print(Shape.Circle())
+} catch e {
+    print("no payload given: " + e.message)
+}
+try {
+    print(Shape.Point(1))
+} catch e {
+    print("payload not wanted: " + e.message)
+}
+try {
+    print(Shape.Nope())
+} catch e {
+    print("no such variant: " + e.message)
+}

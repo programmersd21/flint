@@ -238,6 +238,33 @@ static void blacken_object(VM *vm, Obj *object)
 			mark_object(vm, (Obj *)ctor->name);
 		break;
 	}
+	/*
+	 * An enum type holds its variant names; a value holds its type and
+	 * its payload. The payload is the part that matters: a variant
+	 * carrying a list would be swept while the script still held the
+	 * value, and the symptom would be a corrupt list rather than a
+	 * missed root.
+	 */
+	case OBJ_ENUM_TYPE: {
+		ObjEnumType *type = (ObjEnumType *)object;
+		if (type->name != NULL)
+			mark_object(vm, (Obj *)type->name);
+		for (int i = 0; i < type->variants.capacity; i++) {
+			Entry *entry = &type->variants.entries[i];
+			if (entry->key != NULL) {
+				mark_object(vm, (Obj *)entry->key);
+				mark_value(vm, entry->value);
+			}
+		}
+		break;
+	}
+	case OBJ_ENUM_VALUE: {
+		ObjEnumValue *value = (ObjEnumValue *)object;
+		if (value->enum_type != NULL)
+			mark_object(vm, (Obj *)value->enum_type);
+		mark_value(vm, value->payload);
+		break;
+	}
 	}
 }
 
@@ -428,6 +455,22 @@ void free_object(VM *vm, Obj *object)
 	 * and owned by the VM -- so freeing one is just the header. */
 	case OBJ_STRUCT_CTOR: {
 		fl_reallocate(vm, object, sizeof(ObjStructCtor), 0);
+		break;
+	}
+	case OBJ_ENUM_TYPE: {
+		ObjEnumType *type = (ObjEnumType *)object;
+		table_free(vm, &type->variants);
+		if (type->has_payload != NULL) {
+			FREE_ARRAY(vm,
+			        bool,
+			        type->has_payload,
+			        type->variant_count);
+		}
+		fl_reallocate(vm, object, sizeof(ObjEnumType), 0);
+		break;
+	}
+	case OBJ_ENUM_VALUE: {
+		fl_reallocate(vm, object, sizeof(ObjEnumValue), 0);
 		break;
 	}
 	case OBJ_TABLE: {

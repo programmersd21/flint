@@ -1,0 +1,15 @@
+Shape.Circle(2)
+Shape.Square(3)
+Shape.Point
+Shape
+Shape
+true
+false
+true
+false
+Shape.Circle(r)
+Shape.Point
+Shape.Circle(1)
+no payload given: variant Shape.Circle takes one value.
+payload not wanted: variant Shape.Point takes no value.
+no such variant: enum Shape has no variant 'Nope'.

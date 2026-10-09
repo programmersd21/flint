@@ -257,6 +257,10 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return simple_instruction("OP_RETURN", offset);
 	case OP_LIST_LEN:
 		return simple_instruction("OP_LIST_LEN", offset);
+	case OP_MATCH_TAG:
+		return simple_instruction("OP_MATCH_TAG", offset);
+	case OP_MATCH_PAYLOAD:
+		return simple_instruction("OP_MATCH_PAYLOAD", offset);
 	case OP_TABLE_COUNT:
 		return simple_instruction("OP_TABLE_COUNT", offset);
 	case OP_TABLE_KEY:
@@ -288,6 +292,37 @@ int disassemble_instruction(Chunk *chunk, int offset)
 		return constant_instruction("OP_SET_FIELD_TOP", chunk, offset);
 	case OP_MAKE_STRUCT:
 		return constant_instruction("OP_MAKE_STRUCT", chunk, offset);
+	case OP_MAKE_ENUM:
+		return constant_instruction("OP_MAKE_ENUM", chunk, offset);
+	/*
+	 * a constant index plus an arity byte. constant_instruction()
+	 * would step over two bytes and leave the arity to be read as the
+	 * next opcode, desynchronizing the listing from here onward.
+	 */
+	case OP_MAKE_VARIANT: {
+		uint8_t idx = chunk->code[offset + 1];
+		uint8_t arity = chunk->code[offset + 2];
+		printf("%-20s %4d ; ", "OP_MAKE_VARIANT", idx);
+		if (idx < chunk->constants.count)
+			print_value_brief(chunk->constants.values[idx]);
+		else
+			printf("??? (out of range)");
+		printf(" arity %d\n", (int)arity);
+		return offset + 3;
+	}
+	case OP_MAKE_VARIANT_LONG: {
+		uint32_t idx = (uint32_t)chunk->code[offset + 1] << 16 |
+		               (uint32_t)chunk->code[offset + 2] << 8 |
+		               (uint32_t)chunk->code[offset + 3];
+		uint8_t arity = chunk->code[offset + 4];
+		printf("%-20s %4u ; ", "OP_MAKE_VARIANT_LONG", idx);
+		if (idx < (uint32_t)chunk->constants.count)
+			print_value_brief(chunk->constants.values[idx]);
+		else
+			printf("??? (out of range)");
+		printf(" arity %d\n", (int)arity);
+		return offset + 5;
+	}
 	case OP_IMPORT:
 		return constant_instruction("OP_IMPORT", chunk, offset);
 	case OP_EXPORT:

@@ -1,0 +1,12 @@
+# an arm naming a variant the enum does not have. caught at compile time
+# because the declaration is in the same file.
+
+enum Small {
+    Only,
+}
+
+let s = Small.Only()
+match s {
+    Small.Missing() { print("no") }
+    _ { print("unreachable") }
+}

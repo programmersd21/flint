@@ -137,6 +137,8 @@ int chunk_instruction_size(uint8_t opcode)
 	case OP_NEGATE:
 	case OP_PRINT:
 	case OP_LIST_LEN:
+	case OP_MATCH_TAG:
+	case OP_MATCH_PAYLOAD:
 	case OP_TABLE_COUNT:
 	case OP_TABLE_KEY:
 	case OP_TABLE_VALUE:
@@ -167,7 +169,14 @@ int chunk_instruction_size(uint8_t opcode)
 	case OP_SET_FIELD:
 	case OP_SET_FIELD_TOP:
 	case OP_MAKE_STRUCT:
+	case OP_MAKE_ENUM:
 		return 2;
+	/* three: a u8 variant index and a u8 arity */
+	case OP_MAKE_VARIANT:
+		return 3;
+	/* five: the same, with a 24-bit index */
+	case OP_MAKE_VARIANT_LONG:
+		return 5;
 
 	/* three bytes: a u16 jump offset */
 	case OP_JUMP:

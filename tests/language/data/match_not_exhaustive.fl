@@ -1,0 +1,16 @@
+# the arms miss a variant and there is no wildcard. the subject is a
+# variant of a declared enum, so the compiler knows the full set of tags
+# and says which one is missing -- rather than letting a value reach no
+# arm at run time.
+
+enum Colour {
+    Red,
+    Green,
+    Blue,
+}
+
+let c = Colour.Red()
+match c {
+    Colour.Red() { print("red") }
+    Colour.Green() { print("green") }
+}

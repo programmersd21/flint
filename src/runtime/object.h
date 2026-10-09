@@ -10,6 +10,7 @@
 
 #include "chunk.h"
 #include "common.h"
+#include "table.h"
 #include "value.h"
 
 typedef struct VM VM;
@@ -26,7 +27,9 @@ typedef enum {
 	OBJ_UPVALUE,
 	OBJ_LIST,
 	OBJ_TABLE,
-	OBJ_STRUCT_CTOR
+	OBJ_STRUCT_CTOR,
+	OBJ_ENUM_TYPE,
+	OBJ_ENUM_VALUE
 } ObjType;
 
 struct Obj {
@@ -139,6 +142,29 @@ typedef struct {
 } ObjStructCtor;
 
 /*
+ * A declared enum: a set of variants, some of which carry a value.
+ *
+ * variants maps a variant name to its index; has_payload[i] says whether
+ * variant i takes one. A value keeps only its type and its tag, so the
+ * declaration is shared rather than copied per value.
+ */
+typedef struct {
+	Obj obj;
+	ObjString *name;
+	Table variants;
+	bool *has_payload;
+	int variant_count;
+} ObjEnumType;
+
+/* one constructed variant: which enum, which variant, what it carries */
+typedef struct {
+	Obj obj;
+	ObjEnumType *enum_type;
+	int tag;
+	Value payload;
+} ObjEnumValue;
+
+/*
  * A captured variable. location points into the value stack while the
  * enclosing frame is alive, then at closed once the frame returns. Reads and
  * writes go through location either way, so nothing else has to care.
@@ -242,6 +268,10 @@ static inline bool IS_STRING(Value v)
 #define AS_FUNCTION(value)    ((ObjFunction *)AS_OBJ_PTR(value))
 #define AS_NATIVE(value)      ((ObjNative *)AS_OBJ_PTR(value))
 #define IS_STRUCT_CTOR(value) is_obj_type(value, OBJ_STRUCT_CTOR)
+#define IS_ENUM_TYPE(value)   is_obj_type(value, OBJ_ENUM_TYPE)
+#define AS_ENUM_TYPE(value)   ((ObjEnumType *)AS_OBJ_PTR(value))
+#define IS_ENUM_VALUE(value)  is_obj_type(value, OBJ_ENUM_VALUE)
+#define AS_ENUM_VALUE(value)  ((ObjEnumValue *)AS_OBJ_PTR(value))
 #define AS_STRUCT_CTOR(value) ((ObjStructCtor *)AS_OBJ_PTR(value))
 #define AS_CLOSURE(value)     ((ObjClosure *)AS_OBJ_PTR(value))
 #define AS_LIST(value)        ((ObjList *)AS_OBJ_PTR(value))
@@ -312,6 +342,15 @@ ObjNative *new_native(VM *vm, NativeFn function, int arity);
 ObjNative *new_native_with_data(
         VM *vm, NativeFn function, int arity, void *user_data);
 ObjStructCtor *new_struct_ctor(VM *vm, ObjString *name);
+ObjEnumType *new_enum_type(VM *vm, ObjString *name, int variant_count);
+ObjEnumValue *new_enum_value(
+        VM *vm, ObjEnumType *enum_type, int tag, Value payload);
+ObjEnumType *flint_register_enum(VM *vm,
+        ObjString *name,
+        ObjString **variants,
+        bool *has_payload,
+        int variant_count);
+ObjEnumType *flint_lookup_enum(VM *vm, ObjString *name);
 ObjClosure *new_closure(VM *vm, ObjFunction *function);
 ObjUpvalue *new_upvalue(VM *vm, Value *slot);
 ObjList *new_list(VM *vm);

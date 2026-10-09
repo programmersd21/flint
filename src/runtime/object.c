@@ -317,6 +317,70 @@ ObjList *new_list(VM *vm)
 	return list;
 }
 
+ObjEnumType *new_enum_type(VM *vm, ObjString *name, int variant_count)
+{
+	ObjEnumType *type = (ObjEnumType *)allocate_object(
+	        vm, sizeof(ObjEnumType), OBJ_ENUM_TYPE);
+	type->name = name;
+	type->variant_count = variant_count;
+	table_init(&type->variants);
+	type->has_payload = NULL;
+	if (variant_count > 0) {
+		type->has_payload = ALLOCATE(vm, bool, (size_t)variant_count);
+		for (int i = 0; i < variant_count; i++)
+			type->has_payload[i] = false;
+	}
+	return type;
+}
+
+ObjEnumValue *new_enum_value(
+        VM *vm, ObjEnumType *enum_type, int tag, Value payload)
+{
+	ObjEnumValue *value = (ObjEnumValue *)allocate_object(
+	        vm, sizeof(ObjEnumValue), OBJ_ENUM_VALUE);
+	value->enum_type = enum_type;
+	value->tag = tag;
+	value->payload = payload;
+	return value;
+}
+
+ObjEnumType *flint_register_enum(VM *vm,
+        ObjString *name,
+        ObjString **variants,
+        bool *has_payload,
+        int variant_count)
+{
+	/* a struct and an enum cannot share a name: both are looked up by
+	 * the same `Name` at a call site, and the one found first would
+	 * silently win. */
+	Value existing;
+	if (table_get(&vm->struct_types, name, &existing))
+		return NULL;
+	ObjEnumType *type = new_enum_type(vm, name, variant_count);
+	/* rooted across the insertions below: each table_set can allocate,
+	 * and the variant names are held only by this table */
+	vm_push(vm, OBJ_VAL(type));
+	for (int i = 0; i < variant_count; i++) {
+		table_set(vm,
+		        &type->variants,
+		        variants[i],
+		        NUMBER_VAL((double)i));
+		if (type->has_payload != NULL)
+			type->has_payload[i] = has_payload[i];
+	}
+	vm_pop(vm);
+	table_set(vm, &vm->struct_types, name, OBJ_VAL(type));
+	return type;
+}
+
+ObjEnumType *flint_lookup_enum(VM *vm, ObjString *name)
+{
+	Value type;
+	if (!table_get(&vm->struct_types, name, &type))
+		return NULL;
+	return IS_ENUM_TYPE(type) ? AS_ENUM_TYPE(type) : NULL;
+}
+
 ObjStructCtor *new_struct_ctor(VM *vm, ObjString *name)
 {
 	ObjStructCtor *ctor = (ObjStructCtor *)allocate_object(
@@ -412,6 +476,18 @@ const char *flint_type_name(Value value)
 		return "string";
 	if (IS_LIST(value))
 		return "list";
+	/* an enum type names itself; a value reports the enum it belongs
+	 * to, which is the question a script is asking when it prints one */
+	if (IS_ENUM_TYPE(value))
+		return AS_ENUM_TYPE(value)->name != NULL
+		               ? AS_ENUM_TYPE(value)->name->chars
+			       : "enum";
+	if (IS_ENUM_VALUE(value))
+		return AS_ENUM_VALUE(value)->enum_type != NULL &&
+		                       AS_ENUM_VALUE(value)->enum_type->name !=
+		                               NULL
+		               ? AS_ENUM_VALUE(value)->enum_type->name->chars
+			       : "enum";
 	if (IS_FLINT_TABLE(value)) {
 		/*
 		 * A struct reports its own name. `type(point)` is "Point" --
@@ -626,6 +702,46 @@ static void print_object_to(FILE *out, Value value)
 		        AS_STRUCT_CTOR(value)->name != NULL
 		                ? AS_STRUCT_CTOR(value)->name->chars
 				: "?");
+		break;
+	}
+	case OBJ_ENUM_TYPE: {
+		/* the type prints as its name; a value prints as
+		 * Enum.Variant, or Enum.Variant(payload) when it carries
+		 * one. that is the form a script writes, and a value that
+		 * printed as a bare tag would be unreadable in a log. */
+		fprintf(out,
+		        "<enum %s>",
+		        AS_ENUM_TYPE(value)->name != NULL
+		                ? AS_ENUM_TYPE(value)->name->chars
+				: "?");
+		break;
+	}
+	case OBJ_ENUM_VALUE: {
+		ObjEnumValue *ev = AS_ENUM_VALUE(value);
+		const char *enum_name =
+		        ev->enum_type != NULL && ev->enum_type->name != NULL
+		                ? ev->enum_type->name->chars
+		                : "?";
+		const char *variant = "?";
+		if (ev->enum_type != NULL) {
+			for (int i = 0; i < ev->enum_type->variants.capacity;
+			        i++) {
+				Entry *e = &ev->enum_type->variants.entries[i];
+				if (e->key == NULL)
+					continue;
+				if (IS_NUMBER(e->value) &&
+				        (int)AS_NUMBER(e->value) == ev->tag) {
+					variant = e->key->chars;
+					break;
+				}
+			}
+		}
+		fprintf(out, "%s.%s", enum_name, variant);
+		if (!IS_NIL(ev->payload)) {
+			fprintf(out, "(");
+			print_value_to(out, ev->payload);
+			fprintf(out, ")");
+		}
 		break;
 	}
 	case OBJ_TABLE: {

@@ -1,0 +1,62 @@
+# enums under an aggressive collector.
+#
+# a value holds a reference to its type and one to its payload, and the
+# type holds its variant names. a collector that misses any of them is
+# invisible until a collection lands on it -- and then the value prints as
+# something it is not, or a payload is swept while a script still holds
+# the variant. so this churns, builds, drops the churn, and reads back.
+
+enum Shape {
+    Empty,
+    Circle(number),
+    Named(string),
+    Wrapped(list),
+}
+
+let churn = []
+let i = 0
+while i < 4000 {
+    push(churn, "s" + str(i))
+    i += 1
+}
+
+let shapes = []
+let n = 0
+while n < 500 {
+    if n % 3 == 0 {
+        push(shapes, Shape.Empty())
+    } else if n % 3 == 1 {
+        push(shapes, Shape.Circle(n))
+    } else {
+        push(shapes, Shape.Named("s" + str(n)))
+    }
+    n += 1
+}
+
+print(len(shapes))
+print(shapes[0])
+print(shapes[1])
+print(shapes[2])
+
+# a payload that is itself a container, reached only through the variant.
+# the payload is not reachable from the value -- `len(wrapped)` is a
+# TypeError, and that is the point: what the variant knows is its tag and
+# its payload, not the payload's shape. reading it means matching.
+let wrapped = Shape.Wrapped([1, 2, 3])
+print(wrapped)
+match wrapped {
+    Shape.Wrapped() { print("carries a list") }
+    _ { print("wrong arm ran") }
+}
+
+# drop the churn and read every name back: a swept name would print as
+# an unknown variant, and a swept payload as the wrong value.
+churn = []
+let j = 0
+while j < len(shapes) {
+    print(shapes[j])
+    j += 1
+}
+
+# and the type is still the type
+print(type(shapes[1]))

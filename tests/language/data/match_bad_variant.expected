@@ -1,0 +1,5 @@
+[line 10] Error at 'Missing': enum Small has no variant 'Missing'.
+[line 10] Error at '}': expect expression.
+[line 11] Error at '}': expect expression.
+
+error: could not compile due to 3 errors

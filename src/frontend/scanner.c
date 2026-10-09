@@ -208,6 +208,8 @@ static TokenType identifier_type(void)
 			switch (scanner.start[1]) {
 			case 'l':
 				return check_keyword(2, 2, "se", TOKEN_ELSE);
+			case 'n':
+				return check_keyword(2, 2, "um", TOKEN_ENUM);
 			case 'x':
 				return check_keyword(
 				        2, 4, "port", TOKEN_EXPORT);
@@ -244,6 +246,27 @@ static TokenType identifier_type(void)
 		break;
 	case 'l':
 		return check_keyword(1, 2, "et", TOKEN_LET);
+	case 'm':
+		/*
+		 * `match` is a keyword unless a '(' follows it, in which case
+		 * it names something: `glob.match(p, n)` is a real function in
+		 * the standard library, and `match(p)` as a bare call is
+		 * ordinary code. a keyword that broke every `x.match(...)` in
+		 * the wild would be a language change nobody asked for.
+		 *
+		 * check_keyword answers TOKEN_IDENTIFIER when the letters do
+		 * not match, so the result has to be *compared* -- treated as
+		 * a boolean it is always true, and every m-word becomes a
+		 * keyword. `{memory: 1}` is how that showed up.
+		 *
+		 * the cost is one sharp edge: `match (x) { ... }`, a match on
+		 * a parenthesized expression, reads as a call. a space is all
+		 * that separates the two, and the call is the common case.
+		 */
+		if (check_keyword(1, 4, "atch", TOKEN_MATCH) == TOKEN_MATCH &&
+		        peek() != '(')
+			return TOKEN_MATCH;
+		return TOKEN_IDENTIFIER;
 	case 'n':
 		if (scanner.current - scanner.start > 1) {
 			switch (scanner.start[1]) {

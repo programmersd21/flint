@@ -1808,7 +1808,23 @@ dispatch_resume:;
 		case OP_EQUAL: {
 			Value b = vm_pop(vm);
 			Value a = vm_pop(vm);
-			vm_push(vm, BOOL_VAL(values_equal(a, b)));
+			/*
+			 * enum values compare by tag and payload. the generic
+			 * comparison is in value.h, which cannot see an
+			 * ObjEnumValue -- and falling through to pointer identity
+			 * would make `R.Ok() == R.Ok()` false, which is the one
+			 * comparison a reader is certain to write.
+			 */
+			bool equal;
+			if (IS_ENUM_VALUE(a) && IS_ENUM_VALUE(b)) {
+				ObjEnumValue *ea = AS_ENUM_VALUE(a);
+				ObjEnumValue *eb = AS_ENUM_VALUE(b);
+				equal = ea->tag == eb->tag &&
+				        values_equal(ea->payload, eb->payload);
+			} else {
+				equal = values_equal(a, b);
+			}
+			vm_push(vm, BOOL_VAL(equal));
 			break;
 		}
 		case OP_NOT_EQUAL: {
@@ -2363,6 +2379,102 @@ dispatch_resume:;
 			ObjStructCtor *ctor = new_struct_ctor(vm, interned);
 			vm_pop(vm);
 			vm_push(vm, OBJ_VAL(ctor));
+			break;
+		}
+		case OP_MATCH_TAG: {
+			Value value = vm_pop(vm);
+			if (!IS_ENUM_VALUE(value)) {
+				vm_runtime_error(vm,
+				        "only an enum value has a variant.");
+				RESUME_OR_RETURN_RUNTIME_ERROR();
+			}
+			vm_push(vm,
+			        NUMBER_VAL((double)AS_ENUM_VALUE(value)->tag));
+			break;
+		}
+		case OP_MATCH_PAYLOAD: {
+			Value value = vm_pop(vm);
+			if (!IS_ENUM_VALUE(value)) {
+				vm_runtime_error(vm,
+				        "only an enum value has a payload.");
+				RESUME_OR_RETURN_RUNTIME_ERROR();
+			}
+			/* nil for a variant carrying none, so an arm that
+			 * binds a payload always has something to bind */
+			vm_push(vm, AS_ENUM_VALUE(value)->payload);
+			break;
+		}
+		case OP_MAKE_ENUM: {
+			/* the type a declaration bound, looked up by the
+			 * name the compiler interned -- so a re-declared name
+			 * is picked up, and the constant pool holds a string
+			 * rather than a pointer into movable structure. */
+			ObjString *name = READ_STRING();
+			ObjString *interned =
+			        copy_string(vm, name->chars, name->length);
+			vm_push(vm, STR_VAL(interned));
+			ObjEnumType *type = flint_lookup_enum(vm, interned);
+			vm_pop(vm);
+			if (type == NULL) {
+				vm_runtime_error(vm,
+				        "enum '%s' is not declared.",
+				        name->chars);
+				RESUME_OR_RETURN_RUNTIME_ERROR();
+			}
+			vm_push(vm, OBJ_VAL(type));
+			break;
+		}
+		case OP_MAKE_VARIANT: {
+			/*
+			 * `R.Ok()` or `R.Ok(payload)`. stack is [receiver]
+			 * with no argument and [payload][receiver] with one,
+			 * and the compiler says which in the arity byte --
+			 * inferred from the stack, a payload that happened
+			 * to equal the receiver would read as an argument.
+			 */
+			ObjString *variant_name = READ_STRING();
+			int arity = READ_BYTE();
+			Value receiver = vm->stack_top[-1 - arity];
+			if (!IS_ENUM_TYPE(receiver)) {
+				vm_runtime_error(
+				        vm, "only an enum type has variants.");
+				RESUME_OR_RETURN_RUNTIME_ERROR();
+			}
+			ObjEnumType *type = AS_ENUM_TYPE(receiver);
+			ObjString *interned = copy_string(
+			        vm, variant_name->chars, variant_name->length);
+			/* rooted across the lookup, which can allocate */
+			vm_push(vm, STR_VAL(interned));
+			vm_push(vm, receiver);
+			Value tag_value;
+			bool found = table_get(&type->variants,
+			                     interned,
+			                     &tag_value) != 0;
+			vm_pop(vm);
+			vm_pop(vm);
+			if (!found) {
+				vm_runtime_error(vm,
+				        "enum %s has no variant '%s'.",
+				        type->name->chars,
+				        variant_name->chars);
+				RESUME_OR_RETURN_RUNTIME_ERROR();
+			}
+			int tag = (int)AS_NUMBER(tag_value);
+			bool wants = type->has_payload != NULL &&
+			             type->has_payload[tag];
+			if (wants != (arity == 1)) {
+				vm_runtime_error(vm,
+				        "variant %s.%s takes %s value.",
+				        type->name->chars,
+				        variant_name->chars,
+				        wants ? "one" : "no");
+				RESUME_OR_RETURN_RUNTIME_ERROR();
+			}
+			Value payload = arity == 1 ? vm_pop(vm) : NIL_VAL;
+			vm_pop(vm); /* the receiver */
+			vm_push(vm,
+			        OBJ_VAL(new_enum_value(
+			                vm, type, tag, payload)));
 			break;
 		}
 		case OP_GET_INDEX: {

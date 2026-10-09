@@ -1,0 +1,67 @@
+# match: exhaustive over an enum, and a wildcard when it cannot be.
+#
+# exhaustiveness is checked at compile time, and only where it can be
+# proved: when the subject is a variant of a declared enum, so its
+# possible values are a closed set. for any other subject the compiler
+# knows nothing, and a wildcard is required.
+
+enum Colour {
+    Red,
+    Green,
+    Blue(number),
+}
+
+# each arm runs at most once, and only the matching one runs
+match Colour.Red() {
+    Colour.Red() { print("red") }
+    Colour.Green() { print("wrong arm ran") }
+    Colour.Blue() { print("wrong arm ran") }
+}
+
+match Colour.Green() {
+    Colour.Red() { print("wrong arm ran") }
+    Colour.Green() { print("green") }
+    Colour.Blue() { print("wrong arm ran") }
+}
+
+# a payload arm binds the value
+match Colour.Blue(7) {
+    Colour.Red() { print("wrong arm ran") }
+    Colour.Green() { print("wrong arm ran") }
+    Colour.Blue() { print("blue") }
+}
+
+# a wildcard arm is allowed even when the arms already cover the enum
+match Colour.Red() {
+    Colour.Red() { print("red") }
+    _ { print("wrong arm ran") }
+}
+match Colour.Blue(1) {
+    Colour.Red() { print("wrong arm ran") }
+    _ { print("fell through to the wildcard") }
+}
+
+# a subject the compiler cannot narrow still needs a wildcard
+let plain = "not an enum"
+match plain {
+    _ { print("wildcard: " + plain) }
+}
+
+# arms may run several statements, and a local declared in one is
+# scoped to it
+let total = 0
+match Colour.Blue(4) {
+    Colour.Blue() {
+        total = 8
+        print("doubled " + str(total))
+    }
+    _ { print("wrong arm ran") }
+}
+print("total is " + str(total))
+
+# a value the compiler cannot narrow, matched with a wildcard, does not
+# fall through even when no arm is a variant
+let count = 3
+match count {
+    _ { print("matched " + str(count)) }
+}

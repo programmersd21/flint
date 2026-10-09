@@ -53,6 +53,8 @@ typedef enum {
 	TOKEN_AND,
 	TOKEN_AS,
 	TOKEN_STRUCT,
+	TOKEN_ENUM,
+	TOKEN_MATCH,
 	TOKEN_BREAK,
 	TOKEN_CONST,
 	TOKEN_CONTINUE,
@@ -97,6 +99,20 @@ typedef struct {
 
 /* point the scanner at a new buffer. resets the line to 1. */
 void scanner_init(const char *source);
+
+/*
+ * True when the token after the one the parser is looking at is `type`.
+ * the parser has no rewind, so the two cases -- `R.Ok()` and
+ * `binding { }` -- cannot be told apart without this.
+ */
+bool scanner_peek_is(TokenType type);
+
+/*
+ * True when the most recently produced token began a statement, so the
+ * parser can tell a call to a function named `match` from the `match`
+ * keyword -- the one place the two are genuinely ambiguous.
+ */
+bool scanner_at_statement_start(void);
 
 /* next token. TOKEN_EOF is returned forever once the input runs out. */
 Token scan_token(void);
