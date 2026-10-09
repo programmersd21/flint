@@ -360,3 +360,72 @@ they do not convert between each other, and there is no `dict` view of a table
 or list view of a table. a list of alternating key and value is a table in
 spirit, and works fine, if you find yourself writing `xs[0]` and `xs[1]`
 together often enough that you should stop.
+
+## enums
+
+a declared set of variants. the declaration is the shape; construction is
+where the arity is enforced, so a wrong one is an error where the value is
+built rather than a nil read later.
+
+```flint
+enum Shape {
+    Circle(number),
+    Square(number),
+    Point,
+}
+
+let c = Shape.Circle(2)
+print(c)                 # Shape.Circle(2)
+print(type(c))           # Shape
+print(Shape.Circle(2) == Shape.Circle(2))   # true
+```
+
+a payload can be any value, including a container. the name is what
+`type()` reports and what printing shows, so a value in a log reads as the
+thing it is. two declarations cannot share a name -- an enum and a struct
+both resolve from the same `Name`, and whichever won the lookup would do so
+silently.
+
+an enum value is not a container: `len(value)` is a TypeError, because
+what a variant knows is its tag and its payload, not the payload's shape.
+reading the payload means matching it.
+
+## match
+
+matches on the variant of an enum, with a wildcard or a binding for
+everything else.
+
+```flint
+enum Colour {
+    Red,
+    Green,
+    Blue(number),
+}
+
+match Colour.Blue(7) {
+    Colour.Red() { print("wrong arm ran") }
+    Colour.Green() { print("wrong arm ran") }
+    Colour.Blue() { print("blue") }
+}
+```
+
+exhaustiveness is checked at compile time, and only where it can be proved.
+when the subject is a variant of a declared enum, its possible values are a
+closed set, so the arms must name them all or include `_`:
+
+```flint
+match Colour.Red() {
+    Colour.Red() { print("red") }
+    # Color.Green() missing -- the compiler names the variant
+}
+```
+
+for any other subject the compiler knows nothing, so a wildcard is
+required, and a value that matches no arm is a runtime error rather than a
+fall-through.
+
+two things are not supported: binding a payload in an arm (`Colour.Blue(n)`
+is an error saying so -- match the variant and read the value in the body),
+and matching a literal rather than a variant. `match` is also a name when a
+parenthesis follows it, because `glob.match` is a real function; the cost is
+one sharp edge, where `match (x) {` reads as a call.
