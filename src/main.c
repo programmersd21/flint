@@ -71,33 +71,16 @@ static void print_banner(VM *vm)
 	if (vm->quiet)
 		return;
 	if (cli_color(stdout)) {
-		printf("\x1b[1;36mflint\x1b[0m \x1b[1m%s\x1b[0m\n",
+		printf("\x1b[1;36mflint\x1b[0m \x1b[90m%s\x1b[0m\n",
 		        FLINT_VERSION);
-		printf("\x1b[2ma small scripting language. type an "
-		       "expression and press enter.\x1b[0m\n");
-		printf("\x1b[33m:help\x1b[0m for what works here, "
-		       "\x1b[33mctrl-d\x1b[0m to leave.\n\n");
+		printf("type an expression, or \x1b[33m:help\x1b[0m for "
+		       "commands\n\n");
 	} else {
 		printf("flint %s\n", FLINT_VERSION);
-		printf("a small scripting language. type an expression and "
-		       "press enter.\n");
-		printf(":help for what works here, ctrl-d to leave.\n\n");
+		printf("type an expression, or :help for commands\n\n");
 	}
 }
 
-/*
- * Is this input a complete program, or the first half of one?
- *
- * Depth over the three bracket kinds, tracked through the text with strings
- * and comments skipped. Double-quoted strings can contain escaped quotes, so
- * `\"` does not end one. A `#` starts a comment that runs to the newline.
- * Single quotes are not strings in Flint -- see the scanner -- so they do
- * not open or close anything here either.
- *
- * Returns true when every opener is closed and no string is unterminated.
- * An unterminated string is incomplete rather than wrong: the user may just
- * be typing the second half of it on the next line.
- */
 static bool repl_complete(const char *text)
 {
 	int depth = 0;
@@ -132,36 +115,38 @@ static bool repl_complete(const char *text)
 /* the repl's own commands, kept short because they are not the language */
 static void repl_help(void)
 {
-	printf("\n");
-	printf("  :help      this text\n");
-	printf("  :history   what you typed this session and before\n");
-	printf("  :clear     clear the screen\n");
-	printf("  :load <f>  run a file in this session\n");
-	printf("  :quit      leave, same as ctrl-d\n");
-	printf("  !N        run history entry N again\n");
-	printf("\n");
-	printf("  each entry is its own script. state carries over through\n");
-	printf("  globals, so `x = 1` then `x + 1` works. multi-line input\n");
-	printf("  keeps reading with `... ` until the entry is complete.\n");
-	printf("  history lives in ~/.flint_history when HOME names a\n");
-	printf("  directory it can be written to; otherwise it is this\n");
-	printf("  session only, and nothing complains about it.\n");
-	printf("\n");
-	printf("  try:\n");
-	printf("    1 + 2\n");
-	printf("    let xs = [1, 2, 3]\n");
-	printf("    for x in xs { print(x * 2) }\n");
-	printf("    split(\"a,b,c\", \",\")\n");
-	printf("\n");
+	bool c = cli_color(stdout);
+	if (c) {
+		printf("\n");
+		printf("  \x1b[1mcommands:\x1b[0m\n");
+		printf("    \x1b[36m:help\x1b[0m         show this help\n");
+		printf("    \x1b[36m:history\x1b[0m      show command "
+		       "history\n");
+		printf("    \x1b[36m:clear\x1b[0m        clear terminal\n");
+		printf("    \x1b[36m:load <file>\x1b[0m  execute script file "
+		       "in session\n");
+		printf("    \x1b[36m:quit\x1b[0m, \x1b[36m:q\x1b[0m     exit "
+		       "session\n");
+		printf("    \x1b[36m!<n>\x1b[0m          run history entry "
+		       "n\n\n");
+		printf("  \x1b[1mnote:\x1b[0m\n");
+		printf("    multi-line input continues on unclosed blocks\n");
+		printf("    history is preserved in ~/.flint_history\n\n");
+	} else {
+		printf("\n");
+		printf("  commands:\n");
+		printf("    :help         show this help\n");
+		printf("    :history      show command history\n");
+		printf("    :clear        clear terminal\n");
+		printf("    :load <file>  execute script file in session\n");
+		printf("    :quit, :q     exit session\n");
+		printf("    !<n>          run history entry n\n\n");
+		printf("  note:\n");
+		printf("    multi-line input continues on unclosed blocks\n");
+		printf("    history is preserved in ~/.flint_history\n\n");
+	}
 }
 
-/*
- * Repl history. fgets gives no line editing, so this is not readline: it
- * is a record. Every executed entry is appended to ~/.flint_history when
- * that file can be written, and `:history` lists entries while `!N` runs
- * one again. Both degrade silently -- a repl that cannot write history is
- * still a repl, and saying so on every line would be worse than silence.
- */
 #define REPL_HISTORY_MAX 500
 
 typedef struct {
@@ -927,97 +912,159 @@ static char *read_stdin(void)
 	return buffer;
 }
 
-static void cli_section(FILE *stream, const char *title)
-{
-	if (cli_color(stream))
-		fprintf(stream, "\x1b[1;35m%s\x1b[0m\n", title);
-	else
-		fprintf(stream, "%s\n", title);
-}
-
 static void print_usage(FILE *stream)
 {
-	fprintf(stream, "Usage: flint [options] [script.fl] [args...]\n");
-	fprintf(stream, "\n");
-	fprintf(stream,
-	        "Run a script, read one from stdin, or start a repl.\n");
-	fprintf(stream,
-	        "Anything after the script path is passed to the script and\n");
-	fprintf(stream, "read back with args().\n");
-	fprintf(stream, "\n");
-	cli_section(stream, "Options:");
-	fprintf(stream, "\n");
-	fprintf(stream, "  -h, --help              show this help and exit\n");
-	fprintf(stream,
-	        "  -v, --version           show the version and exit\n");
-	fprintf(stream, "  -e <code>               execute code and exit\n");
-	fprintf(stream, "  -                       read a script from stdin\n");
-	fprintf(stream,
-	        "  sync                    update the installed standard "
-	        "library\n");
-	fprintf(stream,
-	        "  test                    run every *_test.fl under tests/\n");
-	fprintf(stream,
-	        "  fmt [--check] FILES     canonical layout for sources\n");
-	fprintf(stream, "  pkg install|add|update|list\n");
-	fprintf(stream,
-	        "  native LIB.so MOD [script]  load a C module, then run\n");
-	fprintf(stream,
-	        "  native-unload LIB.so MOD   ask a C module to unload\n");
-	fprintf(stream,
-	        "                         dependencies in flint.toml\n");
-	fprintf(stream,
-	        "  test --filter P         only tests whose name has P\n");
-	fprintf(stream, "\n");
-	cli_section(stream, "Diagnostics:");
-	fprintf(stream, "\n");
-	fprintf(stream, "  --error-format=human   excerpt, caret and label\n");
-	fprintf(stream, "  --error-format=short   one location line\n");
-	fprintf(stream, "  --error-format=json    one object per diagnostic\n");
-	fprintf(stream,
-	        "  --color=auto           color on a terminal. the default\n");
-	fprintf(stream, "  --color=always         color even when piped\n");
-	fprintf(stream, "  --color=never          never color\n");
-	fprintf(stream,
-	        "  --explain CODE         what a diagnostic code means\n");
-	fprintf(stream,
-	        "  --fix                  apply machine-applicable fixes\n");
-	fprintf(stream, "\n");
-	cli_section(stream, "Inspection:");
-	fprintf(stream, "\n");
-	fprintf(stream,
-	        "  --check                compile and verify, do not run\n");
-	fprintf(stream,
-	        "  --dump-bytecode        print the bytecode before running\n");
-	fprintf(stream,
-	        "  --profile              print runtime counters after "
-	        "the run\n");
-	fprintf(stream,
-	        "  --stats                print functions, bytecode bytes "
-	        "and\n");
-	fprintf(stream,
-	        "                         constants, then run as normal\n");
-	fprintf(stream, "  --trace                print every instruction\n");
-	fprintf(stream, "\n");
-	cli_section(stream, "Output:");
-	fprintf(stream, "\n");
-	fprintf(stream, "  --quiet                no repl prompt\n");
-	fprintf(stream,
-	        "  --warnings=default     errors, and warnings once there "
-	        "are any\n");
-	fprintf(stream, "  --warnings=none       errors only\n");
-	fprintf(stream,
-	        "  --warnings=all         everything the compiler can "
-	        "produce\n");
-	fprintf(stream, "\n");
-	fprintf(stream,
-	        "these work before or after the script path. Everything "
-	        "else\n");
-	fprintf(stream,
-	        "after it belongs to the script. Use -- to end flint's own\n");
-	fprintf(stream, "options:  flint t.fl -- --error-format is mine\n");
-	fprintf(stream, "\n");
-	fprintf(stream, "With no arguments, starts a repl.\n");
+	bool c = cli_color(stream);
+
+	if (c) {
+		fprintf(stream,
+		        "usage: \x1b[1;36mflint\x1b[0m "
+			"\x1b[33m[options]\x1b[0m \x1b[32m[script.fl]\x1b[0m "
+			"[args...]\n");
+		fprintf(stream,
+		        "       \x1b[1;36mflint\x1b[0m "
+			"\x1b[32m<command>\x1b[0m [args...]\n\n");
+
+		fprintf(stream, "\x1b[1mcommands:\x1b[0m\n");
+		fprintf(stream,
+		        "  \x1b[32mpkg\x1b[0m \x1b[33m<cmd>\x1b[0m             "
+			"manage dependencies (install, add, update, list)\n");
+		fprintf(stream,
+		        "  \x1b[32mfmt\x1b[0m \x1b[33m[--check] <files>\x1b[0m "
+			"  format source files canonically\n");
+		fprintf(stream,
+		        "  \x1b[32mtest\x1b[0m \x1b[33m[--filter <pat>]\x1b[0m "
+			"  run tests under tests/\n");
+		fprintf(stream,
+		        "  \x1b[32msync\x1b[0m \x1b[33m[options]\x1b[0m        "
+			"  sync installed standard library\n");
+		fprintf(stream,
+		        "  \x1b[32mnative-unload\x1b[0m \x1b[33m<lib> "
+			"<mod>\x1b[0m test clean dynamic module unload\n\n");
+
+		fprintf(stream, "\x1b[1moptions:\x1b[0m\n");
+		fprintf(stream,
+		        "  \x1b[33m-e <code>\x1b[0m                evaluate "
+			"inline code and exit\n");
+		fprintf(stream,
+		        "  \x1b[33m-\x1b[0m                        read script "
+			"from stdin\n");
+		fprintf(stream,
+		        "  \x1b[33m-h\x1b[0m, \x1b[33m--help\x1b[0m            "
+			"   show this help\n");
+		fprintf(stream,
+		        "  \x1b[33m-v\x1b[0m, \x1b[33m--version\x1b[0m         "
+			"   show version (use --verbose for details)\n");
+		fprintf(stream,
+		        "  \x1b[33m--quiet\x1b[0m                  suppress "
+			"repl banner\n\n");
+
+		fprintf(stream, "\x1b[1minspection:\x1b[0m\n");
+		fprintf(stream,
+		        "  \x1b[33m--check\x1b[0m                  parse and "
+			"verify without executing\n");
+		fprintf(stream,
+		        "  \x1b[33m--trace\x1b[0m                  trace "
+			"bytecode instructions\n");
+		fprintf(stream,
+		        "  \x1b[33m--dump-bytecode\x1b[0m          disassemble "
+			"bytecode before execution\n");
+		fprintf(stream,
+		        "  \x1b[33m--profile\x1b[0m                print "
+			"runtime performance counters\n");
+		fprintf(stream,
+		        "  \x1b[33m--stats\x1b[0m                  print "
+			"compiler and constant table statistics\n\n");
+
+		fprintf(stream, "\x1b[1mdiagnostics:\x1b[0m\n");
+		fprintf(stream,
+		        "  \x1b[33m--error-format=<fmt>\x1b[0m     human, "
+			"short, or json\n");
+		fprintf(stream,
+		        "  \x1b[33m--color=<when>\x1b[0m           auto, "
+			"always, or never\n");
+		fprintf(stream,
+		        "  \x1b[33m--warnings=<mode>\x1b[0m        default, "
+			"none, or all\n");
+		fprintf(stream,
+		        "  \x1b[33m--explain <code>\x1b[0m         explain a "
+			"diagnostic error code (e.g. E0001)\n");
+		fprintf(stream,
+		        "  \x1b[33m--fix\x1b[0m                    apply "
+			"machine-applicable compiler fixes\n\n");
+
+		fprintf(stream,
+		        "\x1b[90mrun without arguments to start the "
+			"interactive repl.\x1b[0m\n");
+	} else {
+		fprintf(stream,
+		        "usage: flint [options] [script.fl] [args...]\n");
+		fprintf(stream, "       flint <command> [args...]\n\n");
+
+		fprintf(stream, "commands:\n");
+		fprintf(stream,
+		        "  pkg <cmd>             manage dependencies (install, "
+			"add, update, list)\n");
+		fprintf(stream,
+		        "  fmt [--check] <files> format source files "
+			"canonically\n");
+		fprintf(stream,
+		        "  test [--filter <pat>] run tests under tests/\n");
+		fprintf(stream,
+		        "  sync [options]        sync installed standard "
+			"library\n");
+		fprintf(stream,
+		        "  native-unload <lib> <mod> test clean dynamic module "
+			"unload\n\n");
+
+		fprintf(stream, "options:\n");
+		fprintf(stream,
+		        "  -e <code>             evaluate inline code and "
+			"exit\n");
+		fprintf(stream,
+		        "  -                     read script from stdin\n");
+		fprintf(stream, "  -h, --help            show this help\n");
+		fprintf(stream,
+		        "  -v, --version         show version (use --verbose "
+			"for details)\n");
+		fprintf(stream,
+		        "  --quiet               suppress repl banner\n\n");
+
+		fprintf(stream, "inspection:\n");
+		fprintf(stream,
+		        "  --check               parse and verify without "
+			"executing\n");
+		fprintf(stream,
+		        "  --trace               trace bytecode "
+			"instructions\n");
+		fprintf(stream,
+		        "  --dump-bytecode       disassemble bytecode before "
+			"execution\n");
+		fprintf(stream,
+		        "  --profile             print runtime performance "
+			"counters\n");
+		fprintf(stream,
+		        "  --stats               print compiler and constant "
+			"table statistics\n\n");
+
+		fprintf(stream, "diagnostics:\n");
+		fprintf(stream,
+		        "  --error-format=<fmt>  human, short, or json\n");
+		fprintf(stream,
+		        "  --color=<when>        auto, always, or never\n");
+		fprintf(stream,
+		        "  --warnings=<mode>     default, none, or all\n");
+		fprintf(stream,
+		        "  --explain <code>      explain a diagnostic error "
+			"code (e.g. E0001)\n");
+		fprintf(stream,
+		        "  --fix                 apply machine-applicable "
+			"compiler fixes\n\n");
+
+		fprintf(stream,
+		        "run without arguments to start the interactive "
+			"repl.\n");
+	}
 }
 
 static int explain_code(const char *code)
@@ -1073,11 +1120,25 @@ static int explain_code(const char *code)
 	};
 	for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {
 		if (strcmp(code, entries[i].code) == 0) {
-			printf("%s: %s\n", entries[i].code, entries[i].text);
+			if (cli_color(stdout)) {
+				printf("\x1b[1;36m%s\x1b[0m: %s\n",
+				        entries[i].code,
+				        entries[i].text);
+			} else {
+				printf("%s: %s\n",
+				        entries[i].code,
+				        entries[i].text);
+			}
 			return 0;
 		}
 	}
-	fprintf(stderr, "unknown diagnostic code '%s'\n", code);
+	if (cli_color(stderr)) {
+		fprintf(stderr,
+		        "\x1b[31merror:\x1b[0m unknown diagnostic code '%s'\n",
+		        code);
+	} else {
+		fprintf(stderr, "error: unknown diagnostic code '%s'\n", code);
+	}
 	return 64;
 }
 
@@ -1129,47 +1190,69 @@ static const char *const sync_modules[] = {
 
 static void print_sync_usage(FILE *stream)
 {
-	fprintf(stream, "Usage: flint sync [options]\n");
-	fprintf(stream, "\n");
-	fprintf(stream,
-	        "Download the standard library and install it into the\n");
-	fprintf(stream, "directory `make install` uses.\n");
-	fprintf(stream, "\n");
-	cli_section(stream, "Options:");
-	fprintf(stream, "\n");
-	fprintf(stream,
-	        "  --dry-run        print what would be fetched, write "
-	        "nothing\n");
-	fprintf(stream,
-	        "  --ref=<ref>      git ref to take. default: %s\n",
-	        SYNC_DEFAULT_REF);
-	fprintf(stream,
-	        "  --url=<base>     base URL. default: %s\n",
-	        SYNC_DEFAULT_URL);
-	fprintf(stream, "  -h, --help       show this help and exit\n");
-	fprintf(stream, "\n");
-	fprintf(stream, "Environment:\n");
-	fprintf(stream, "\n");
-	fprintf(stream,
-	        "  FLINT_STDLIB      install here instead of "
-	        "$HOME/.flint/stdlib\n");
-	fprintf(stream, "  FLINT_STDLIB_URL  default for --url\n");
-	fprintf(stream, "  FLINT_STDLIB_REF  default for --ref\n");
-	fprintf(stream, "\n");
-	fprintf(stream,
-	        "Each file is compiled before it is installed, and one that\n");
-	fprintf(stream,
-	        "does not compile is left out. Exit status is 0 when every\n");
-	fprintf(stream, "module installed, 69 when any failed, 73 when the\n");
-	fprintf(stream, "directory could not be created.\n");
+	bool c = cli_color(stream);
+
+	if (c) {
+		fprintf(stream,
+		        "usage: \x1b[1;36mflint sync\x1b[0m "
+			"\x1b[33m[options]\x1b[0m\n\n");
+		fprintf(stream,
+		        "download standard library modules and install "
+			"locally.\n\n");
+
+		fprintf(stream, "\x1b[1moptions:\x1b[0m\n");
+		fprintf(stream,
+		        "  \x1b[33m--dry-run\x1b[0m            simulate fetch "
+			"without writing files\n");
+		fprintf(stream,
+		        "  \x1b[33m--ref=<ref>\x1b[0m          git ref or tag "
+			"(default: %s)\n",
+		        SYNC_DEFAULT_REF);
+		fprintf(stream,
+		        "  \x1b[33m--url=<base>\x1b[0m         base url "
+			"(default: github)\n");
+		fprintf(stream,
+		        "  \x1b[33m-h\x1b[0m, \x1b[33m--help\x1b[0m           "
+			"show this help\n\n");
+
+		fprintf(stream, "\x1b[1menvironment:\x1b[0m\n");
+		fprintf(stream,
+		        "  \x1b[32mFLINT_STDLIB\x1b[0m         override target "
+			"directory (~/.flint/stdlib)\n");
+		fprintf(stream,
+		        "  \x1b[32mFLINT_STDLIB_URL\x1b[0m     override "
+			"default base url\n");
+		fprintf(stream,
+		        "  \x1b[32mFLINT_STDLIB_REF\x1b[0m     override "
+			"default git ref\n");
+	} else {
+		fprintf(stream, "usage: flint sync [options]\n\n");
+		fprintf(stream,
+		        "download standard library modules and install "
+			"locally.\n\n");
+
+		fprintf(stream, "options:\n");
+		fprintf(stream,
+		        "  --dry-run        simulate fetch without writing "
+			"files\n");
+		fprintf(stream,
+		        "  --ref=<ref>      git ref or tag (default: %s)\n",
+		        SYNC_DEFAULT_REF);
+		fprintf(stream,
+		        "  --url=<base>     base url (default: %s)\n",
+		        SYNC_DEFAULT_URL);
+		fprintf(stream, "  -h, --help       show this help\n\n");
+
+		fprintf(stream, "environment:\n");
+		fprintf(stream,
+		        "  FLINT_STDLIB      override target directory\n");
+		fprintf(stream,
+		        "  FLINT_STDLIB_URL  override default base url\n");
+		fprintf(stream,
+		        "  FLINT_STDLIB_REF  override default git ref\n");
+	}
 }
 
-/*
- * Two files, byte for byte, without reading either into memory whole. A
- * stdlib module is a few kilobytes, but this is a general helper and a
- * general helper that mallocs a file size is a general helper that can fail
- * on a file size.
- */
 static bool files_are_identical(const char *a, const char *b)
 {
 	FILE *fa = fopen(a, "rb");
@@ -1270,6 +1353,136 @@ static void collect_tests(
 		(*count)++;
 	}
 	closedir(d);
+}
+
+/*
+ * Styled usage blocks, one per subcommand that was missing it. Same
+ * palette as the main help and print_sync_usage: bold section headers,
+ * cyan for the command itself, yellow for options, green for paths and
+ * names. Every block has a plain twin for pipes and --color=never, and
+ * every subcommand answers -h/--help with exit 0.
+ */
+static void print_fmt_usage(FILE *stream)
+{
+	bool c = cli_color(stream);
+
+	if (c) {
+		fprintf(stream,
+		        "usage: \x1b[1;36mflint fmt\x1b[0m "
+			"\x1b[33m[--check]\x1b[0m \x1b[32m<files>\x1b[0m\n\n");
+		fprintf(stream,
+		        "rewrite each file in canonical layout: 4-space\n");
+		fprintf(stream,
+		        "indentation, no trailing whitespace, a single\n");
+		fprintf(stream,
+		        "trailing newline. the contents of multiline\n");
+		fprintf(stream, "strings are left alone.\n\n");
+
+		fprintf(stream, "\x1b[1moptions:\x1b[0m\n");
+		fprintf(stream,
+		        "  \x1b[33m--check\x1b[0m              list files that "
+			"would change, rewrite nothing\n");
+		fprintf(stream,
+		        "  \x1b[33m-h\x1b[0m, \x1b[33m--help\x1b[0m            "
+			"   show this help\n");
+	} else {
+		fprintf(stream, "usage: flint fmt [--check] <files>\n\n");
+		fprintf(stream,
+		        "rewrite each file in canonical layout: 4-space\n");
+		fprintf(stream,
+		        "indentation, no trailing whitespace, a single\n");
+		fprintf(stream,
+		        "trailing newline. the contents of multiline\n");
+		fprintf(stream, "strings are left alone.\n\n");
+
+		fprintf(stream, "options:\n");
+		fprintf(stream,
+		        "  --check            list files that would change, "
+			"rewrite nothing\n");
+		fprintf(stream, "  -h, --help         show this help\n");
+	}
+}
+
+static void print_test_usage(FILE *stream)
+{
+	bool c = cli_color(stream);
+
+	if (c) {
+		fprintf(stream,
+		        "usage: \x1b[1;36mflint test\x1b[0m \x1b[33m[--filter "
+			"<pat>]\x1b[0m\n\n");
+		fprintf(stream,
+		        "run every *_test.fl under tests/, each in a fresh\n");
+		fprintf(stream,
+		        "VM so globals and imports cannot leak between\n");
+		fprintf(stream,
+		        "tests. a failing test prints what it ran.\n\n");
+
+		fprintf(stream, "\x1b[1moptions:\x1b[0m\n");
+		fprintf(stream,
+		        "  \x1b[33m--filter <pat>\x1b[0m      only tests whose "
+			"name has <pat>\n");
+		fprintf(stream,
+		        "  \x1b[33m-h\x1b[0m, \x1b[33m--help\x1b[0m            "
+			"   show this help\n");
+	} else {
+		fprintf(stream, "usage: flint test [--filter <pat>]\n\n");
+		fprintf(stream,
+		        "run every *_test.fl under tests/, each in a fresh\n");
+		fprintf(stream,
+		        "VM so globals and imports cannot leak between\n");
+		fprintf(stream,
+		        "tests. a failing test prints what it ran.\n\n");
+
+		fprintf(stream, "options:\n");
+		fprintf(stream,
+		        "  --filter <pat>     only tests whose name has "
+			"<pat>\n");
+		fprintf(stream, "  -h, --help         show this help\n");
+	}
+}
+
+static void print_native_unload_usage(FILE *stream)
+{
+	bool c = cli_color(stream);
+
+	if (c) {
+		fprintf(stream,
+		        "usage: \x1b[1;36mflint native-unload\x1b[0m "
+			"\x1b[32m<lib> <mod>\x1b[0m\n\n");
+		fprintf(stream,
+		        "load a compiled module, then immediately ask it to\n");
+		fprintf(stream,
+		        "shut down and unload. the answer is almost always\n");
+		fprintf(stream,
+		        "busy: exported functions stay callable for the "
+			"life\n");
+		fprintf(stream,
+		        "of the VM, so the library stays loaded. busy exits\n");
+		fprintf(stream,
+		        "0 -- it is the structured answer, not a failure.\n\n");
+
+		fprintf(stream, "\x1b[1moptions:\x1b[0m\n");
+		fprintf(stream,
+		        "  \x1b[33m-h\x1b[0m, \x1b[33m--help\x1b[0m            "
+			"   show this help\n");
+	} else {
+		fprintf(stream, "usage: flint native-unload <lib> <mod>\n\n");
+		fprintf(stream,
+		        "load a compiled module, then immediately ask it to\n");
+		fprintf(stream,
+		        "shut down and unload. the answer is almost always\n");
+		fprintf(stream,
+		        "busy: exported functions stay callable for the "
+			"life\n");
+		fprintf(stream,
+		        "of the VM, so the library stays loaded. busy exits\n");
+		fprintf(stream,
+		        "0 -- it is the structured answer, not a failure.\n\n");
+
+		fprintf(stream, "options:\n");
+		fprintf(stream, "  -h, --help         show this help\n");
+	}
 }
 
 static int run_test_suite(const char *filter)
@@ -1730,16 +1943,36 @@ int main(int argc, char *argv[])
 			return 0;
 		}
 		if (strcmp(flag, "-v") == 0 || strcmp(flag, "--version") == 0) {
-			printf("Flint %s\n", FLINT_VERSION);
-			if (arg + 1 < argc &&
-			        (strcmp(argv[arg + 1], "--verbose") == 0 ||
-			                strcmp(argv[arg + 1], "-v") == 0)) {
-				printf("  language version: 0.12.0\n");
-				printf("  runtime version: 0.12.0\n");
-				printf("  package format version: 0.12.0\n");
-				printf("  bytecode version: 0.12.0\n");
-				printf("  native ABI version: 1\n");
-				printf("  lockfile version: 0.12.0\n");
+			if (cli_color(stdout)) {
+				printf("\x1b[1;36mflint\x1b[0m "
+				       "\x1b[90m%s\x1b[0m\n",
+				        FLINT_VERSION);
+				if (arg + 1 < argc &&
+				        (strcmp(argv[arg + 1], "--verbose") ==
+				                        0 ||
+				                strcmp(argv[arg + 1], "-v") ==
+				                        0)) {
+					printf("  language:        0.13.1\n");
+					printf("  runtime:         0.13.1\n");
+					printf("  package format:  0.13.1\n");
+					printf("  bytecode:        0.13.1\n");
+					printf("  native abi:      1\n");
+					printf("  lockfile:        0.13.1\n");
+				}
+			} else {
+				printf("flint %s\n", FLINT_VERSION);
+				if (arg + 1 < argc &&
+				        (strcmp(argv[arg + 1], "--verbose") ==
+				                        0 ||
+				                strcmp(argv[arg + 1], "-v") ==
+				                        0)) {
+					printf("  language:        0.13.1\n");
+					printf("  runtime:         0.13.1\n");
+					printf("  package format:  0.13.1\n");
+					printf("  bytecode:        0.13.1\n");
+					printf("  native abi:      1\n");
+					printf("  lockfile:        0.13.1\n");
+				}
 			}
 			return 0;
 		}
@@ -1767,6 +2000,12 @@ int main(int argc, char *argv[])
 			 * already ate it wherever it appeared and set
 			 * check_only. for fmt that *is* the check mode:
 			 * `flint fmt --check f` lists without rewriting. */
+			if (arg + 1 < argc &&
+			        (strcmp(argv[arg + 1], "-h") == 0 ||
+			                strcmp(argv[arg + 1], "--help") == 0)) {
+				print_fmt_usage(stdout);
+				return 0;
+			}
 			return flint_fmt(argc, argv, arg + 1, check_only);
 		}
 		/*
@@ -1777,38 +2016,43 @@ int main(int argc, char *argv[])
 			return flint_pkg(argc, argv, arg + 1);
 		}
 		/*
-		 * `flint native <lib> <module>` -- load a compiled module and
-		 * make its functions callable for this run. A test and a
-		 * development tool rather than something a script depends on:
-		 * the loader keeps the library for the life of the process,
-		 * so nothing here claims unloading.
+		 * Native modules load through `import`, not through a
+		 * subcommand: `import foo` finds foo.so beside the script,
+		 * in flint_modules, or in the standard library, the way
+		 * Python finds extension modules on sys.path. The explicit
+		 * `flint native` loader was removed in 0.13.2; only
+		 * `native-unload` below keeps a CLI surface, because an
+		 * unload request has no import equivalent. the branch
+		 * below catches bare `native` so it reports the removal
+		 * instead of falling through to "could not open file".
 		 */
 		if (strcmp(flag, "native") == 0 && access(flag, F_OK) != 0) {
-			if (arg + 2 >= argc) {
+			bool c = cli_color(stderr);
+			if (c) {
 				fprintf(stderr,
-				        "flint native: needs a library path "
-				        "and a "
-				        "module name\n");
-				return 64;
+				        "\x1b[1mflint native\x1b[0m was "
+					"removed in 0.13.2: "
+				        "native modules load through "
+					"\x1b[1;36mimport\x1b[0m.\n");
+				fprintf(stderr,
+				        "write \x1b[32mimport mymod\x1b[0m "
+					"where mymod.so sits "
+				        "beside the script, in "
+					"\x1b[32mflint_modules/\x1b[0m, or in "
+				        "the standard library.\n");
+			} else {
+				fprintf(stderr,
+				        "flint native was removed in 0.13.2: "
+				        "native modules load through "
+					"import.\n");
+				fprintf(stderr,
+				        "write `import mymod` where mymod.so "
+					"sits "
+				        "beside the script, in flint_modules/, "
+					"or in "
+				        "the standard library.\n");
 			}
-			VM vm;
-			vm_init(&vm);
-			vm.quiet = quiet;
-			char error[512] = {0};
-			if (!fl_ext_load_native(&vm,
-			            argv[arg + 1],
-			            argv[arg + 2],
-			            error,
-			            sizeof(error))) {
-				fprintf(stderr, "flint native: %s\n", error);
-				vm_free(&vm);
-				return 65;
-			}
-			int code = 0;
-			if (arg + 3 < argc)
-				code = run_file(&vm, argv[arg + 3], &mode);
-			vm_free(&vm);
-			return code;
+			return 64;
 		}
 		/*
 		 * `flint native-unload <lib> <module>` -- load a compiled
@@ -1822,6 +2066,12 @@ int main(int argc, char *argv[])
 		 */
 		if (strcmp(flag, "native-unload") == 0 &&
 		        access(flag, F_OK) != 0) {
+			if (arg + 1 < argc &&
+			        (strcmp(argv[arg + 1], "-h") == 0 ||
+			                strcmp(argv[arg + 1], "--help") == 0)) {
+				print_native_unload_usage(stdout);
+				return 0;
+			}
 			if (arg + 2 >= argc) {
 				fprintf(stderr,
 				        "flint native-unload: needs a library "
@@ -1871,6 +2121,10 @@ int main(int argc, char *argv[])
 					}
 					filter = argv[i + 1];
 					i++;
+				} else if (strcmp(argv[i], "-h") == 0 ||
+				           strcmp(argv[i], "--help") == 0) {
+					print_test_usage(stdout);
+					return 0;
 				} else {
 					fprintf(stderr,
 					        "flint test: unknown option "
