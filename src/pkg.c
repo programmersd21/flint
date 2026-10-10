@@ -1907,14 +1907,19 @@ static bool pkg_resolve_git(const PkgDep *dep,
 {
 	*workdir = NULL;
 	if (!pkg_have_git()) {
+		/* one message per platform, chosen outside the call: a
+		 * preprocessor conditional inside a macro's argument list
+		 * is undefined behaviour, and clang says so. */
+#ifdef _WIN32
 		snprintf(error,
 		        error_size,
-#ifdef _WIN32
 		        "git dependencies need a POSIX system");
 #else
+		snprintf(error,
+		        error_size,
 		        "git is not installed -- git dependencies need it");
 #endif
-		return NULL;
+		return false;
 	}
 	char *mirror = pkg_mirror_dir(dep->git, dep->name);
 	if (mirror == NULL) {

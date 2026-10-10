@@ -39,11 +39,17 @@ typedef struct FlRetained {
 	struct FlRetained *next;
 } FlRetained;
 
-/* one trampoline's private state: which module, which function */
+/* one trampoline's private state: which module, which function.
+ * Registration-only code: on Windows the loader refuses up front, so
+ * nothing calls the trampoline and an uncalled static function is a
+ * -Werror failure. Kept beside the loader rather than deleted, because
+ * the Windows loader is the part that changes. */
+#ifndef _WIN32
 typedef struct {
 	FlModule *module;
 	FlNativeFn fn;
 } ExtBinding;
+#endif /* registration-only; the loader below is POSIX-only */
 
 /* a module's place in the lifecycle: loaded, quiescing after an unload
  * request, or unloaded (which only exists as a return value -- an
@@ -675,6 +681,7 @@ const char *fl_error_category(void)
 /* loading                                                                  */
 /* ---------------------------------------------------------------------- */
 
+#ifndef _WIN32
 /*
  * One trampoline serves every function of every module: it recovers which
  * function it is from the ObjNative it was reached through, whose private
@@ -740,6 +747,7 @@ static bool ext_register_one(
 	vm_define_native_with_data(vm, name, ext_trampoline, arity, binding);
 	return true;
 }
+#endif /* registration-only code; see ExtBinding above */
 
 bool fl_ext_load_native(VM *vm,
         const char *path,
