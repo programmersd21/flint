@@ -5,7 +5,6 @@ edition = "2021"
 description = "Safe Rust bindings over the Flint native C ABI"
 license = "MIT"
 repository = "https://github.com/programmersd21/flint"
-readme = "README.md"
 keywords = ["scripting", "embedding", "ffi"]
 categories = ["external-ffi-bindings"]
 build = "build.rs"
