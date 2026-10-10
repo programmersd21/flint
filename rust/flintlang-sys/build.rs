@@ -8,8 +8,9 @@
 // them through these bindings in CI.
 fn main() {
     let manifest = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let vendored =
-        std::path::Path::new(&manifest).join("c-api").join("flint.h");
+    let vendored = std::path::Path::new(&manifest)
+        .join("c-api")
+        .join("flint.h");
     assert!(
         vendored.exists(),
         "flintlang-sys: c-api/flint.h is missing from the package"

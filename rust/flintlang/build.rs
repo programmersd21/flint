@@ -80,9 +80,9 @@ fn main() {
         for inc in &includes {
             cmd.arg("-I").arg(inc);
         }
-        let status = cmd.status().unwrap_or_else(|e| {
-            panic!("flintlang: could not run C compiler '{cc}': {e}")
-        });
+        let status = cmd
+            .status()
+            .unwrap_or_else(|e| panic!("flintlang: could not run C compiler '{cc}': {e}"));
         assert!(
             status.success(),
             "flintlang: compiling {} failed",
@@ -97,10 +97,13 @@ fn main() {
     for obj in &objects {
         ar.arg(obj);
     }
-    let status = ar.status().unwrap_or_else(|e| {
-        panic!("flintlang: could not run archiver 'ar': {e}")
-    });
-    assert!(status.success(), "flintlang: archiving libflintlang.a failed");
+    let status = ar
+        .status()
+        .unwrap_or_else(|e| panic!("flintlang: could not run archiver 'ar': {e}"));
+    assert!(
+        status.success(),
+        "flintlang: archiving libflintlang.a failed"
+    );
 
     println!("cargo:rustc-link-search=native={}", out.display());
     println!("cargo:rustc-link-lib=static=flintlang");
@@ -111,9 +114,8 @@ fn main() {
 }
 
 fn collect_c(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = std::fs::read_dir(dir).unwrap_or_else(|e| {
-        panic!("flintlang: cannot read {}: {e}", dir.display())
-    });
+    let entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("flintlang: cannot read {}: {e}", dir.display()));
     for entry in entries {
         let path = entry.unwrap().path();
         if path.is_dir() {
