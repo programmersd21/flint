@@ -20,7 +20,7 @@
 #include <limits.h>
 #include <math.h>
 #ifndef _WIN32
-#include <poll.h>
+#	include <poll.h>
 #endif
 #include <signal.h>
 #include <stdio.h>
@@ -1507,8 +1507,8 @@ static Value process_run_native(VM *vm, int argc, Value *argv)
 	 * which error a call that cannot run returns. */
 	(void)argc;
 	(void)argv;
-	vm_runtime_error(vm,
-	        "process.run() needs a POSIX system in this release.");
+	vm_runtime_error(
+	        vm, "process.run() needs a POSIX system in this release.");
 	return NIL_VAL;
 #else
 	if (argc < 1 || argc > 2) {
