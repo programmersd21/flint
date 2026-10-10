@@ -3094,5 +3094,5 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 	        error,
 	        error_size,
 	        start,
-        success);
+	        success);
 }
