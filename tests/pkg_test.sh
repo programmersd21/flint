@@ -158,18 +158,28 @@ expect "git import works" "HEY zed" "$("$FLINT" use.fl 2>&1)"
 pin=$(sed -n '/^commit = /s/commit = "\(.*\)"/\1/p' flint.lock)
 expect "lock pins a 40-char commit" "40" "${#pin}"
 
-# A damaged mirror cache must heal instead of making every retry fail.
+# A damaged mirror is replaced in one install, without following symlinks.
 mirror=
 for candidate in "$HOME"/.flint/git/gitsrc-*; do
 	[ -d "$candidate" ] && { mirror=$candidate; break; }
 done
 expect "git mirror cache exists" "yes" "$([ -n "$mirror" ] && echo yes || echo no)"
+rm -rf flint_modules/shout
 rm -f "$mirror/HEAD" "$mirror/config"
 out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
-expect "damaged mirror install fails while clearing cache" "1" "$([ "$code" -ne 0 ] && echo 1 || echo 0)"
-out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
-expect "next install recovers the mirror" "0" "$code"
+expect "damaged mirror recovers in one install" "0" "$code"
 expect "recovered mirror still imports" "HEY zed" "$("$FLINT" use.fl 2>&1)"
+
+# A symlink at the cache path must be unlinked, never recursively followed.
+target="$WORK/mirror-target"
+mkdir -p "$target"
+echo "keep me" > "$target/marker"
+rm -rf flint_modules/shout "$mirror"
+ln -s "$target" "$mirror"
+out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
+expect "symlink mirror is safely replaced" "0" "$code"
+expect "symlink target data is preserved" "keep me" "$(cat "$target/marker")"
+expect "replacement mirror still imports" "HEY zed" "$("$FLINT" use.fl 2>&1)"
 
 cat > "$WORK/gitsrc/main.fl" <<'EOF'
 export fn loud(who) {
