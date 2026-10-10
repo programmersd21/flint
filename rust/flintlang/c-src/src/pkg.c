@@ -3075,6 +3075,14 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 				char *absolute = pkg_normalize_path(
 				        joined, nested[k].path);
 				free(nested[k].path);
+				if (absolute == NULL) {
+					nested[k].path = NULL;
+					pkg_free_deps(nested, nested_count);
+					free(nested);
+					snprintf(error, error_size, "out of memory");
+					*success = false;
+					return list;
+				}
 				nested[k].path = absolute;
 			}
 			list[count++] = nested[k];
