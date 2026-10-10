@@ -1,6 +1,6 @@
 [package]
 name = "flintlang-sys"
-version = "0.13.2"
+version = "0.14.0"
 edition = "2021"
 description = "Safe Rust bindings over the Flint native C ABI"
 license = "MIT"
