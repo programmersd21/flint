@@ -73,8 +73,16 @@ flint native <library.so> <module> [script.fl]
 
 loads a compiled module through the public C ABI and makes its functions
 callable for the run. posix only; a windows build refuses with a message.
-the loaded library is never unloaded -- see
-[native-abi.md](native-abi.md).
+see [native-abi.md](native-abi.md) for the contract.
+
+```sh
+flint native-unload <library.so> <module>
+```
+
+asks a loaded module to shut down and unload. the answer is almost always
+busy -- exported functions stay callable for the life of the VM -- and
+busy names what holds the library. busy exits 0: it is the structured
+answer, not a failure.
 
 | exit | meaning |
 |---|---|

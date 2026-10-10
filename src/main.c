@@ -941,6 +941,8 @@ static void print_usage(FILE *stream)
 	fprintf(stream,
 	        "  native LIB.so MOD [script]  load a C module, then run\n");
 	fprintf(stream,
+	        "  native-unload LIB.so MOD   ask a C module to unload\n");
+	fprintf(stream,
 	        "                         dependencies in flint.toml\n");
 	fprintf(stream,
 	        "  test --filter P         only tests whose name has P\n");
@@ -1785,6 +1787,55 @@ int main(int argc, char *argv[])
 				code = run_file(&vm, argv[arg + 3], &mode);
 			vm_free(&vm);
 			return code;
+		}
+		/*
+		 * `flint native-unload <lib> <module>` -- load a compiled
+		 * module, then immediately ask it to shut down and unload.
+		 * The answer is almost always busy: exported functions stay
+		 * callable for the life of the VM, so the library stays
+		 * loaded. A busy answer names what holds it, and the exit
+		 * status stays 0 -- busy is the structured answer, not a
+		 * failure. Only a load error, or a path this process never
+		 * loaded, fails.
+		 */
+		if (strcmp(flag, "native-unload") == 0 &&
+		        access(flag, F_OK) != 0) {
+			if (arg + 2 >= argc) {
+				fprintf(stderr,
+				        "flint native-unload: needs a library "
+				        "path and a module name\n");
+				return 64;
+			}
+			VM vm;
+			vm_init(&vm);
+			vm.quiet = quiet;
+			char error[512] = {0};
+			if (!fl_ext_load_native(&vm,
+			            argv[arg + 1],
+			            argv[arg + 2],
+			            error,
+			            sizeof(error))) {
+				fprintf(stderr,
+				        "flint native-unload: %s\n",
+				        error);
+				vm_free(&vm);
+				return 65;
+			}
+			int verdict = fl_ext_request_unload(
+			        &vm, argv[arg + 1], error, sizeof(error));
+			if (verdict == 0)
+				printf("unloaded %s\n", argv[arg + 2]);
+			else if (verdict == 1)
+				printf("busy: %s\n", error);
+			else {
+				fprintf(stderr,
+				        "flint native-unload: %s\n",
+				        error);
+				vm_free(&vm);
+				return 65;
+			}
+			vm_free(&vm);
+			return 0;
 		}
 		if (strcmp(flag, "test") == 0 && access(flag, F_OK) != 0) {
 			const char *filter = NULL;

@@ -45,6 +45,25 @@ typedef struct {
 	FlNativeFn fn;
 } ExtBinding;
 
+/* a module's place in the lifecycle: loaded, quiescing after an unload
+ * request, or unloaded (which only exists as a return value -- an
+ * unloaded record is removed, not kept). */
+#define FL_EXT_LOADED    0
+#define FL_EXT_QUIESCING 1
+
+/* every library this process loaded, so an unload request can find it.
+ * process-wide because dlopen is: two VMs loading one path share the
+ * library, and unloading under one VM would pull it from under the
+ * other. */
+typedef struct ExtLoaded {
+	char path[1024];
+	void *lib;
+	FlModule *module;
+	struct ExtLoaded *next;
+} ExtLoaded;
+
+static ExtLoaded *ext_loaded;
+
 #define FL_EXT_MAX_ARGS 16
 
 struct FlModule {
@@ -52,6 +71,12 @@ struct FlModule {
 	char name[256];
 	FlRetained *retained;
 	size_t retained_count;
+	/* calls currently inside this module's functions. unloading with
+	 * one in flight would return while its code is on the C stack. */
+	int active_calls;
+	/* FL_EXT_LOADED until fl_ext_request_unload asks; then quiescing,
+	 * which refuses new calls at the trampoline. */
+	int state;
 	/* set once init returns; registration after that is an error */
 	bool init_done;
 	/* the exported functions, for the export table at import time */
@@ -666,6 +691,15 @@ static Value ext_trampoline(VM *vm, int argc, Value *argv)
 	ExtBinding *binding = (ExtBinding *)callee->user_data;
 	if (binding->fn == NULL)
 		return NIL_VAL;
+	if (binding->module != NULL &&
+	        binding->module->state == FL_EXT_QUIESCING) {
+		/* an unload was requested: no new work enters. the calls
+		 * already inside finish normally, which is what lets the
+		 * reference check below ever pass. */
+		fl_raise(binding->module,
+		        "module is shutting down; no new calls accepted");
+		return NIL_VAL;
+	}
 
 	int count = argc;
 	if (count > FL_EXT_MAX_ARGS)
@@ -678,7 +712,11 @@ static Value ext_trampoline(VM *vm, int argc, Value *argv)
 	for (int i = 0; i < count; i++)
 		args[i] = handle_of(argv[i]);
 
+	if (binding->module != NULL)
+		binding->module->active_calls++;
 	FlValue result = binding->fn(binding->module, argc, args);
+	if (binding->module != NULL)
+		binding->module->active_calls--;
 	if (vm->has_pending || vm->pending_catch)
 		/* the extension raised; whatever it returned is not a value */
 		return NIL_VAL;
@@ -728,6 +766,8 @@ bool fl_ext_load_native(VM *vm,
 	typedef int (*FlInitFn)(FlModule *, uint32_t);
 	FlInitFn init = (FlInitFn)(uintptr_t)dlsym(handle, FL_MODULE_FUNC);
 	if (init == NULL) {
+		/* entered nothing, registered nothing: safe to close. */
+		dlclose(handle);
 		snprintf(error,
 		        error_size,
 		        "'%s' is not a flint module: no " FL_MODULE_FUNC
@@ -738,10 +778,12 @@ bool fl_ext_load_native(VM *vm,
 
 	FlModule *module = calloc(1, sizeof(FlModule));
 	if (module == NULL) {
+		dlclose(handle);
 		snprintf(error, error_size, "out of memory");
 		return false;
 	}
 	module->vm = vm;
+	module->state = FL_EXT_LOADED;
 	fl_module_name(module, module_name);
 
 	/* the vtable has to be in place before init runs: the very first call
@@ -749,6 +791,9 @@ bool fl_ext_load_native(VM *vm,
 	fl_ext_install_api();
 
 	if (init(module, FL_ABI_VERSION) != FL_INIT_OK) {
+		/* nothing registered yet, so closing is safe: no flint code
+		 * can reach into this library. */
+		dlclose(handle);
 		free(module);
 		snprintf(error,
 		        error_size,
@@ -767,7 +812,9 @@ bool fl_ext_load_native(VM *vm,
 			/* partial registration is rolled back by not being
 			 * rolled back: the functions already defined are
 			 * harmless without the module being reachable, and
-			 * the loader reports the failure. */
+			 * the loader reports the failure. the library stays
+			 * open for the same reason a loaded one does -- those
+			 * functions are callable now. */
 			snprintf(error,
 			        error_size,
 			        "module '%s' registered too many functions",
@@ -776,12 +823,24 @@ bool fl_ext_load_native(VM *vm,
 		}
 	}
 	if (module->func_count == 0) {
+		dlclose(handle);
+		free(module);
 		snprintf(error,
 		        error_size,
 		        "module '%s' exported no functions",
 		        module_name);
 		return false;
 	}
+	ExtLoaded *record = calloc(1, sizeof(ExtLoaded));
+	if (record == NULL) {
+		snprintf(error, error_size, "out of memory");
+		return false;
+	}
+	snprintf(record->path, sizeof(record->path), "%s", path);
+	record->lib = handle;
+	record->module = module;
+	record->next = ext_loaded;
+	ext_loaded = record;
 	return true;
 #else
 	(void)vm;
@@ -791,5 +850,84 @@ bool fl_ext_load_native(VM *vm,
 	        error_size,
 	        "native modules need a POSIX system; this build is windows");
 	return false;
+#endif
+}
+
+/*
+ * Ask a loaded module to shut down and unload. See ext.h for the
+ * contract; here is the mechanism.
+ *
+ * The check order is the point. Active calls first: unloading with one in
+ * flight returns while its code is on the C stack, which no later check
+ * can undo. Retained handles next: the collector roots them, so the value
+ * survives, but the code that interprets a retained function handle does
+ * not. Registered functions last, and this is the one that never passes:
+ * registration put ObjNatives into the VM's globals, reachable for as long
+ * as the VM lives, so there is always a route to the library's code.
+ *
+ * That makes physical unloading unreachable today, and the code below says
+ * so rather than deleting the path: the day deregistration exists, the
+ * reference check is already in the right order. Until then every request
+ * answers busy, the library stays open, and nothing is force-closed.
+ */
+int fl_ext_request_unload(
+        VM *vm, const char *path, char *error, size_t error_size)
+{
+	(void)vm;
+#ifndef _WIN32
+	ExtLoaded *record = ext_loaded;
+	while (record != NULL && strcmp(record->path, path) != 0)
+		record = record->next;
+	if (record == NULL) {
+		snprintf(error,
+		        error_size,
+		        "'%s' is not a native module this process loaded",
+		        path);
+		return -1;
+	}
+	FlModule *module = record->module;
+	module->state = FL_EXT_QUIESCING;
+	if (module->active_calls > 0) {
+		snprintf(error,
+		        error_size,
+		        "module '%s' is busy: %d call(s) still inside it",
+		        module->name,
+		        module->active_calls);
+		return 1;
+	}
+	if (module->retained_count > 0) {
+		snprintf(error,
+		        error_size,
+		        "module '%s' is busy: %lu retained handle(s) "
+		        "outstanding -- release them and ask again",
+		        module->name,
+		        (unsigned long)module->retained_count);
+		return 1;
+	}
+	if (module->func_count > 0) {
+		snprintf(error,
+		        error_size,
+		        "module '%s' is busy: %d exported function(s) stay "
+		        "callable for the life of the VM, so the library "
+		        "stays loaded until process exit",
+		        module->name,
+		        module->func_count);
+		return 1;
+	}
+	dlclose(record->lib);
+	ExtLoaded **link = &ext_loaded;
+	while (*link != NULL && *link != record)
+		link = &(*link)->next;
+	if (*link != NULL)
+		*link = record->next;
+	free(module);
+	free(record);
+	return 0;
+#else
+	(void)path;
+	snprintf(error,
+	        error_size,
+	        "native modules need a POSIX system; this build is windows");
+	return -1;
 #endif
 }

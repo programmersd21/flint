@@ -127,11 +127,40 @@ a windows build refuses with a message rather than pretending to support
 it; the loader is behind a platform seam so a second implementation is an
 addition, not a rewrite.
 
-**a loaded library is never unloaded.** its functions stay callable for the
-life of the VM and a value it produced can outlive the call that made it,
-so unloading would be a use-after-free waiting for the collector. the cost
-is one handle per library per process, bounded by the number of modules a
-script imports -- a number the program decides, not the input.
+## unloading
+
+```
+flint native-unload libmymod.so mymod
+```
+
+an unload request moves the module to quiescing -- calls already inside
+finish, new calls are refused with a runtime error -- and then checks
+every route to native code, in the order that matters: active calls
+first, retained handles next, registered functions last. the library is
+closed only when nothing references it; otherwise it stays loaded and
+the answer names what holds it:
+
+```
+busy: module 'mymod' is busy: 1 retained handle(s) outstanding -- release them and ask again
+```
+
+busy is the structured answer, not a failure, so the exit status stays 0.
+release the references and ask again.
+
+in practice the answer is always busy today, and the document says so
+rather than letting you discover it: registration puts the module's
+functions into the VM's globals, reachable for as long as the VM lives,
+so there is always a route to the library's code. physical unloading
+waits on deregistration, which does not exist yet; until then the
+lifecycle -- loaded, quiescing, busy -- is explicit instead of implicit,
+and nothing is ever force-closed. a failed load, by contrast, closes
+what it opened: a library whose entry point is missing or whose init
+fails is `dlclose`d before the error is reported, because nothing
+registered can reach into it.
+
+for untrusted or non-cooperating extensions, run them in a separate
+process rather than loading them in-process. this ABI is not a sandbox:
+a module runs with the host process's privileges.
 
 ## what this is not
 

@@ -53,7 +53,7 @@ expect_contains() {
 CC=${CC:-cc}
 CFLAGS="-std=c11 -Wall -Wextra -Werror -fPIC -shared -I$REPO/include"
 
-for name in hello_native bad_version no_symbol; do
+for name in hello_native bad_version no_symbol lifecycle; do
 	# shellcheck disable=SC2086
 	$CC $CFLAGS -o "$WORK/$name.so" "$REPO/tests/native/$name.c"
 done
@@ -173,6 +173,39 @@ TFL
 		echo "native abi tests: tui module did not build, skipping"
 	fi
 fi
+
+# --- the unload lifecycle: request, quiesce, busy -----------------------
+# a module that retains a handle at init cannot be unloaded: the request
+# must name the retained handle and leave the library loaded. busy is the
+# structured answer, so the exit status stays 0.
+out=$("$FLINT" native-unload "$WORK/lifecycle.so" lifecycle 2>&1) \
+	&& status=0 || status=$?
+expect_eq "an unload request against a retained handle succeeds as a request" 0 "$status"
+expect_contains "and the answer is busy" "busy:" "$out"
+expect_contains "naming the retained handle" "retained handle" "$out"
+
+# a module with no retained handles is still busy: its exported functions
+# stay callable through the VM's globals for as long as the VM lives, so
+# there is always a route to the library's code.
+out=$("$FLINT" native-unload "$WORK/hello_native.so" hello_demo 2>&1) \
+	&& status=0 || status=$?
+expect_eq "an unload request against exported functions succeeds as a request" 0 "$status"
+expect_contains "and the answer is busy" "busy:" "$out"
+expect_contains "naming the exported functions" "exported function" "$out"
+
+# the library is still loaded after a busy answer: its functions run.
+cat > "$WORK/stillhere.fl" <<'EOF'
+print(ping())
+EOF
+out=$("$FLINT" native "$WORK/lifecycle.so" lifecycle "$WORK/stillhere.fl" 2>&1) \
+	&& status=0 || status=$?
+expect_eq "a busy module still runs" 0 "$status"
+expect_contains "because nothing was force-closed" "true" "$out"
+
+# a path that cannot load fails before any unload is requested.
+out=$("$FLINT" native-unload "$WORK/nope.so" demo 2>&1) && status=0 || status=$?
+expect_eq "an unload of a missing library fails" 1 "$([ $status -ne 0 ] && echo 1 || echo 0)"
+expect_contains "and says it cannot load" "cannot load" "$out"
 
 if [ "$failed" -ne 0 ]; then
 	echo "native abi tests: $checks checks, $failed failures"

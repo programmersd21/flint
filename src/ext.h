@@ -30,4 +30,25 @@ bool fl_ext_load_native(VM *vm,
         char *error,
         size_t error_size);
 
+/*
+ * Ask a loaded module to shut down and unload.
+ *
+ * The request moves the module to quiescing: already-running calls finish,
+ * new calls are refused with a runtime error. Then every route to native
+ * code is checked -- active calls, retained handles, and registered
+ * functions, which stay callable through the VM's globals for as long as
+ * the VM lives. Unloading happens only when nothing references the
+ * library; otherwise the module stays loaded and the reason is written
+ * to error.
+ *
+ * Returns 0 when the library was actually closed, 1 when it is busy and
+ * stays loaded, and -1 when the path is not a module this process loaded.
+ * A 1 is a structured answer, not a failure: release the references and
+ * ask again.
+ */
+int fl_ext_request_unload(VM *vm,
+        const char *path,
+        char *error,
+        size_t error_size);
+
 #endif /* FL_EXT_H */
