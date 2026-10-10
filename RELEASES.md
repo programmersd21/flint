@@ -11,6 +11,12 @@ Package and dependency handling get a reliability pass.
   `main.fl` package entry point and flat-module layout.
 - Document the supported package layouts and import lookup behavior.
 
+### Package manifest entry points
+
+- Add optional `[package] lib = "src/api.fl"` to declare the public module
+  for a package. The path is relative to the package root and must stay inside
+  that root; legacy entry-point layouts remain available when `lib` is absent.
+
 ### Package installation
 
 - Clone Git dependencies into a staging directory before publishing a
@@ -33,7 +39,7 @@ Package and dependency handling get a reliability pass.
 - Identify HTTP requests with the `flint/0.14.0` User-Agent by default.
 - Keep the standalone C runtime and the Rust-embedded C source in sync.
 
-Release gate: this changelog is a draft until PRs #10, #11, and #13 are
+Release gate: this changelog is a draft until PRs #10, #11, #13, and #14 are
 merged and the final release checks pass. Do not publish a `v0.14.0`
 tag or artifacts before then.
 
