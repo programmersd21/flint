@@ -1312,33 +1312,63 @@ static void pkg_usage(FILE *stream)
 	bool c = isatty(fileno(stream));
 
 	if (c) {
-		fprintf(stream, "usage: \x1b[1;36mflint pkg\x1b[0m \x1b[32m<command>\x1b[0m \x1b[33m[options]\x1b[0m\n\n");
-		fprintf(stream, "manage dependencies declared in flint.toml.\n\n");
+		fprintf(stream,
+		        "usage: \x1b[1;36mflint pkg\x1b[0m "
+			"\x1b[32m<command>\x1b[0m "
+			"\x1b[33m[options]\x1b[0m\n\n");
+		fprintf(stream,
+		        "manage dependencies declared in flint.toml.\n\n");
 
 		fprintf(stream, "\x1b[1mcommands:\x1b[0m\n");
-		fprintf(stream, "  \x1b[32minstall\x1b[0m            resolve manifest dependencies into flint_modules/\n");
-		fprintf(stream, "  \x1b[32madd\x1b[0m \x1b[33m<path|url>\x1b[0m     add dependency to flint.toml and install\n");
-		fprintf(stream, "  \x1b[32mupdate\x1b[0m \x1b[33m[name]\x1b[0m      re-resolve git pins and reinstall\n");
-		fprintf(stream, "  \x1b[32mlist\x1b[0m               list installed packages from flint.lock\n\n");
+		fprintf(stream,
+		        "  \x1b[32minstall\x1b[0m            resolve manifest "
+			"dependencies into flint_modules/\n");
+		fprintf(stream,
+		        "  \x1b[32madd\x1b[0m \x1b[33m<path|url>\x1b[0m     "
+			"add dependency to flint.toml and install\n");
+		fprintf(stream,
+		        "  \x1b[32mupdate\x1b[0m \x1b[33m[name]\x1b[0m      "
+			"re-resolve git pins and reinstall\n");
+		fprintf(stream,
+		        "  \x1b[32mlist\x1b[0m               list installed "
+			"packages from flint.lock\n\n");
 
-		fprintf(stream, "\x1b[1mmanifest format (flint.toml):\x1b[0m\n");
+		fprintf(stream,
+		        "\x1b[1mmanifest format (flint.toml):\x1b[0m\n");
 		fprintf(stream, "  name = \"../path\"\n");
-		fprintf(stream, "  name = { path = \"../path\", version = \"^1.0.0\" }\n");
-		fprintf(stream, "  name = { git = \"https://...\", rev = \"v1.0.0\" }\n");
+		fprintf(stream,
+		        "  name = { path = \"../path\", version = \"^1.0.0\" "
+			"}\n");
+		fprintf(stream,
+		        "  name = { git = \"https://...\", rev = \"v1.0.0\" "
+			"}\n");
 	} else {
 		fprintf(stream, "usage: flint pkg <command> [options]\n\n");
-		fprintf(stream, "manage dependencies declared in flint.toml.\n\n");
+		fprintf(stream,
+		        "manage dependencies declared in flint.toml.\n\n");
 
 		fprintf(stream, "commands:\n");
-		fprintf(stream, "  install           resolve manifest dependencies into flint_modules/\n");
-		fprintf(stream, "  add <path|url>    add dependency to flint.toml and install\n");
-		fprintf(stream, "  update [name]     re-resolve git pins and reinstall\n");
-		fprintf(stream, "  list              list installed packages from flint.lock\n\n");
+		fprintf(stream,
+		        "  install           resolve manifest dependencies "
+			"into flint_modules/\n");
+		fprintf(stream,
+		        "  add <path|url>    add dependency to flint.toml and "
+			"install\n");
+		fprintf(stream,
+		        "  update [name]     re-resolve git pins and "
+			"reinstall\n");
+		fprintf(stream,
+		        "  list              list installed packages from "
+			"flint.lock\n\n");
 
 		fprintf(stream, "manifest format (flint.toml):\n");
 		fprintf(stream, "  name = \"../path\"\n");
-		fprintf(stream, "  name = { path = \"../path\", version = \"^1.0.0\" }\n");
-		fprintf(stream, "  name = { git = \"https://...\", rev = \"v1.0.0\" }\n");
+		fprintf(stream,
+		        "  name = { path = \"../path\", version = \"^1.0.0\" "
+			"}\n");
+		fprintf(stream,
+		        "  name = { git = \"https://...\", rev = \"v1.0.0\" "
+			"}\n");
 	}
 }
 
