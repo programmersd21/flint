@@ -3103,17 +3103,28 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 				 * it, and "." must not contribute a
 				 * component or the lockfile carries a
 				 * spelling nobody wrote. */
+				int joined_len;
 				if (strcmp(base_dir, ".") == 0)
-					snprintf(joined,
+					joined_len = snprintf(joined,
 					        sizeof(joined),
 					        "%s",
 					        list[i].path);
 				else
-					snprintf(joined,
+					joined_len = snprintf(joined,
 					        sizeof(joined),
 					        "%s/%s",
 					        base_dir,
 					        list[i].path);
+				if (joined_len < 0 ||
+				        (size_t)joined_len >= sizeof(joined)) {
+					pkg_free_deps(nested, nested_count);
+					free(nested);
+					snprintf(error,
+					        error_size,
+					        "dependency path is too long");
+					*success = false;
+					return list;
+				}
 				char *absolute = pkg_normalize_path(
 				        joined, nested[k].path);
 				free(nested[k].path);
