@@ -2,18 +2,40 @@
 
 ## v0.14.0
 
-- Package imports support package-named single-file modules such as
-  `flint_modules/levenshtein/levenshtein.fl`, in addition to `main.fl`
-  and flat-module layouts.
-- Failed Git mirror clones clean up incomplete cache directories so a
-  subsequent package install can recover.
-- Document package import resolution and keep the standalone C runtime
-  and Rust-embedded C source synchronized.
-- Clean up dependency expansion on errors and stop cyclic path dependencies
-  at the depth limit.
+Package and dependency handling get a reliability pass.
 
-This is release preparation. Do not publish a `v0.14.0` tag or artifacts
-until PRs #10, #11, and #13 are merged and the release checks pass.
+### Package imports
+
+- Resolve package-named single-file modules such as
+  `flint_modules/levenshtein/levenshtein.fl`, alongside the existing
+  `main.fl` package entry point and flat-module layout.
+- Document the supported package layouts and import lookup behavior.
+
+### Package installation
+
+- Clone Git dependencies into a staging directory before publishing a
+  mirror, so interrupted or incomplete clones do not become the active
+  cache.
+- Serialize operations on a shared Git mirror and avoid following
+  symlinks during cache cleanup.
+- Recover from damaged or incomplete mirrors on a subsequent install.
+- Keep dependency arrays valid when expansion fails, clean up partial
+  dependency state, reject overlong paths, and bound cyclic dependency
+  resolution with a clear error.
+
+### Release and compatibility notes
+
+- Update the Rust `flintlang` and `flintlang-sys` crate metadata and
+  examples to version `0.14.0`.
+- Report language, runtime, package format, bytecode, and lockfile
+  versions as `0.14.0`. The native ABI remains version `1`; it is
+  versioned independently.
+- Identify HTTP requests with the `flint/0.14.0` User-Agent by default.
+- Keep the standalone C runtime and the Rust-embedded C source in sync.
+
+Release gate: this changelog is a draft until PRs #10, #11, and #13 are
+merged and the final release checks pass. Do not publish a `v0.14.0`
+tag or artifacts before then.
 
 ## v0.13.2
 
