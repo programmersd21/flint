@@ -118,14 +118,24 @@ registered late could be called before it exists.
 
 ## loading
 
+```flint
+import mymod
 ```
-flint native libmymod.so mymod run.fl
-```
+
+no subcommand: a bare library name resolves to `mymod.so` (or `.dylib`,
+or `.dll`) beside the importing script, in `flint_modules/`, or in the
+standard library -- source first, so a `.fl` always shadows a stale
+shared object. an explicit path loads directly: `import "./mymod.so"`
+and absolute paths skip the search. the module name handed to
+`flint_module_init` is the basename minus its suffix. like Python's
+extension modules on `sys.path`, the file must be named after the
+module, and the single fixed entry point needs no per-name mangling.
 
 Linux and the other POSIX systems, via `dlopen(RTLD_NOW | RTLD_LOCAL)`.
 a windows build refuses with a message rather than pretending to support
 it; the loader is behind a platform seam so a second implementation is an
-addition, not a rewrite.
+addition, not a rewrite. the old `flint native` explicit loader was
+removed in 0.13.2; only `native-unload` keeps a CLI surface.
 
 ## unloading
 

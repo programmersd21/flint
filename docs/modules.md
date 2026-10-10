@@ -113,14 +113,23 @@ search order is:
 A quoted path is a file, with one exception: a name with no slash and no
 `.fl` extension is a library name and resolves to the standard library, the
 same as a bare name. In practice that means quoted imports always carry
-their extension. Relative paths resolve against the **importing
-file's** directory, not the process working directory, so a script run from
-anywhere works. With `-e` or stdin there is no source file, so a relative
+their extension. A path ending in `.so`, `.dylib`, or `.dll` loads as a
+native module instead of compiling as source. Relative paths resolve
+against the **importing file's** directory, not the process working
+directory, so a script run from anywhere works. With `-e` or stdin
+there is no source file, so a relative
 path uses the working directory.
 
 There is no search path for quoted imports and no symlink canonicalisation.
 Two spellings of one file load it twice, which is also why a module that has
 already loaded is cheap to import again: the cache is keyed by resolved path.
+
+A bare name that finds no `.fl` falls further: first a sibling `.fl`
+beside the importing file (which the rules above never try for bare
+names), then a native shared object -- `<name>.so`, `.dylib`, or `.dll`
+beside the script, in `flint_modules/`, or in the standard library.
+Source always wins, in either directory: a stale `.so` never shadows
+edited source. See [native-abi.md](native-abi.md) for the native side.
 
 Keeping the standard library current is `flint sync`: it downloads the
 modules from the project's github and installs them into `~/.flint/stdlib`,

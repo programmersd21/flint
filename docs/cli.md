@@ -53,11 +53,14 @@ assert(parse("a b") == ["a", "b"], "split on a single space")
 the name of a test file is its description, so it should read as one:
 `collections_sort_test.fl` rather than `test3.fl`.
 
+`flint test -h` prints the same summary in the styled usage block.
+
 ## fmt
 
 ```sh
 flint fmt program.fl
 flint fmt [--check] a.fl b.fl
+flint fmt -h
 ```
 
 rewrites each file in canonical layout: 4-space indentation, no trailing
@@ -68,15 +71,22 @@ when any would, rewriting nothing: the shape CI wants.
 ## native
 
 ```sh
-flint native <library.so> <module> [script.fl]
+import mymod
 ```
 
-loads a compiled module through the public C ABI and makes its functions
-callable for the run. posix only; a windows build refuses with a message.
-see [native-abi.md](native-abi.md) for the contract.
+native modules load through `import`, with no subcommand involved: a
+bare library name resolves to `mymod.so` (or `.dylib`, or `.dll`) beside
+the importing script, in `flint_modules/`, or in the standard library --
+source first, so a `.fl` always shadows a stale shared object. an
+explicit path works too: `import "./mymod.so"` and absolute paths load
+directly. the module's registered functions arrive as a table under the
+imported name, exactly like a source module's exports. posix only; a
+windows build refuses with a message. see [native-abi.md](native-abi.md)
+for the contract.
 
 ```sh
 flint native-unload <library.so> <module>
+flint native-unload -h
 ```
 
 asks a loaded module to shut down and unload. the answer is almost always
