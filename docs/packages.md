@@ -81,29 +81,39 @@ installs; the next install records the hashes. `pkg list` output is
 unchanged.
 
 Each dependency lands in `flint_modules/<name>/` with its sources and
-its own `flint.toml`:
+its own `flint.toml`. A package can expose its default module as
+`main.fl`, as a same-named file such as `levenshtein/levenshtein.fl`,
+or as a flat `flint_modules/<name>.fl` file.
 
 ```text
 flint_modules/
   libfoo/
     flint.toml
-    foo.fl
+    main.fl
+  levenshtein/
+    flint.toml
+    levenshtein.fl
 ```
 
 ## imports and resolution
 
 ```flint
-import "libfoo/foo.fl"
-print(foo.hello())
+import libfoo
+print(libfoo.hello())
+
+import levenshtein
+print(levenshtein.distance("kitten", "sitting"))
 
 import "gitlib/g.fl"
 print(g.greet())
 ```
 
-A quoted path with a `/` or a `.fl` extension is a file: relative to the
-importing file, except `flint_modules/` is also searched, and packages
-resolve before the standard library. A bare name (`import math`) is the
-standard library.
+A bare name first checks installed packages in `flint_modules/`:
+`<name>/main.fl`, then `<name>/<name>.fl`, then the flat
+`<name>.fl` layout. If no package matches, the standard library is
+checked (so `import math` still imports the library). A quoted path with
+a `/` or a `.fl` extension can address a file relative to the importing
+file; package-internal paths are also resolved from `flint_modules/`.
 
 ## transitive dependencies
 

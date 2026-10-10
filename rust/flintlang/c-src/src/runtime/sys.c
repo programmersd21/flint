@@ -482,6 +482,21 @@ char *sys_resolve_module(const char *path)
 						        main_file);
 						free(main_file);
 					}
+					/*
+					 * Also support a single-file package named after
+					 * itself, e.g. levenshtein/levenshtein.fl.
+					 */
+					if (found == NULL) {
+						size_t need_named = strlen(dir_main) + 1 +
+						        pathlen + 3 + 1;
+						char *named = malloc(need_named);
+						if (named != NULL) {
+							snprintf(named, need_named, "%s/%s.fl",
+							        dir_main, path);
+							found = pkg_candidate(named);
+							free(named);
+						}
+					}
 					if (found == NULL) {
 						size_t need2 =
 						        strlen(dir_main) + 4;

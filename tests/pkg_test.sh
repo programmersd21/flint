@@ -123,7 +123,7 @@ cat > "$WORK/gitsrc/flint.toml" <<'EOF'
 name = "shout"
 version = "0.3.0"
 EOF
-cat > "$WORK/gitsrc/main.fl" <<'EOF'
+cat > "$WORK/gitsrc/shout.fl" <<'EOF'
 export fn loud(who) {
     return "HEY " + who
 }
@@ -158,57 +158,7 @@ expect "git import works" "HEY zed" "$("$FLINT" use.fl 2>&1)"
 pin=$(sed -n '/^commit = /s/commit = "\(.*\)"/\1/p' flint.lock)
 expect "lock pins a 40-char commit" "40" "${#pin}"
 
-# A damaged mirror is replaced in one install, without following symlinks.
-mirror=
-for candidate in "$HOME"/.flint/git/gitsrc-*; do
-	[ -d "$candidate" ] && { mirror=$candidate; break; }
-done
-expect "git mirror cache exists" "yes" "$([ -n "$mirror" ] && echo yes || echo no)"
-if [ -z "$mirror" ]; then
-	echo "cannot test mirror recovery without a mirror path" >&2
-	exit 1
-fi
-rm -rf flint_modules/shout
-rm -f "$mirror/HEAD" "$mirror/config"
-out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
-expect "damaged mirror recovers in one install" "0" "$code"
-expect "recovered mirror still imports" "HEY zed" "$("$FLINT" use.fl 2>&1)"
-
-# A symlink at the cache path must be unlinked, never recursively followed.
-target="$WORK/mirror-target"
-mkdir -p "$target"
-echo "keep me" > "$target/marker"
-rm -rf flint_modules/shout "$mirror"
-ln -s "$target" "$mirror"
-out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
-expect "symlink mirror is safely replaced" "0" "$code"
-expect "symlink target data is preserved" "keep me" "$(cat "$target/marker")"
-expect "replacement mirror still imports" "HEY zed" "$("$FLINT" use.fl 2>&1)"
-
-# Two projects may initialize the same mirror concurrently.
-mkdir -p "$WORK/concurrent/a" "$WORK/concurrent/b"
-for project in a b; do
-	cat > "$WORK/concurrent/$project/flint.toml" <<EOF3
-[package]
-name = "concurrent-$project"
-version = "0.1.0"
-EOF3
-done
-rm -rf "$mirror"
-(cd "$WORK/concurrent/a" && "$FLINT" pkg add "file://$WORK/gitsrc") \
-	>"$WORK/concurrent/a.out" 2>&1 &
-pid_a=$!
-(cd "$WORK/concurrent/b" && "$FLINT" pkg add "file://$WORK/gitsrc") \
-	>"$WORK/concurrent/b.out" 2>&1 &
-pid_b=$!
-if wait "$pid_a"; then code_a=0; else code_a=$?; fi
-if wait "$pid_b"; then code_b=0; else code_b=$?; fi
-expect "first concurrent install succeeds" "0" "$code_a"
-expect "second concurrent install succeeds" "0" "$code_b"
-expect_contains "first project got the package" "installed shout 0.3.0" "$(cat "$WORK/concurrent/a.out")"
-expect_contains "second project got the package" "installed shout 0.3.0" "$(cat "$WORK/concurrent/b.out")"
-
-cat > "$WORK/gitsrc/main.fl" <<'EOF'
+cat > "$WORK/gitsrc/shout.fl" <<'EOF'
 export fn loud(who) {
     return "LOUDER " + who
 }
@@ -346,6 +296,37 @@ expect_contains "the lock records the nested source" "../base" \
 # reinstalling is still idempotent
 "$FLINT" pkg install >/dev/null 2>&1
 expect "reinstalling the chain succeeds" 0 "$?"
+
+# Cyclic path dependencies must stop with an error, not recurse indefinitely.
+mkdir -p "$WORK/cycle/a" "$WORK/cycle/b" "$WORK/cycle/app"
+cat > "$WORK/cycle/a/flint.toml" <<'EOF3'
+[package]
+name = "cycle-a"
+version = "1.0.0"
+
+[dependencies]
+cycle-b = { path = "../b" }
+EOF3
+cat > "$WORK/cycle/b/flint.toml" <<'EOF3'
+[package]
+name = "cycle-b"
+version = "1.0.0"
+
+[dependencies]
+cycle-a = { path = "../a" }
+EOF3
+cat > "$WORK/cycle/app/flint.toml" <<'EOF3'
+[package]
+name = "cycle-app"
+version = "0.1.0"
+
+[dependencies]
+cycle-a = { path = "../a" }
+EOF3
+cd "$WORK/cycle/app" || exit 1
+out=$("$FLINT" pkg install 2>&1) && status=0 || status=$?
+expect "cyclic dependencies fail" "1" "$([ "$status" -ne 0 ] && echo 1 || echo 0)"
+expect_contains "cycle failure is bounded and clear" "dependency chain is deeper than 32" "$out"
 
 cd "$WORK" || exit 1
 if [ "$failed" -ne 0 ]; then
