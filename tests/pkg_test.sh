@@ -123,7 +123,7 @@ cat > "$WORK/gitsrc/flint.toml" <<'EOF'
 name = "shout"
 version = "0.3.0"
 EOF
-cat > "$WORK/gitsrc/main.fl" <<'EOF'
+cat > "$WORK/gitsrc/shout.fl" <<'EOF'
 export fn loud(who) {
     return "HEY " + who
 }
@@ -158,7 +158,7 @@ expect "git import works" "HEY zed" "$("$FLINT" use.fl 2>&1)"
 pin=$(sed -n '/^commit = /s/commit = "\(.*\)"/\1/p' flint.lock)
 expect "lock pins a 40-char commit" "40" "${#pin}"
 
-cat > "$WORK/gitsrc/main.fl" <<'EOF'
+cat > "$WORK/gitsrc/shout.fl" <<'EOF'
 export fn loud(who) {
     return "LOUDER " + who
 }
