@@ -131,8 +131,16 @@ release: flint
 # The alternative -- linking each module against a shared libflint -- would
 # mean the runtime becomes a library, which changes how flint is built and
 # shipped for one feature. Exporting the ABI is the smaller change.
+#
+# ELF-only: mingw has no -rdynamic, and needs none, because the Windows
+# loader refuses up front -- there is nothing to resolve against. Matched
+# on the compiler name, which is what the Windows probe sets.
+RDYNAMIC := -rdynamic
+ifneq (,$(findstring mingw,$(CC)))
+RDYNAMIC :=
+endif
 flint: $(REL_OBJS)
-	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS) -rdynamic
+	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS) $(RDYNAMIC)
 
 flint-debug: $(DBG_OBJS)
 	$(CC) $(ALL_CFLAGS) $(DBG_CFLAGS) $^ -o $@ $(LIBS)
