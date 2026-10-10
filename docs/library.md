@@ -1023,3 +1023,131 @@ wraps text in an OSC-8 link that terminals without support render as plain
 text. `progress_bar` clamps its fraction to 0..1 and fills with blocks
 against light shade inside brackets; `spinner_frame` cycles `"|/-\\"`
 for any integer, including negatives.
+
+## log
+
+```flint
+import log
+
+let logger = log.new("server")
+logger.timestamps = false   # the clock moves; tests switch it off
+log.info(logger, "listening")
+logger.level = log.WARN
+log.info(logger, "dropped")
+log.error(logger, "refused")
+```
+
+leveled logging to stdout, one line per message: `[INFO] server:
+listening`. a logger is a table `{name, level, timestamps}`, and levels
+are numbers -- `DEBUG` 0, `INFO` 1, `WARN` 2, `ERROR` 3 -- so assignment
+and comparison need no lookup. messages below the level return before
+touching the clock. timestamps print the epoch time first and can be
+switched off per logger for stable test output. stdout, not stderr:
+flint has no stderr handle, and the document says so instead of
+pretending.
+
+## test
+
+```flint
+import test
+
+test.eq(1 + 1, 2, "addition")
+test.run("division", fn() {
+    test.check(4 / 2 == 2, "halving")
+})
+test.finish()
+```
+
+a test runner in one import. checks record failures and continue, so one
+run reports everything broken rather than stopping at the first; `run`
+catches a throw and records it as the case's failure instead of aborting
+the suite. `finish` prints the summary and exits nonzero when anything
+failed, which is what makes a suite file a gate. `eq` names both sides
+on mismatch, because "expected 3, got 4" locates the bug.
+
+## hash
+
+```flint
+import hash
+
+print(hash.djb2("hello"))   # 261238937
+print(hash.hex("hello"))    # 0f923099
+```
+
+djb2 over the string's bytes, exact in doubles and reduced mod 2^32, for
+hash tables, convenience checksums, and sharding. non-cryptographic, and
+documented as such: the package manager's SHA-256 is the real hash with
+vectors, and nothing here should authenticate anything. bytes, like the
+rest of flint.
+
+## debug
+
+```flint
+import debug
+
+fn serve() {
+    return debug.frames()
+}
+print(debug.format(serve()))
+```
+
+the live call stack, innermost first, as `{function, line}` tables --
+`frames()[0]` is the caller, and the script level names itself
+`<script>`, as in traces. `format` renders the CLI's one-line-per-frame
+shape, and `err_str` condenses a caught error to `type: message`.
+`dump` prints a value across lines for inspection. read-only throughout:
+no breakpoints, no stepping, no locals -- frames carry names and lines
+because locals live in slots the collector may reuse.
+
+## regex
+
+```flint
+import regex
+
+print(regex.match("[a-z]+@[a-z]+", "amy@x"))  # true
+print(regex.find("a+", "xxaay"))              # [2, 4]
+```
+
+Thompson NFA matching over bytes: `match` is a full match, `find`
+returns `[start, end]` of the leftmost-longest match or nil. literals,
+`.`, `* + ?`, `|` alternation, `(...)` groups, `[...]` classes with
+ranges and negation, `^ $` anchors, and `\` escapes plus `\d \w \s`.
+linear in text times pattern states -- no backtracking, so no input goes
+catastrophic. an invalid pattern returns nil rather than false, the way
+a typo is distinct from a non-match. no captures, no backreferences, no
+`{m,n}` counts: write `xx*`. bytes throughout, so `.` matches `\n`.
+
+## compress
+
+```flint
+import compress
+
+let packed = compress.compress("aaaabaaaab")
+print(compress.decompress(packed) == "aaaabaaaab")  # true
+```
+
+LZSS for small byte strings: a four-byte big-endian length, then tokens
+behind one control byte per eight -- literals verbatim, matches as 12
+bits of distance plus 4 bits of length. decompress returns nil on
+truncated or overreaching input. exact round-trips including NUL bytes;
+repetition shrinks, random data roughly breaks even. quadratic window
+search through interpreter loops, so kilobytes, not disk images -- a hot
+path wants a C dependency, not a faster loop here.
+
+## signal
+
+```flint
+import signal
+
+print(signal.send(signal.pid(), 0))   # true: we exist
+```
+
+process signals by number: `HUP` 1, `INT` 2, `QUIT` 3, `ABRT` 6, `KILL`
+9, `PIPE` 13, `TERM` 15 -- the seven identical on Linux, macOS, and the
+BSDs, which is the whole list for exactly that reason. `raise` delivers
+to this process synchronously (INT and TERM end it under the default
+disposition); `send` is `kill`, and signal 0 checks existence without
+delivering. `send` is POSIX-only and errors on Windows, which has no
+kill. unknown names throw rather than guessing. deliberately no
+handlers: a C signal handler may only touch async-signal-safe state,
+and a VM with a collector is the opposite of that.

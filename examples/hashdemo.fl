@@ -1,0 +1,6 @@
+# the hash module: djb2 values and hex spellings.
+import hash
+
+print(hash.djb2("hello"))
+print(hash.hex("hello"))
+print(hash.hex(""))

@@ -13,6 +13,12 @@ match_payload.fl`; SHA-256 content hashes in `src/util/sha256.c` and
 in `src/ext.c`). items 5-7 remain future work, as `RELEASES.md` states.
 the audit stays as written; `RELEASES.md` is the record of what shipped.
 
+0.13.1, on top: the portability probes and everything they found
+(`docs/platforms.md`), plus the standard-library modules the audit
+listed under item 7 -- csv, toml, url, datetime, then log, test, hash,
+debug, regex, compress, signal, each with contract, tests, and docs.
+regex and compress ship with the proofs the audit asked for.
+
 every finding is labelled by severity and by how sure I am. a defect I could
 reproduce is one; a suspicion from reading is another, and the difference
 matters more than the label.

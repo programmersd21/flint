@@ -1,0 +1,7 @@
+# the regex module: full matches and leftmost-longest searches.
+import regex
+
+print(regex.match("[a-z]+@[a-z]+", "amy@x"))
+print(regex.match("[a-z]+@[a-z]+", "not-an-address"))
+print(regex.find("[0-9]+", "order 42, batch 7"))
+print(regex.find("z+", "nothing here"))

@@ -1,0 +1,9 @@
+# the debug module: frames, formatting, and dumps.
+import debug
+
+fn serve() {
+    return debug.frames()
+}
+
+print(debug.format(serve()))
+debug.dump({port: 8080, tags: ["web", "api"]})

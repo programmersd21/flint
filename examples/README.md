@@ -27,6 +27,13 @@ bottom rather than dipping in.
 | [argsdemo.fl](argsdemo.fl) | the args module: count, get, flags, and flag values |
 | [cli.fl](cli.fl) | a `--name` flag with defaults, from the command line or the env |
 | [chaining.fl](chaining.fl) | `?.` through missing config, lazy calls, and `??` fallbacks |
+| [log.fl](log.fl) | the log module: levels, filtering, stable output |
+| [testdemo.fl](testdemo.fl) | the test module: a suite file that gates |
+| [hashdemo.fl](hashdemo.fl) | the hash module: djb2 values and hex |
+| [debugdemo.fl](debugdemo.fl) | the debug module: frames, formatting, dumps |
+| [regex.fl](regex.fl) | the regex module: full matches and searches |
+| [compressdemo.fl](compressdemo.fl) | the compress module: round-trips that shrink |
+| [signaldemo.fl](signaldemo.fl) | the signal module: numbers and self-checks |
 | [modules/](modules/) | a four-file program: import, export, shared globals, const |
 
 ## running them

@@ -159,6 +159,20 @@ two modules can define the same private name without exposing or overwriting eac
 | `encoding`    | hex, base64 and url encoding           |
 | `ansi`        | terminal escape codes                  |
 | `pretty_print`| multi-line value rendering             |
+| `csv`         | comma-separated values, rows and objects |
+| `toml`        | configuration files, read              |
+| `url`         | split URLs into parts and build them back |
+| `datetime`    | UTC calendar dates as tables           |
+| `glob`        | shell-style filename matching          |
+| `terminal`    | sizes, tty guessing, progress widgets  |
+| `env`         | environment variables, parsed          |
+| `log`         | leveled logging to stdout              |
+| `test`        | checks, cases, and a gating finish     |
+| `hash`        | djb2 values and hex, non-cryptographic |
+| `debug`       | call-stack frames and value dumps      |
+| `regex`       | Thompson NFA matching over bytes       |
+| `compress`    | LZSS for small byte strings            |
+| `signal`      | signal numbers, raise, send            |
 
 the library is written in flint wherever possible.
 

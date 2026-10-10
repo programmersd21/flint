@@ -1,0 +1,9 @@
+# the test module: a suite file that gates.
+import test
+
+test.eq(1 + 1, 2, "addition")
+test.run("strings", fn() {
+    test.eq("ab" + "c", "abc", "concat")
+    test.check(len("abc") == 3, "length")
+})
+test.finish()

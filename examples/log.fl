@@ -1,0 +1,10 @@
+# the log module: levels, filtering, and stable output.
+import log
+
+let server = log.new("server")
+server.timestamps = false
+log.info(server, "listening on :8080")
+log.debug(server, "dropped: debug is below info")
+server.level = log.WARN
+log.info(server, "dropped too: info is below warn now")
+log.error(server, "connection refused")

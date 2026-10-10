@@ -1,0 +1,8 @@
+# the compress module: exact round-trips that shrink repetition.
+import compress
+
+let text = "aaaabaaaabaaaabaaaab"
+let packed = compress.compress(text)
+print(len(packed) < len(text))
+print(compress.decompress(packed) == text)
+print(compress.decompress("short"))

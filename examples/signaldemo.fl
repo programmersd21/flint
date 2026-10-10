@@ -1,0 +1,6 @@
+# the signal module: numbers, self-checks, no delivery in demos.
+import signal
+
+print(signal.INT)
+print(signal.send(signal.pid(), 0))
+print(signal.send(999999, 0))
