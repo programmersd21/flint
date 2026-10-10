@@ -900,17 +900,17 @@ static bool pkg_ensure_mirror_unlocked(const char *mirror,
 		if (lstat(mirror, &st) == 0) {
 			if (!pkg_remove_tree(mirror)) {
 				(void)pkg_remove_tree(staging);
-				snprintf(error, error_size, "cannot remove damaged mirror '%s'", mirror);
+				snprintf(error, error_size, "cannot remove damaged mirror");
 				return false;
 			}
 		} else if (errno != ENOENT) {
 			(void)pkg_remove_tree(staging);
-			snprintf(error, error_size, "cannot inspect mirror '%s'", mirror);
+			snprintf(error, error_size, "cannot inspect mirror");
 			return false;
 		}
 		if (rename(staging, mirror) != 0) {
 			(void)pkg_remove_tree(staging);
-			snprintf(error, error_size, "cannot publish mirror '%s'", mirror);
+			snprintf(error, error_size, "cannot publish mirror");
 			return false;
 		}
 		return true;
@@ -962,7 +962,7 @@ static bool pkg_ensure_mirror(const char *mirror,
 	}
 	int lock_fd = open(lock_path, O_CREAT | O_RDWR, 0600);
 	if (lock_fd < 0) {
-		snprintf(error, error_size, "cannot open mirror lock '%s'", lock_path);
+		snprintf(error, error_size, "cannot open mirror lock");
 		return false;
 	}
 	struct flock lock = {0};
@@ -972,7 +972,7 @@ static bool pkg_ensure_mirror(const char *mirror,
 		if (errno == EINTR)
 			continue;
 		close(lock_fd);
-		snprintf(error, error_size, "cannot lock mirror '%s'", mirror);
+		snprintf(error, error_size, "cannot lock mirror");
 		return false;
 	}
 	bool ok = pkg_ensure_mirror_unlocked(
