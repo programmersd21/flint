@@ -437,6 +437,102 @@ static char *pkg_candidate(const char *path)
 	return NULL;
 }
 
+/*
+ * An installed package may explicitly choose its public module with
+ * [package] lib = "src/api.fl". The path is relative to the package root;
+ * it must stay inside that root and name a .fl file. A declared but invalid
+ * or missing entry point does not silently fall back to a different file.
+ */
+static char *pkg_declared_lib(const char *package_dir, bool *declared)
+{
+	*declared = false;
+	char manifest[8192];
+	if (snprintf(manifest, sizeof(manifest), "%s/flint.toml", package_dir) >=
+	        (int)sizeof(manifest))
+		return NULL;
+	FILE *file = fopen(manifest, "r");
+	if (file == NULL)
+		return NULL;
+
+	bool in_package = false;
+	char line[4096];
+	char *entry = NULL;
+	while (fgets(line, sizeof(line), file) != NULL) {
+		char *p = line;
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (*p == '\0' || *p == '\n' || *p == '#')
+			continue;
+		if (*p == '[') {
+			char *end = strchr(p, ']');
+			if (end == NULL)
+				continue;
+			end[1] = '\0';
+			in_package = strcmp(p, "[package]") == 0;
+			continue;
+		}
+		if (!in_package || strncmp(p, "lib", 3) != 0 ||
+		        (p[3] != ' ' && p[3] != '\t' && p[3] != '='))
+			continue;
+		p += 3;
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (*p++ != '=')
+			continue;
+		while (*p == ' ' || *p == '\t')
+			p++;
+		*declared = true;
+		if (*p++ != '"')
+			break;
+		char *end = strchr(p, '"');
+		if (end == NULL)
+			break;
+		char *tail = end + 1;
+		while (*tail == ' ' || *tail == '\t' || *tail == '\r' ||
+		        *tail == '\n')
+			tail++;
+		if (*tail != '\0' && *tail != '#')
+			break;
+		*end = '\0';
+		size_t len = strlen(p);
+		if (len < 4 || strcmp(p + len - 3, ".fl") != 0 ||
+		        p[0] == '/' || strchr(p, '\\') != NULL)
+			break;
+		bool unsafe = false;
+		const char *part = p;
+		for (const char *q = p;; q++) {
+			if (*q == '/' || *q == '\0') {
+				size_t part_len = (size_t)(q - part);
+				if (part_len == 0 ||
+				        (part_len == 1 && part[0] == '.') ||
+				        (part_len == 2 && part[0] == '.' &&
+				                part[1] == '.')) {
+					unsafe = true;
+					break;
+				}
+				if (*q == '\0')
+					break;
+				part = q + 1;
+			}
+		}
+		if (unsafe)
+			break;
+		size_t dir_len = strlen(package_dir);
+		if (dir_len > (size_t)-1 - len - 2)
+			break;
+		entry = malloc(dir_len + len + 2);
+		if (entry != NULL)
+			snprintf(entry, dir_len + len + 2, "%s/%s", package_dir, p);
+		break;
+	}
+	fclose(file);
+	if (entry == NULL)
+		return NULL;
+	char *found = pkg_candidate(entry);
+	free(entry);
+	return found;
+}
+
 char *sys_resolve_module(const char *path)
 {
 	size_t pathlen = strlen(path);
@@ -471,44 +567,43 @@ char *sys_resolve_module(const char *path)
 				        pkg_join3(root, "flint_modules", path);
 				char *found = NULL;
 				if (dir_main != NULL) {
-					size_t need = strlen(dir_main) + 9;
-					char *main_file = malloc(need);
-					if (main_file != NULL) {
-						snprintf(main_file,
-						        need,
-						        "%s/main.fl",
-						        dir_main);
-						found = pkg_candidate(
-						        main_file);
-						free(main_file);
-					}
-					/*
-					 * Also support a single-file package named after
-					 * itself, e.g. levenshtein/levenshtein.fl.
-					 */
-					if (found == NULL) {
-						size_t need_named = strlen(dir_main) + 1 +
-						        pathlen + 3 + 1;
-						char *named = malloc(need_named);
-						if (named != NULL) {
-							snprintf(named, need_named, "%s/%s.fl",
-							        dir_main, path);
-							found = pkg_candidate(named);
-							free(named);
-						}
-					}
-					if (found == NULL) {
-						size_t need2 =
-						        strlen(dir_main) + 4;
-						char *flat = malloc(need2);
-						if (flat != NULL) {
-							snprintf(flat,
-							        need2,
-							        "%s.fl",
+					bool has_declared_lib = false;
+					found = pkg_declared_lib(
+					        dir_main, &has_declared_lib);
+					if (!has_declared_lib) {
+						size_t need = strlen(dir_main) + 9;
+						char *main_file = malloc(need);
+						if (main_file != NULL) {
+							snprintf(main_file,
+							        need,
+							        "%s/main.fl",
 							        dir_main);
-							found = pkg_candidate(
-							        flat);
-							free(flat);
+							found = pkg_candidate(main_file);
+							free(main_file);
+						}
+						/*
+						 * Also support a single-file package named after
+						 * itself, e.g. levenshtein/levenshtein.fl.
+						 */
+						if (found == NULL) {
+							size_t need_named = strlen(dir_main) + 1 +
+							        pathlen + 3 + 1;
+							char *named = malloc(need_named);
+							if (named != NULL) {
+								snprintf(named, need_named, "%s/%s.fl",
+								        dir_main, path);
+								found = pkg_candidate(named);
+								free(named);
+							}
+						}
+						if (found == NULL) {
+							size_t need2 = strlen(dir_main) + 4;
+							char *flat = malloc(need2);
+							if (flat != NULL) {
+								snprintf(flat, need2, "%s.fl", dir_main);
+								found = pkg_candidate(flat);
+								free(flat);
+							}
 						}
 					}
 					free(dir_main);

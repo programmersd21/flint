@@ -85,6 +85,39 @@ out=$("$FLINT" main.fl 2>&1)
 expect "package import works" "hi sam
 HI SAM" "$out"
 
+# an explicit [package] lib entry point overrides legacy layouts.
+mkdir -p "$WORK/libproj/app" "$WORK/libproj/chosen/src"
+cat > "$WORK/libproj/chosen/flint.toml" <<'EOF_LIB'
+[package]
+name = "chosen"
+version = "1.0.0"
+lib = "src/api.fl"
+EOF_LIB
+cat > "$WORK/libproj/chosen/main.fl" <<'EOF_LIB'
+export fn value() { return "wrong main" }
+EOF_LIB
+cat > "$WORK/libproj/chosen/src/api.fl" <<'EOF_LIB'
+export fn value() { return "manifest entry" }
+EOF_LIB
+cat > "$WORK/libproj/app/flint.toml" <<'EOF_LIB'
+[package]
+name = "lib-app"
+version = "0.1.0"
+
+[dependencies]
+chosen = { path = "../chosen" }
+EOF_LIB
+cat > "$WORK/libproj/app/run.fl" <<'EOF_LIB'
+import "chosen"
+print(chosen.value())
+EOF_LIB
+cd "$WORK/libproj/app" || exit 1
+"$FLINT" pkg install >/dev/null 2>&1
+expect "declared library entry point is used" "manifest entry" "$("$FLINT" run.fl 2>&1)"
+expect "declared entry point was copied" "yes" \
+	"$([ -f flint_modules/chosen/src/api.fl ] && echo yes || echo no)"
+cd "$WORK/pathproj/app" || exit 1
+
 # reinstall is idempotent
 "$FLINT" pkg install >/dev/null 2>&1
 expect "reinstall keeps the module" "yes" \
