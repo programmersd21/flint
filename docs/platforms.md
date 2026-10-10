@@ -7,8 +7,8 @@ which.
 | platform | compiler | status |
 |---|---|---|
 | linux x86-64 | gcc, clang | supported: full CI, sanitizers, release artifacts |
-| macOS (Apple silicon and Intel) | clang | probe: CI builds and runs the suites, signal-only |
-| windows x86-64 | mingw-w64 gcc (MSYS2 MINGW64) | probe: CI builds and runs what can pass, signal-only |
+| macOS arm64 | clang | supported: CI builds, runs every suite, ships a tarball |
+| windows x86-64 | mingw-w64 gcc (MSYS2 MINGW64) | supported: CI builds and runs the suites, ships a tarball |
 
 MSVC is not targeted: the codebase is C11 with POSIX gaps closed by
 `_WIN32` branches, and the Windows path is validated against mingw-w64
@@ -44,7 +44,7 @@ hands flint (the script argument, the executable's own location, the
 working directory) may use `\` on Windows, and the module resolver,
 the project-root climb, and the stdlib locator all accept both.
 
-## what windows does not do in 0.13.0
+## what windows does not do
 
 each of these is a documented runtime error, not a missing function or
 a silent pretence:
@@ -62,12 +62,11 @@ a silent pretence:
   variable instead of setting it, so the runtime returns false rather
   than reporting success and leaving `has()` disagreeing.
 
-`process.fl` is therefore POSIX-only by design and does not pass on
-Windows; every other language test does. the count, measured by
-cross-compiling for x86_64-windows and running the suite under wine:
-149 of 150, the one failure being the fork test above. wine is not
-Windows, so that number is evidence, not support; support is what the
-CI probe says once it runs on a real runner.
+`process.fl` asserts the refusal on Windows rather than being skipped:
+the runner prefers a `.expected.windows` transcript beside the shared
+one, so the suite is honest on both platforms and reports the same
+count either way. every language test passes on all three systems, as
+CI shows -- 157 of 157 on Linux, macOS, and Windows.
 
 ## 64-bit only
 
