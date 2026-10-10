@@ -3,12 +3,12 @@
 version = 4
 
 [[package]]
-name = "flint-sys"
-version = "0.1.0"
+name = "flintlang-sys"
+version = "0.13.2"
 
 [[package]]
 name = "rust-native"
 version = "0.1.0"
 dependencies = [
- "flint-sys",
+ "flintlang-sys",
 ]

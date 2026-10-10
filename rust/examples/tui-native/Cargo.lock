@@ -381,8 +381,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
 
 [[package]]
-name = "flint-sys"
-version = "0.1.0"
+name = "flintlang-sys"
+version = "0.13.2"
 
 [[package]]
 name = "fnv"
@@ -1480,7 +1480,7 @@ checksum = "9e1c906769ad99c88eaa54e728060edef082f8e358ff32030cb7c7d315e81109"
 name = "tui-native"
 version = "0.1.0"
 dependencies = [
- "flint-sys",
+ "flintlang-sys",
  "ratatui",
 ]
 
