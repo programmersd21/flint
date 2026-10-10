@@ -863,12 +863,19 @@ static bool pkg_ensure_mirror(const char *mirror,
 		if (pkg_git(argv, NULL, 1) != 0) {
 			/*
 			 * git can leave a partial destination when a clone fails.
-			 * Remove it so the next attempt can start cleanly rather
-			 * than failing forever on a non-empty cache directory.
+			 * Remove it and retry once so a damaged cache heals during
+			 * this install. A bad URL still fails, but leaves no poison
+			 * directory behind for the next attempt.
 			 */
-			(void)pkg_remove_tree(mirror);
-			snprintf(error, error_size, "cannot clone '%s'", url);
-			return false;
+			if (!pkg_remove_tree(mirror)) {
+				snprintf(error, error_size, "cannot clone '%s'", url);
+				return false;
+			}
+			if (pkg_git(argv, NULL, 1) != 0) {
+				(void)pkg_remove_tree(mirror);
+				snprintf(error, error_size, "cannot clone '%s'", url);
+				return false;
+			}
 		}
 		return true;
 	}
