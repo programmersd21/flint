@@ -148,12 +148,14 @@ static FlValue handle_of(Value value)
 	return handle;
 }
 
+#ifndef _WIN32
 static Value value_of(FlValue handle)
 {
 	if (handle.opaque == NULL)
 		return NIL_VAL;
 	return (Value)((uintptr_t)handle.opaque - 1);
 }
+#endif /* handle decoding; the decoders are all guarded with the loader */
 
 /* ---------------------------------------------------------------------- */
 /* vtable implementations                                                  */

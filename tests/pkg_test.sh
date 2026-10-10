@@ -24,6 +24,17 @@ trap 'rm -rf "$WORK"' EXIT
 failed=0
 checks=0
 
+# in-place sed that works on GNU and BSD: BSD sed needs an argument to
+# -i and GNU forbids the same form, so a temp file plus mv is the one
+# version that edits the same bytes everywhere. the macOS probe found
+# this: `sed -i` without a suffix is "invalid command code" there.
+sedi() {
+	expr="$1"
+	file="$2"
+	tmp="$file.sedit"
+	sed "$expr" "$file" >"$tmp" && mv "$tmp" "$file"
+}
+
 fail() {
 	echo "FAIL: $1"
 	failed=$((failed + 1))
@@ -91,7 +102,7 @@ expect "modified tree is healed" "no" \
 	"$(grep -q tampered flint_modules/greet/main.fl && echo yes || echo no)"
 
 # a version requirement that cannot hold fails loudly
-sed -i 's/version = "\^1.0.0"/version = "^9.0.0"/' flint.toml
+sedi 's/version = "\^1.0.0"/version = "^9.0.0"/' flint.toml
 out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
 expect "bad requirement exits non-zero" "1" "$([ $code -ne 0 ] && echo 1 || echo 0)"
 expect_contains "bad requirement explains" "does not satisfy" "$out"
@@ -184,7 +195,7 @@ expect_contains "unchanged reinstall verifies in place" "verified shout" "$out"
 cp flint.lock "$WORK/gitlock.good"
 first=$(sed -n '/^content = /s/content = "\(.\).*/\1/p' flint.lock)
 if [ "$first" = "0" ]; then rep=1; else rep=0; fi
-sed -i "s/^content = \"$first/content = \"$rep/" flint.lock
+sedi "s/^content = \"$first/content = \"$rep/" flint.lock
 rm -rf flint_modules
 out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
 expect "content mismatch exits non-zero" "1" "$([ $code -ne 0 ] && echo 1 || echo 0)"
@@ -206,7 +217,7 @@ version = "0.1.0"
 [dependencies]
 shout = { git = "file:///PLACEHOLDER", rev = "v0.3.0" }
 EOF
-sed -i "s|file:///PLACEHOLDER|file://$WORK/gitsrc|" flint.toml
+sedi "s|file:///PLACEHOLDER|file://$WORK/gitsrc|" flint.toml
 "$FLINT" pkg install >/dev/null 2>&1
 expect "rev pins to the tag" "HEY zed" "$("$FLINT" use.fl 2>&1)"
 
