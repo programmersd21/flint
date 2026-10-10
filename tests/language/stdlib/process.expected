@@ -18,6 +18,6 @@ through the pipe
 0
 unknown process.run() option 'directory'.
 [line 44] in run_opts()
-[line 56] in script
+[line 73] in script
 true
 137

@@ -122,10 +122,32 @@ fi
 # the point is that it crosses the identical boundary: #[repr(C)] and
 # extern "C" only, with the wrapper on top. it also shows the two things a C
 # example cannot: a contained panic, and a retained handle.
-if command -v cargo >/dev/null 2>&1; then
+#
+# platform notes, both found on the macOS probe: the cdylib calls fl_*
+# host functions, which Linux leaves for the loader but macOS must be
+# told to allow (like the C modules above), and the library suffix is
+# .dylib there rather than .so. dlopen takes either name.
+DYLIB_EXT="so"
+if [ "$(uname)" = "Darwin" ]; then
+	DYLIB_EXT="dylib"
+	# append, not assign: a caller-provided RUSTFLAGS stays in force.
+	RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-args=-undefined dynamic_lookup"
+	export RUSTFLAGS
+fi
+# a failed build prints its log: "did not build, skipping" with no reason
+# is how a red platform hides for a month.
+build_rust_module() {
+	# $1: manifest path. $2: log label.
 	if cargo build --release --offline --quiet \
-		--manifest-path "$REPO/rust/examples/rust-native/Cargo.toml" \
-		>/dev/null 2>&1; then
+		--manifest-path "$1" >"$WORK/cargo-$2.log" 2>&1; then
+		return 0
+	fi
+	echo "native abi tests: $2 module did not build, skipping:"
+	tail -5 "$WORK/cargo-$2.log"
+	return 1
+}
+if command -v cargo >/dev/null 2>&1; then
+	if build_rust_module "$REPO/rust/examples/rust-native/Cargo.toml" rust; then
 		ok
 		cat > "$WORK/rust.fl" <<'RFL'
 print(sum(5))
@@ -143,7 +165,7 @@ try {
 }
 RFL
 		out=$("$FLINT" native \
-			"$REPO/rust/examples/rust-native/target/release/librust_native.so" \
+			"$REPO/rust/examples/rust-native/target/release/librust_native.$DYLIB_EXT" \
 			rust_native "$WORK/rust.fl" 2>/dev/null) || status=1
 		expect_eq "a rust module runs" "10
 [\"the\", \"quick\", \"brown\", \"fox\"]
@@ -161,9 +183,7 @@ fi
 # the shape that matters: flint asks for a frame, ratatui draws one, and
 # what comes back across the abi is text. nothing of ratatui crosses.
 if command -v cargo >/dev/null 2>&1; then
-	if cargo build --release --offline --quiet \
-		--manifest-path "$REPO/rust/examples/tui-native/Cargo.toml" \
-		>/dev/null 2>&1; then
+	if build_rust_module "$REPO/rust/examples/tui-native/Cargo.toml" tui; then
 		ok
 		cat > "$WORK/tui.fl" <<'TFL'
 let rows = render_frame("demo", ["one", "two"])
@@ -171,7 +191,7 @@ for row in rows { print(row) }
 print(size())
 TFL
 		out=$("$FLINT" native \
-			"$REPO/rust/examples/tui-native/target/release/libtui_native.so" \
+			"$REPO/rust/examples/tui-native/target/release/libtui_native.$DYLIB_EXT" \
 			tui_native "$WORK/tui.fl" 2>/dev/null) || status=1
 		expect_contains "a ratatui frame comes back bordered" "│one" "$out"
 		expect_contains "with its title block" "demo" "$out"

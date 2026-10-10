@@ -5,53 +5,71 @@
 # of them doing anything the test machine cannot do. wall-clock time is
 # asserted only as "it finished", never as an exact duration, because CI
 # machines are slow in ways that have nothing to do with this code.
+#
+# windows has no fork, so spawning is refused there by design: the windows
+# branch below asserts the refusal, and process.expected.windows holds its
+# transcript. one shared file cannot hold both contracts.
 
 import process
+import os
 
-# a clean run: output captured, status zero, not timed out
-let ok = process.run(["echo", "hello"])
-print(ok.stdout)
-print(ok.stderr)
-print(ok.code)
-print(ok.timed_out)
+if os.name() == "windows" {
+    try {
+        process.run(["echo", "hello"])
+    } catch e {
+        print(e.message)
+    }
+    try {
+        process.run_opts(["echo", "x"], {timeout: 100})
+    } catch e {
+        print(e.message)
+    }
+} else {
+    # a clean run: output captured, status zero, not timed out
+    let ok = process.run(["echo", "hello"])
+    print(ok.stdout)
+    print(ok.stderr)
+    print(ok.code)
+    print(ok.timed_out)
 
-# arguments are separate strings, never split: a filename with a space in it
-# is one argument, not two
-let spaced = process.run(["echo", "two words"])
-print(spaced.stdout)
-print(spaced.code)
+    # arguments are separate strings, never split: a filename with a space in it
+    # is one argument, not two
+    let spaced = process.run(["echo", "two words"])
+    print(spaced.stdout)
+    print(spaced.code)
 
-# a failing child: nonzero status, stderr captured, stdout empty. the
-# child is sh exiting 3 with a complaint on stderr, because the exit
-# code of ls on a missing directory is 2 on GNU and 1 on BSD -- the
-# test is about flint reading the failure, not about which ls ran.
-let bad = process.run(["sh", "-c", "echo no such directory >&2; exit 3"])
-print(bad.code)
-print(len(bad.stdout))
-print(len(bad.stderr) > 0)
-print(bad.timed_out)
+    # a failing child: nonzero status, stderr captured, stdout empty. the
+    # child is sh exiting 3 with a complaint on stderr, because the exit
+    # code of ls on a missing directory is 2 on GNU and 1 on BSD -- the
+    # test is about flint reading the failure, not about which ls ran.
+    let bad = process.run(["sh", "-c", "echo no such directory >&2; exit 3"])
+    print(bad.code)
+    print(len(bad.stdout))
+    print(len(bad.stderr) > 0)
+    print(bad.timed_out)
 
-# not found: 127, by the shell convention exec() already uses
-let missing = process.run(["flint-no-such-program-xyz"])
-print(missing.code)
+    # not found: 127, by the shell convention exec() already uses
+    let missing = process.run(["flint-no-such-program-xyz"])
+    print(missing.code)
 
-# options: cwd, stdin, and timeout. the cwd is /, because /tmp is a
-# symlink to /private/tmp on macOS and pwd prints the resolved path --
-# the test is about the child running where it was told, not about
-# which /tmp the machine has.
-let here = process.run_opts(["pwd"], {cwd: "/"})
-print(here.stdout)
-print(here.code)
+    # options: cwd, stdin, and timeout. the cwd is /, because /tmp is a
+    # symlink to /private/tmp on macOS and pwd prints the resolved path --
+    # the test is about the child running where it was told, not about
+    # which /tmp the machine has.
+    let here = process.run_opts(["pwd"], {cwd: "/"})
+    print(here.stdout)
+    print(here.code)
 
-let echoed = process.run_opts(["cat"], {stdin: "through the pipe"})
-print(echoed.stdout)
-print(echoed.code)
+    let echoed = process.run_opts(["cat"], {stdin: "through the pipe"})
+    print(echoed.stdout)
+    print(echoed.code)
 
-# sleep 5 with a 200ms timeout: killed, flagged, and carrying SIGKILL's code
-let slow = process.run_opts(["sleep", "5"], {timeout: 200})
-print(slow.timed_out)
-print(slow.code)
+    # sleep 5 with a 200ms timeout: killed, flagged, and carrying SIGKILL's code
+    let slow = process.run_opts(["sleep", "5"], {timeout: 200})
+    print(slow.timed_out)
+    print(slow.code)
 
-# an unknown option is an error, not silently dropped
-let strict = process.run_opts(["echo", "x"], {directory: "/tmp"})
-print(strict.code)
+    # an unknown option is an error, not silently dropped
+    let strict = process.run_opts(["echo", "x"], {directory: "/tmp"})
+    print(strict.code)
+}

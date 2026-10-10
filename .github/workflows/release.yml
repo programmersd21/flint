@@ -1,5 +1,6 @@
-# tags a v* push. builds the release binary, runs the tests, publishes a
-# tarball. no release goes out with a failing test suite.
+# tags a v* push. builds a release binary per platform, runs the suites
+# that can run there, publishes a tarball each. no release goes out with
+# a failing suite on the platform that built it.
 name: release
 
 on:
@@ -8,8 +9,8 @@ on:
       - 'v*'
 
 jobs:
-  release:
-    name: build and publish
+  release-linux:
+    name: build and publish (linux x86-64)
     runs-on: ubuntu-24.04
     # Pinned rather than floating. ubuntu-latest migrates without warning --
     # it is scheduled to become 26.04 -- and a new runner image means new
@@ -78,6 +79,121 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: flint-${{ github.ref_name }}-linux-x86_64.tar.gz
+        generate_release_notes: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-macos:
+    name: build and publish (macOS arm64)
+    # arm64 only: the hosted x86_64 macOS runners are retired, and a
+    # cross-compiled artifact this workflow cannot run is an artifact that
+    # ships untested. the tarball says arm64 because that is what ran it.
+    runs-on: macos-14
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: release build
+      run: make clean && make release
+
+    - name: language tests
+      run: make test
+
+    - name: unit tests
+      run: make unit
+
+    # the native suite builds real shared objects and loads them: the same
+    # dlopen path the tarball's users get, including the rust modules.
+    - name: native tests
+      run: make native-test
+
+    - name: package
+      run: |
+        mkdir -p stage
+        cp flint stage/flint
+        cp -r lib stage/lib
+        cp README.md SPEC.md RELEASES.md LICENSE stage/
+        tar -czvf flint-${{ github.ref_name }}-macos-arm64.tar.gz -C stage .
+
+    - name: smoke test the artifact
+      run: |
+        rm -rf verify && mkdir verify
+        tar -xzf flint-${{ github.ref_name }}-macos-arm64.tar.gz -C verify
+        chmod +x verify/flint
+        cd verify
+        ./flint --version
+        ./flint -e 'import encoding
+        print(encoding.base64_encode("flint"))'
+
+    - name: publish
+      uses: softprops/action-gh-release@v2
+      with:
+        files: flint-${{ github.ref_name }}-macos-arm64.tar.gz
+        generate_release_notes: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  release-windows:
+    name: build and publish (windows x86-64)
+    # mingw64, not msys and not msvc: the codebase is C11 with the POSIX
+    # gaps closed by _WIN32 branches, validated against mingw-w64 headers
+    # by the CI probe. the tarball says what built it.
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v5
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          base-devel
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-make
+
+    # CC names the mingw compiler explicitly so a PATH change cannot
+    # silently substitute the emulated msys gcc, which would prove
+    # nothing about Windows.
+    - name: release build
+      run: make clean && make release CC=x86_64-w64-mingw32-gcc
+
+    # the suites that can pass here: spawning and signals are refused by
+    # design, and the suite asserts the refusals. the language suite is
+    # the artifact's test.
+    - name: language tests
+      run: make test CC=x86_64-w64-mingw32-gcc
+
+    - name: unit tests
+      run: make unit CC=x86_64-w64-mingw32-gcc
+
+    - name: package
+      run: |
+        mkdir -p stage
+        cp flint.exe stage/flint.exe
+        cp -r lib stage/lib
+        cp README.md SPEC.md RELEASES.md LICENSE stage/
+        tar -czvf flint-${{ github.ref_name }}-windows-x86_64.tar.gz -C stage .
+
+    - name: smoke test the artifact
+      run: |
+        rm -rf verify && mkdir verify
+        tar -xzf flint-${{ github.ref_name }}-windows-x86_64.tar.gz -C verify
+        cd verify
+        ./flint.exe --version
+        ./flint.exe -e 'import encoding
+        print(encoding.base64_encode("flint"))'
+
+    - name: publish
+      uses: softprops/action-gh-release@v2
+      with:
+        files: flint-${{ github.ref_name }}-windows-x86_64.tar.gz
         generate_release_notes: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

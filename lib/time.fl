@@ -11,8 +11,10 @@ export fn now() {
     return __now()
 }
 
-# cpu milliseconds, for measuring something. clock() is seconds as a double
-# and loses resolution on some platforms; this is the one for a benchmark.
+# monotonic wall milliseconds, for measuring something. clock() is
+# seconds as a double and loses resolution on some platforms; this is
+# the one for a benchmark. milliseconds since boot, so strictly
+# positive from the first call and never backward.
 export fn clock_ms() {
     return __clock_ms()
 }

@@ -1,0 +1,8 @@
+true
+2
+15
+9
+signal.send() needs a POSIX system in this release.
+unknown signal 'NOPE'; HUP INT QUIT ABRT KILL PIPE TERM
+bad pid refused
+fractional signal refused

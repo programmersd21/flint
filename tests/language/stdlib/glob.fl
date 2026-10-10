@@ -1,4 +1,5 @@
 import glob
+import os
 
 # star matches any run, including empty
 print(glob.match("*", ""))
@@ -37,8 +38,10 @@ print(glob.match("exact", "exac"))
 print(glob.filter("*.fl", ["a.fl", "b.txt", "c.fl"]))
 print(glob.filter("???", ["a", "abc", "abcd", "xyz"]))
 
-# list on a temp dir: sorted, so the output is deterministic
-let dir = "/tmp/flint-glob-test"
+# list on a temp dir: sorted, so the output is deterministic. the dir
+# comes from os.tmpdir(), because /tmp does not exist on windows and a
+# hardcoded path is how a portable test fails on one machine.
+let dir = os.tmpdir() + "/flint-glob-test"
 __mkdir(dir)
 write_file(dir + "/b.fl", "x")
 write_file(dir + "/a.fl", "x")

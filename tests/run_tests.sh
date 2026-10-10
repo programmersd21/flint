@@ -49,6 +49,19 @@ for test_file in $(find tests/language -type f -name '*.fl' | sort); do
     [ -f "$test_file" ] || continue
     base="${test_file%.fl}"
     expected="$base.expected"
+    # a platform may diverge honestly: spawning works on posix and is
+    # refused on windows, and one expected file cannot hold both. a
+    # name.expected.windows (or .darwin) beside the test overrides the
+    # shared one on that platform only; everywhere else the shared file
+    # rules, so a platform file is a documented divergence, not a fork.
+    case "$(uname -s 2>/dev/null)" in
+    MINGW* | MSYS* | CYGWIN*) plat="windows" ;;
+    Darwin*) plat="darwin" ;;
+    *) plat="" ;;
+    esac
+    if [ -n "$plat" ] && [ -f "$base.expected.$plat" ]; then
+        expected="$base.expected.$plat"
+    fi
     stdin_file="$base.stdin"
     status_file="$base.status"
 

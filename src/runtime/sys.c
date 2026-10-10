@@ -2333,7 +2333,19 @@ static Value clock_ms_native(VM *vm, int argc, Value *argv)
 	(void)vm;
 	(void)argc;
 	(void)argv;
-	return NUMBER_VAL((double)clock() * 1000.0);
+	/* monotonic wall milliseconds, as documented: clock() is CPU time,
+	 * which sits at zero for a process that just started and fails a
+	 * `> 0` check on a fast machine. milliseconds since boot is large
+	 * from the first call and never runs backward. */
+#ifdef _WIN32
+	return NUMBER_VAL((double)GetTickCount64());
+#else
+	struct timespec ts;
+	/* NOLINTNEXTLINE(misc-include-cleaner) */
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return NUMBER_VAL(
+	        (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0);
+#endif
 }
 
 /* __sleep(seconds). interrupts, so ctrl-c works while a script waits. */

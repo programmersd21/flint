@@ -6,6 +6,7 @@
 # and leaves delivery to the documented contract.
 
 import signal
+import os
 
 print(signal.pid() > 0)
 print(signal.INT)
@@ -15,8 +16,18 @@ print(signal.KILL)
 # signal 0 checks existence without delivering. there is deliberately
 # no delivery test: send(pid, TERM) to self would end the runner, and
 # the unknown-name case below already proves names go through the map.
-print(signal.send(signal.pid(), 0))
-print(signal.send(999999, 0))
+# on windows kill does not exist at all, so the branch asserts the
+# refusal and signal.expected.windows holds its one line.
+if os.name() == "windows" {
+    try {
+        signal.send(signal.pid(), 0)
+    } catch e {
+        print(e.message)
+    }
+} else {
+    print(signal.send(signal.pid(), 0))
+    print(signal.send(999999, 0))
+}
 
 # unknown names throw a catchable error, not a guess
 try {
