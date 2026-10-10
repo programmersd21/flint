@@ -140,7 +140,14 @@ void sys_set_source_dir(const char *dir)
  */
 void sys_set_source_dir_for_file(const char *file)
 {
+	/* Both separators: this path came from the OS (argv, a dialog, a
+	 * drag onto the binary), and on Windows that means backslashes.
+	 * Import specifiers inside flint source stay forward-slash by
+	 * convention; this is about the one path the platform chose. */
 	const char *slash = strrchr(file, '/');
+	const char *back = strrchr(file, '\\');
+	if (back != NULL && (slash == NULL || back > slash))
+		slash = back;
 	if (slash == NULL) {
 		/* no directory component */
 		sys_set_source_dir("");
@@ -323,7 +330,14 @@ static bool is_library_name(const char *path)
 static const char *pkg_project_root(const char *from)
 {
 	static char root[4096];
-	if (from != NULL && from[0] != '\0' && from[0] != '/') {
+#ifdef _WIN32
+	bool from_absolute =
+	        from != NULL && from[0] != '\0' &&
+	        (from[0] == '/' || from[0] == '\\' || from[1] == ':');
+#else
+	bool from_absolute = from != NULL && from[0] != '\0' && from[0] == '/';
+#endif
+	if (from != NULL && from[0] != '\0' && !from_absolute) {
 		char cwd[4096];
 		if (getcwd(cwd, sizeof(cwd)) == NULL)
 			return NULL;
@@ -338,6 +352,15 @@ static const char *pkg_project_root(const char *from)
 		if (getcwd(root, sizeof(root)) == NULL)
 			return NULL;
 	}
+#ifdef _WIN32
+	/* Climb with one separator. The C runtime accepts '/' everywhere
+	 * on Windows, so backslashes become slashes once, here, rather
+	 * than in every split and marker below. */
+	for (char *p = root; *p != '\0'; p++) {
+		if (*p == '\\')
+			*p = '/';
+	}
+#endif
 	/* nearest directory at or above here holding flint.toml or
 	 * flint_modules/. a trailing slash trims to nothing, so drop
 	 * it first; the climb ends at the filesystem root. */
@@ -1096,6 +1119,12 @@ static Value os_setenv_native(VM *vm, int argc, Value *argv)
 		return NIL_VAL;
 	}
 #ifdef _WIN32
+	/* _putenv_s with an empty value deletes the variable instead of
+	 * setting it: an empty value is not representable on Windows.
+	 * Refuse it here, where the answer can be false, rather than
+	 * reporting success and leaving has() disagreeing. */
+	if (AS_CSTRING(argv[1])[0] == '\0')
+		return FALSE_VAL;
 	int rc = _putenv_s(name, AS_CSTRING(argv[1]));
 #else
 	int rc = setenv(name, AS_CSTRING(argv[1]), 1);

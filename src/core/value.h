@@ -13,6 +13,7 @@
 /* clang-format off: keep the masks and shifts aligned. */
 
 #include <assert.h>
+#include <inttypes.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -127,7 +128,12 @@ static inline double AS_NUMBER(Value v)
 }
 
 /*
- * Is this double safe to print with %ld?
+ * Is this double safe to print as an integer?
+ *
+ * int64_t, not long: Windows long is 32 bits, so (long)9007199254740992
+ * is undefined behaviour there and a no-op here, and a platform the
+ * tests never run is exactly where that hides. int64_t holds every
+ * double up to 2^53 on every platform flint targets.
  *
  * The order of the two tests is the whole point. Written the obvious way,
  *
@@ -151,7 +157,7 @@ static inline bool fl_double_is_printable_int(double d)
 	if (d < -FL_INT_EXACT_LIMIT || d > FL_INT_EXACT_LIMIT)
 		return false;
 
-	long as_long = (long)d;
+	int64_t as_long = (int64_t)d;
 
 	/* round-trip: a double that does not come back bit-identical is not
 	 * an integer we are willing to print as one */
@@ -159,23 +165,22 @@ static inline bool fl_double_is_printable_int(double d)
 }
 
 /* the printable form of a double that passes the test above */
-static inline long fl_double_to_long(double d) { return (long)d; }
+static inline int64_t fl_double_to_long(double d) { return (int64_t)d; }
 
-static inline int fl_itoa(long value, char *buf, size_t buflen)
+static inline int fl_itoa(int64_t value, char *buf, size_t buflen)
 {
 	/* enough for "-9223372036854775808" and its NUL */
 	if (buflen < 21)
 		return 0;
 	/* the cheap path is only worth taking for values that certainly
-	 * round-trip through long, which is what fl_double_is_printable_int
-	 * already established for the caller. */
-	if (value < -1000000000L || value > 1000000000L)
+	 * round-trip, which is what fl_double_is_printable_int already
+	 * established for the caller. */
+	if (value < -1000000000LL || value > 1000000000LL)
 		return 0;
 
 	char digits[20];
 	size_t n = 0;
-	unsigned long u = value < 0 ? (unsigned long)(-(value + 1)) + 1
-	                            : (unsigned long)value;
+	uint64_t u = value < 0 ? (uint64_t)(-(value + 1)) + 1 : (uint64_t)value;
 	do {
 		digits[n++] = (char)('0' + (u % 10));
 		u /= 10;
@@ -229,7 +234,7 @@ static inline int fl_double_to_text(double d, char *buf, size_t buflen)
 		int n = fl_itoa(fl_double_to_long(d), buf, buflen);
 		if (n > 0)
 			return n;
-		snprintf(buf, buflen, "%ld", fl_double_to_long(d));
+		snprintf(buf, buflen, "%" PRId64, fl_double_to_long(d));
 		return (int)strlen(buf);
 	}
 	/* 17 significant digits always round-trips a double, so the loop

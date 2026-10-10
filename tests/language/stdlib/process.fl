@@ -1,10 +1,10 @@
 # process -- running programs and reading what they said.
 #
 # every case here runs a real child and checks what came back. the commands
-# are echo, sh, cat and sleep: all present on any posix system, none of them
-# doing anything the test machine cannot do. wall-clock time is asserted only
-# as "it finished", never as an exact duration, because CI machines are slow
-# in ways that have nothing to do with this code.
+# are echo, sh, cat, pwd and sleep: all present on any posix system, none
+# of them doing anything the test machine cannot do. wall-clock time is
+# asserted only as "it finished", never as an exact duration, because CI
+# machines are slow in ways that have nothing to do with this code.
 
 import process
 
@@ -21,8 +21,11 @@ let spaced = process.run(["echo", "two words"])
 print(spaced.stdout)
 print(spaced.code)
 
-# a failing child: nonzero status, stderr captured, stdout empty
-let bad = process.run(["ls", "/no/such/directory/flint-process-test"])
+# a failing child: nonzero status, stderr captured, stdout empty. the
+# child is sh exiting 3 with a complaint on stderr, because the exit
+# code of ls on a missing directory is 2 on GNU and 1 on BSD -- the
+# test is about flint reading the failure, not about which ls ran.
+let bad = process.run(["sh", "-c", "echo no such directory >&2; exit 3"])
 print(bad.code)
 print(len(bad.stdout))
 print(len(bad.stderr) > 0)
@@ -32,8 +35,11 @@ print(bad.timed_out)
 let missing = process.run(["flint-no-such-program-xyz"])
 print(missing.code)
 
-# options: cwd, stdin, and timeout
-let here = process.run_opts(["pwd"], {cwd: "/tmp"})
+# options: cwd, stdin, and timeout. the cwd is /, because /tmp is a
+# symlink to /private/tmp on macOS and pwd prints the resolved path --
+# the test is about the child running where it was told, not about
+# which /tmp the machine has.
+let here = process.run_opts(["pwd"], {cwd: "/"})
 print(here.stdout)
 print(here.code)
 

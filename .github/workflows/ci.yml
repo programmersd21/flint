@@ -193,7 +193,7 @@ jobs:
   # show exactly where the POSIX assumptions break, in CI, instead of in
   # a user's terminal.
   macos-probe:
-    name: macOS probe (clang, release + language + unit)
+    name: macOS probe (clang, release + suites)
     runs-on: macos-15
     continue-on-error: true
     steps:
@@ -204,9 +204,19 @@ jobs:
       run: make test
     - name: unit tests
       run: make unit
+    # macOS is POSIX throughout (dlopen, fork, git, sh), so the suites
+    # that need them run here exactly as on Linux.
+    - name: formatter tests
+      run: make fmt-test
+    - name: package-manager tests
+      run: make pkg-test
+    - name: runner self-test
+      run: make runner-test
+    - name: native ABI tests
+      run: make native-test
 
   windows-probe:
-    name: Windows probe (msys2, release build only)
+    name: Windows probe (mingw64, build + suites)
     runs-on: windows-latest
     continue-on-error: true
     defaults:
@@ -216,14 +226,23 @@ jobs:
     - uses: actions/checkout@v5
     - uses: msys2/setup-msys2@v2
       with:
+        msystem: MINGW64
         update: true
         install: >-
           base-devel
           mingw-w64-x86_64-gcc
           mingw-w64-x86_64-make
-    # Compile only: the test scripts assume a POSIX shell, /tmp, and
-    # Unix utilities throughout, so running the suite here would test
-    # msys2 rather than flint. A green compile is the first fact; the
-    # suite follows when the scripts are portable.
+    # MINGW64, not MSYS: the msys shell emulates fork and would prove
+    # nothing about Windows. CC names the mingw compiler explicitly so a
+    # PATH change cannot silently switch back to the emulated one.
     - name: release build
-      run: make clean && make release
+      run: make clean && make release CC=x86_64-w64-mingw32-gcc
+    # The binary is flint.exe; the msys shell resolves ./flint to it, so
+    # the suite drivers run unmodified. Suites that need fork (pkg git
+    # fixtures) or POSIX processes cannot pass here and do not run:
+    # process execution and git dependencies report "needs a POSIX
+    # system" on Windows by design.
+    - name: language tests
+      run: make test CC=x86_64-w64-mingw32-gcc
+    - name: unit tests
+      run: make unit CC=x86_64-w64-mingw32-gcc

@@ -50,7 +50,9 @@ export fn getenv(name, fallback) {
 # set it for this process and its children. false only when the name itself
 # is invalid; the empty string and a name containing '=' are refused before
 # the call, because setenv would refuse them anyway and the message should
-# name the problem.
+# name the problem. on windows an empty *value* is also refused: the system
+# call deletes the variable instead of setting it, so the runtime returns
+# false rather than reporting success and leaving has() disagreeing.
 export fn setenv(name, value) {
     return __os_setenv(name, value)
 }

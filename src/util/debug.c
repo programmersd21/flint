@@ -13,6 +13,7 @@
 #include "stdint.h"
 #include "value.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 /* short form for disassembly. the real formatting is in the vm. */
 static void print_value_brief(Value value)
@@ -21,7 +22,7 @@ static void print_value_brief(Value value)
 		double d = AS_NUMBER(value);
 		/* integral values print as integers, same rule as print() */
 		if (fl_double_is_printable_int(d))
-			printf("%ld", fl_double_to_long(d));
+			printf("%" PRId64, fl_double_to_long(d));
 		else
 			printf("%g", d);
 	} else if (IS_NIL(value)) {

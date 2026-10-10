@@ -159,6 +159,11 @@ static Value value_of(FlValue handle)
 /* vtable implementations                                                  */
 /* ---------------------------------------------------------------------- */
 
+/* POSIX-only with the loader: on Windows nothing installs the table, so
+ * the implementations would all be unused statics under -Werror. The
+ * public fl_* functions below stay unconditional -- they read through
+ * api(), which is NULL there, and degrade to inert fallbacks. */
+#ifndef _WIN32
 static uint32_t api_abi_version(void) { return FL_ABI_VERSION; }
 
 static int api_has_capability(uint32_t capability)
@@ -496,6 +501,7 @@ static const FlApi flint_api = {
         api_raise_fmt,
         api_error_category,
 };
+#endif /* vtable implementations; see above */
 
 #ifndef _WIN32
 static void set_api(const FlApi *table) { fl_api = table; }

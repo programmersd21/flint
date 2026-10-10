@@ -20,6 +20,7 @@ program you can run: `./flint -e 'print(1)'`.
 | [cli.md](cli.md) | commands, flags, exit codes, `flint test` |
 | [packages.md](packages.md) | `flint.toml`, `flint pkg`, `flint.lock` |
 | [native-abi.md](native-abi.md) | writing a native module in C |
+| [platforms.md](platforms.md) | what runs where, and the windows gaps |
 | [rust.md](rust.md) | embedding flint, and modules in rust |
 
 the formal grammar and semantics are in [../SPEC.md](../SPEC.md), and the
