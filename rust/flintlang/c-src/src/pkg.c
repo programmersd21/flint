@@ -982,12 +982,8 @@ static bool pkg_ensure_mirror(const char *mirror,
 	close(lock_fd);
 	return ok;
 #else
-	(void)mirror;
-	(void)url;
-	(void)fetch;
-	(void)commit;
-	snprintf(error, error_size, "git dependencies need a POSIX system");
-	return false;
+	return pkg_ensure_mirror_unlocked(
+	        mirror, url, fetch, commit, error, error_size);
 #endif
 }
 
