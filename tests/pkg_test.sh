@@ -181,6 +181,29 @@ expect "symlink mirror is safely replaced" "0" "$code"
 expect "symlink target data is preserved" "keep me" "$(cat "$target/marker")"
 expect "replacement mirror still imports" "HEY zed" "$("$FLINT" use.fl 2>&1)"
 
+# Two projects may initialize the same mirror concurrently.
+mkdir -p "$WORK/concurrent/a" "$WORK/concurrent/b"
+for project in a b; do
+	cat > "$WORK/concurrent/$project/flint.toml" <<EOF3
+[package]
+name = "concurrent-$project"
+version = "0.1.0"
+EOF3
+done
+rm -rf "$mirror"
+(cd "$WORK/concurrent/a" && "$FLINT" pkg add "file://$WORK/gitsrc") \
+	>"$WORK/concurrent/a.out" 2>&1 &
+pid_a=$!
+(cd "$WORK/concurrent/b" && "$FLINT" pkg add "file://$WORK/gitsrc") \
+	>"$WORK/concurrent/b.out" 2>&1 &
+pid_b=$!
+if wait "$pid_a"; then code_a=0; else code_a=$?; fi
+if wait "$pid_b"; then code_b=0; else code_b=$?; fi
+expect "first concurrent install succeeds" "0" "$code_a"
+expect "second concurrent install succeeds" "0" "$code_b"
+expect_contains "first project got the package" "installed shout 0.3.0" "$(cat "$WORK/concurrent/a.out")"
+expect_contains "second project got the package" "installed shout 0.3.0" "$(cat "$WORK/concurrent/b.out")"
+
 cat > "$WORK/gitsrc/main.fl" <<'EOF'
 export fn loud(who) {
     return "LOUDER " + who
