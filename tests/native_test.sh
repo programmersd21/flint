@@ -68,21 +68,25 @@ done
 ok
 
 # --- a module that works -------------------------------------------------
+# plain `import`, no subcommand: the .so files sit beside the script, so
+# the bare library name resolves to them the way Python finds extension
+# modules on sys.path.
 cat > "$WORK/uses.fl" <<'EOF'
-print(greet("flint"))
-print(add(2, 3))
-print(add("not a number", 1))
-print(build(4))
-print(table())
+import hello_native
+print(hello_native.greet("flint"))
+print(hello_native.add(2, 3))
+print(hello_native.add("not a number", 1))
+print(hello_native.build(4))
+print(hello_native.table())
 try {
-    boom()
+    hello_native.boom()
 } catch e {
     print("caught: " + str(e))
 }
-print(remember(7))
+print(hello_native.remember(7))
 EOF
 
-out=$("$FLINT" native "$WORK/hello_native.so" native_demo "$WORK/uses.fl" 2>&1) \
+out=$("$FLINT" "$WORK/uses.fl" 2>&1) \
 	&& status=0 || status=$?
 expect_eq "a working module runs" 0 "$status"
 expect_contains "a native string concatenates across the boundary" "hello, flint" "$out"
@@ -92,16 +96,47 @@ expect_contains "a native list" "[0, 1, 2, 3]" "$out"
 expect_contains "a native table" "kind: native" "$out"
 expect_contains "a native error is catchable" "message: native module refused" "$out"
 
-# --- the paths that must fail -------------------------------------------
-out=$("$FLINT" native "$WORK/nope.so" demo 2>&1) && status=0 || status=$?
-expect_eq "a missing library fails" 1 "$([ $status -ne 0 ] && echo 1 || echo 0)"
-expect_contains "and says so" "cannot load" "$out"
+# --- source still wins over native --------------------------------------
+# a .fl beside the same name shadows the .so: the probe above fell
+# through to native only because no .fl existed. edited source must
+# never lose to a stale shared object.
+cat > "$WORK/hello_native.fl" <<'EOF'
+export fn greet(name) {
+    return "source wins: " + name
+}
+EOF
+cat > "$WORK/shadow.fl" <<'EOF'
+import hello_native
+print(hello_native.greet("flint"))
+EOF
+out=$("$FLINT" "$WORK/shadow.fl" 2>&1) \
+	&& status=0 || status=$?
+expect_eq "source shadows the shared object" 0 "$status"
+expect_contains "the .fl ran instead" "source wins: flint" "$out"
+rm "$WORK/hello_native.fl" "$WORK/shadow.fl"
 
-out=$("$FLINT" native "$WORK/no_symbol.so" demo 2>&1) && status=0 || status=$?
+# --- the paths that must fail -------------------------------------------
+cat > "$WORK/missing.fl" <<'EOF'
+import nope
+print(nope)
+EOF
+out=$("$FLINT" "$WORK/missing.fl" 2>&1) && status=0 || status=$?
+expect_eq "a missing library fails" 1 "$([ $status -ne 0 ] && echo 1 || echo 0)"
+expect_contains "and says so" "could not open module file" "$out"
+
+cat > "$WORK/nosym.fl" <<'EOF'
+import no_symbol
+print(no_symbol)
+EOF
+out=$("$FLINT" "$WORK/nosym.fl" 2>&1) && status=0 || status=$?
 expect_eq "a library with no entry point fails" 1 "$([ $status -ne 0 ] && echo 1 || echo 0)"
 expect_contains "and names the symbol" "flint_module_init" "$out"
 
-out=$("$FLINT" native "$WORK/bad_version.so" demo 2>&1) && status=0 || status=$?
+cat > "$WORK/badver.fl" <<'EOF'
+import bad_version
+print(bad_version)
+EOF
+out=$("$FLINT" "$WORK/badver.fl" 2>&1) && status=0 || status=$?
 expect_eq "an unsupported ABI version fails" 1 "$([ $status -ne 0 ] && echo 1 || echo 0)"
 expect_contains "and says why" "initialise" "$out"
 
@@ -157,24 +192,25 @@ build_rust_module() {
 if command -v cargo >/dev/null 2>&1; then
 	if build_rust_module "$REPO/rust/examples/rust-native/Cargo.toml" rust offline; then
 		ok
-		cat > "$WORK/rust.fl" <<'RFL'
-print(sum(5))
-print(words("the quick brown fox"))
-print(describe("text"))
+		# absolute path import: the binding derives from the filename,
+		# so `as` says what the script means.
+		cat > "$WORK/rust.fl" <<RFL
+import "$REPO/rust/examples/rust-native/target/release/librust_native.$DYLIB_EXT" as rust
+print(rust.sum(5))
+print(rust.words("the quick brown fox"))
+print(rust.describe("text"))
 try {
-    shout("hello")
+    rust.shout("hello")
 } catch e {
     print("caught: " + e.message)
 }
 try {
-    explode()
+    rust.explode()
 } catch e {
     print("contained")
 }
 RFL
-		out=$("$FLINT" native \
-			"$REPO/rust/examples/rust-native/target/release/librust_native.$DYLIB_EXT" \
-			rust_native "$WORK/rust.fl" 2>/dev/null) || status=1
+		out=$("$FLINT" "$WORK/rust.fl" 2>/dev/null) || status=1
 		expect_eq "a rust module runs" "10
 [\"the\", \"quick\", \"brown\", \"fox\"]
 {kind: string, from_rust: true}
@@ -193,14 +229,13 @@ fi
 if command -v cargo >/dev/null 2>&1; then
 	if build_rust_module "$REPO/rust/examples/tui-native/Cargo.toml" tui online; then
 		ok
-		cat > "$WORK/tui.fl" <<'TFL'
-let rows = render_frame("demo", ["one", "two"])
+		cat > "$WORK/tui.fl" <<TFL
+import "$REPO/rust/examples/tui-native/target/release/libtui_native.$DYLIB_EXT" as tui
+let rows = tui.render_frame("demo", ["one", "two"])
 for row in rows { print(row) }
-print(size())
+print(tui.size())
 TFL
-		out=$("$FLINT" native \
-			"$REPO/rust/examples/tui-native/target/release/libtui_native.$DYLIB_EXT" \
-			tui_native "$WORK/tui.fl" 2>/dev/null) || status=1
+		out=$("$FLINT" "$WORK/tui.fl" 2>/dev/null) || status=1
 		expect_contains "a ratatui frame comes back bordered" "│one" "$out"
 		expect_contains "with its title block" "demo" "$out"
 		expect_contains "and the size is reported" "[80, 24]" "$out"
@@ -229,10 +264,12 @@ expect_contains "and the answer is busy" "busy:" "$out"
 expect_contains "naming the exported functions" "exported function" "$out"
 
 # the library is still loaded after a busy answer: its functions run.
+# bare import again -- the .so beside the script resolves with no help.
 cat > "$WORK/stillhere.fl" <<'EOF'
-print(ping())
+import lifecycle
+print(lifecycle.ping())
 EOF
-out=$("$FLINT" native "$WORK/lifecycle.so" lifecycle "$WORK/stillhere.fl" 2>&1) \
+out=$("$FLINT" "$WORK/stillhere.fl" 2>&1) \
 	&& status=0 || status=$?
 expect_eq "a busy module still runs" 0 "$status"
 expect_contains "because nothing was force-closed" "true" "$out"
