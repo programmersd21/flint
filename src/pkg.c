@@ -82,7 +82,8 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
         int depth,
         char *error,
         size_t error_size,
-        int from);
+        int from,
+        bool *ok);
 
 /*
  * Run git and capture its stdout. argv[0] is "git", the rest are plain
@@ -2123,6 +2124,7 @@ static int pkg_install_core(bool update_all, const char *update_one)
 	int count = 0;
 	if (!pkg_collect_deps(&manifest, &deps, &count, error, sizeof(error))) {
 		fprintf(stderr, "flint pkg: %s\n", error);
+		pkg_free_deps(deps, count);
 		pkg_free_manifest(&manifest);
 		return 65;
 	}
@@ -2182,6 +2184,7 @@ static int pkg_install_core(bool update_all, const char *update_one)
 		 * realloc, and reading the old pointer afterwards is the
 		 * use-after-free that produced a garbage path here. */
 		int filled = count;
+		bool expand_ok = true;
 		PkgDep *expanded = pkg_expand_deps(deps,
 		        count,
 		        &capacity,
@@ -2190,15 +2193,16 @@ static int pkg_install_core(bool update_all, const char *update_one)
 		        0,
 		        error,
 		        sizeof(error),
-		        0);
-		if (expanded == NULL) {
+		        0,
+		        &expand_ok);
+		deps = expanded;
+		count = filled;
+		if (!expand_ok) {
 			fprintf(stderr, "flint pkg: %s\n", error);
 			pkg_free_deps(deps, count);
 			pkg_free_locked(locked, locked_count);
 			return 65;
 		}
-		deps = expanded;
-		count = filled;
 
 		/* dedupe by name: two packages can reach the same one by
 		 * different routes, and it should be installed once. A name
@@ -2956,14 +2960,16 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
         int depth,
         char *error,
         size_t error_size,
-        int from)
+        int from,
+        bool *ok)
 {
 	if (from == 0 && depth > 32) {
 		snprintf(error,
 		        error_size,
 		        "dependency chain is deeper than 32 -- is there a "
 		        "cycle?");
-		return NULL;
+		*ok = false;
+		return list;
 	}
 
 	/* count first: every append can move the array, so the loop below
@@ -2993,7 +2999,8 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 			        base_dir,
 			        list[i].path);
 		if (!pkg_load(manifest_path, &child, error, error_size))
-			return NULL;
+			*ok = false;
+			return list;
 		PkgDep *nested = NULL;
 		int nested_count = 0;
 		bool ok = pkg_collect_deps(
@@ -3001,7 +3008,8 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 		pkg_free_manifest(&child);
 		if (!ok) {
 			pkg_free_deps(nested, nested_count);
-			return NULL;
+			*ok = false;
+			return list;
 		}
 		added += nested_count;
 		pkg_free_deps(nested, nested_count);
@@ -3020,7 +3028,8 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 		PkgDep *bigger = realloc(list, (size_t)grown * sizeof(PkgDep));
 		if (bigger == NULL) {
 			snprintf(error, error_size, "out of memory");
-			return NULL;
+			*ok = false;
+			return list;
 		}
 		list = bigger;
 		*capacity = grown;
@@ -3058,7 +3067,8 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 			        base_dir,
 			        list[i].path);
 		if (!pkg_load(manifest_path, &child, error, error_size))
-			return NULL;
+			*ok = false;
+			return list;
 		PkgDep *nested = NULL;
 		int nested_count = 0;
 		bool ok = pkg_collect_deps(
@@ -3066,7 +3076,8 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 		pkg_free_manifest(&child);
 		if (!ok) {
 			pkg_free_deps(nested, nested_count);
-			return NULL;
+			*ok = false;
+			return list;
 		}
 		for (int k = 0; k < nested_count; k++) {
 			/* a nested path is relative to its parent package */
@@ -3095,7 +3106,9 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 				nested[k].path = absolute;
 			}
 			list[count++] = nested[k];
+			*filled = count;
 		}
+		free(nested);
 	}
 
 	*filled = count;
