@@ -2,64 +2,36 @@
 
 ## v0.13.2
 
-the release that retires the `native` subcommand. native modules load
-through `import` now -- `import mymod` finds `mymod.so` beside the
-script, in `flint_modules/`, or in the standard library, the way Python
-finds extension modules on `sys.path` -- so there is no loader ceremony
-left for a subcommand to perform. `flint native` is gone; running it
-reports the removal and points at `import` instead of falling through
-to "could not open file". `native-unload` keeps its CLI surface,
-because an unload request has no import equivalent.
+native modules load through `import` -- no subcommand, no loader
+ceremony:
 
-### import, not load
+```flint
+import mymod
+print(mymod.add(2, 3))
+```
 
-- bare `import foo` resolves `foo.so`/`.dylib`/`.dll` in the script's
-  directory, `flint_modules/`, then the standard library -- but only
-  after the `.fl` lookup fails everywhere, so edited source always
-  shadows a stale shared object, in either directory.
-- explicit paths work too: `import "./x.so"` and absolute paths load
-  directly, which covers the old `flint native /tmp/x.so mod` flow
-  without a subcommand.
-- the module name handed to `flint_module_init` derives from the
-  filename, and the binding derives the usual way (`import "x.so" as
-  y`, or `x` from the last component minus its extension).
-- registered functions arrive as a table under the imported name, so
-  `mymod.add(2, 3)` reads exactly like a source module's exports.
-- the same module cache, cycle detection, and failure discipline as
-  source imports: a repeated import is a lookup, a cycle reports the
-  path, and a failed load marks the key instead of retrying.
-- fixed alongside: registering a native mid-execution read the running
-  script's stack slots instead of the values just pushed
-  (`vm->stack[0]` assumed an empty stack, true at startup and false
-  under `import`). registration is stack-top relative now.
-- Windows refuses at load time with the existing message; the suffix
-  still matches so the error names the file the user meant.
+`import mymod` finds `mymod.so` (`.dylib`/`.dll` elsewhere) beside the
+script, in `flint_modules/`, or in the standard library. source always
+wins: a `.fl` shadows a stale shared object, in either directory.
+explicit paths (`import "./x.so"`, absolute paths) load directly.
+registered functions arrive as a table under the imported name, under
+the same cache, cycle detection, and failure discipline as source
+imports. the old `flint native` loader is gone -- running it explains
+the removal instead of failing cryptically -- while `native-unload`
+stays, since unload requests have no import equivalent. see
+[docs/native-abi.md](docs/native-abi.md).
 
-### crates: flintlang and flintlang-sys
+also in this release: [`flintlang`](https://crates.io/crates/flintlang)
+and [`flintlang-sys`](https://crates.io/crates/flintlang-sys) 0.13.2 on
+crates.io (the `flint` names were taken); styled `-h`/`--help` for
+`fmt`, `test`, and `native-unload`; and a fix where mid-execution
+native registration read the running script's stack slots instead of
+the values just pushed.
 
-`crates.io/flint` and `crates.io/flint-sys` are taken (a filesystem
-linter and unrelated bindings), so the packages ship as `flintlang`
-and `flintlang-sys` at 0.13.2, versioned in lockstep with the
-language. both carry READMEs, keywords, categories, and repository
-links. `flintlang` vendors its C sources and compiles them with the
-system C compiler -- no make, no network, no extra crates -- which is
-what makes it publishable; `flintlang-sys` pins its reviewed header
-copy. MSVC is refused with a message, matching the project's
-mingw-w64 stance on Windows.
-
-### styled subcommand help
-
-every subcommand answers `-h`/`--help` with the main interface's
-styled usage blocks: `fmt`, `test`, and `native-unload` join `pkg` and
-`sync`, which already had them. `test -h` used to report "unknown
-option"; `fmt -h` tried to format a file named `-h`.
-
-### version and gates
-
-version metadata moves to 0.13.2. the gates hold: 157 language tests,
-native ABI (now import-driven, 33 checks), package, runner, verifier,
-formatter, and Rust workspace checks all green. the release workflow
-ships linux-x86_64, macos-arm64, and windows-x86_64 tarballs as before.
+gates: 157 language tests, 33 native ABI checks, and the full C and
+Rust suites green on Linux, macOS, and Windows. artifacts below hold
+the binary, standard library, and docs per platform:
+`linux-x86_64`, `macos-arm64`, `windows-x86_64`.
 
 ## v0.13.1
 
