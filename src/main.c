@@ -919,83 +919,83 @@ static void print_usage(FILE *stream)
 	if (c) {
 		fprintf(stream,
 		        "usage: \x1b[1;36mflint\x1b[0m "
-			"\x1b[33m[options]\x1b[0m \x1b[32m[script.fl]\x1b[0m "
-			"[args...]\n");
+		        "\x1b[33m[options]\x1b[0m \x1b[32m[script.fl]\x1b[0m "
+		        "[args...]\n");
 		fprintf(stream,
 		        "       \x1b[1;36mflint\x1b[0m "
-			"\x1b[32m<command>\x1b[0m [args...]\n\n");
+		        "\x1b[32m<command>\x1b[0m [args...]\n\n");
 
 		fprintf(stream, "\x1b[1mcommands:\x1b[0m\n");
 		fprintf(stream,
 		        "  \x1b[32mpkg\x1b[0m \x1b[33m<cmd>\x1b[0m             "
-			"manage dependencies (install, add, update, list)\n");
+		        "manage dependencies (install, add, update, list)\n");
 		fprintf(stream,
 		        "  \x1b[32mfmt\x1b[0m \x1b[33m[--check] <files>\x1b[0m "
-			"  format source files canonically\n");
+		        "  format source files canonically\n");
 		fprintf(stream,
 		        "  \x1b[32mtest\x1b[0m \x1b[33m[--filter <pat>]\x1b[0m "
-			"  run tests under tests/\n");
+		        "  run tests under tests/\n");
 		fprintf(stream,
 		        "  \x1b[32msync\x1b[0m \x1b[33m[options]\x1b[0m        "
-			"  sync installed standard library\n");
+		        "  sync installed standard library\n");
 		fprintf(stream,
 		        "  \x1b[32mnative-unload\x1b[0m \x1b[33m<lib> "
-			"<mod>\x1b[0m test clean dynamic module unload\n\n");
+		        "<mod>\x1b[0m test clean dynamic module unload\n\n");
 
 		fprintf(stream, "\x1b[1moptions:\x1b[0m\n");
 		fprintf(stream,
 		        "  \x1b[33m-e <code>\x1b[0m                evaluate "
-			"inline code and exit\n");
+		        "inline code and exit\n");
 		fprintf(stream,
 		        "  \x1b[33m-\x1b[0m                        read script "
-			"from stdin\n");
+		        "from stdin\n");
 		fprintf(stream,
 		        "  \x1b[33m-h\x1b[0m, \x1b[33m--help\x1b[0m            "
-			"   show this help\n");
+		        "   show this help\n");
 		fprintf(stream,
 		        "  \x1b[33m-v\x1b[0m, \x1b[33m--version\x1b[0m         "
-			"   show version (use --verbose for details)\n");
+		        "   show version (use --verbose for details)\n");
 		fprintf(stream,
 		        "  \x1b[33m--quiet\x1b[0m                  suppress "
-			"repl banner\n\n");
+		        "repl banner\n\n");
 
 		fprintf(stream, "\x1b[1minspection:\x1b[0m\n");
 		fprintf(stream,
 		        "  \x1b[33m--check\x1b[0m                  parse and "
-			"verify without executing\n");
+		        "verify without executing\n");
 		fprintf(stream,
 		        "  \x1b[33m--trace\x1b[0m                  trace "
-			"bytecode instructions\n");
+		        "bytecode instructions\n");
 		fprintf(stream,
 		        "  \x1b[33m--dump-bytecode\x1b[0m          disassemble "
-			"bytecode before execution\n");
+		        "bytecode before execution\n");
 		fprintf(stream,
 		        "  \x1b[33m--profile\x1b[0m                print "
-			"runtime performance counters\n");
+		        "runtime performance counters\n");
 		fprintf(stream,
 		        "  \x1b[33m--stats\x1b[0m                  print "
-			"compiler and constant table statistics\n\n");
+		        "compiler and constant table statistics\n\n");
 
 		fprintf(stream, "\x1b[1mdiagnostics:\x1b[0m\n");
 		fprintf(stream,
 		        "  \x1b[33m--error-format=<fmt>\x1b[0m     human, "
-			"short, or json\n");
+		        "short, or json\n");
 		fprintf(stream,
 		        "  \x1b[33m--color=<when>\x1b[0m           auto, "
-			"always, or never\n");
+		        "always, or never\n");
 		fprintf(stream,
 		        "  \x1b[33m--warnings=<mode>\x1b[0m        default, "
-			"none, or all\n");
+		        "none, or all\n");
 		fprintf(stream,
 		        "  \x1b[33m--explain <code>\x1b[0m         explain a "
-			"diagnostic error code (e.g. E0001)\n");
+		        "diagnostic error code (e.g. E0001)\n");
 		fprintf(stream,
 		        "  \x1b[33m--fix\x1b[0m                    apply "
-			"machine-applicable compiler fixes\n\n");
+		        "machine-applicable compiler fixes\n\n");
 
 		fprintf(stream,
 		        "\x1b[90mrun without arguments to start the "
-			"interactive repl.\x1b[0m\n");
+		        "interactive repl.\x1b[0m\n");
 	} else {
 		fprintf(stream,
 		        "usage: flint [options] [script.fl] [args...]\n");
@@ -1004,48 +1004,48 @@ static void print_usage(FILE *stream)
 		fprintf(stream, "commands:\n");
 		fprintf(stream,
 		        "  pkg <cmd>             manage dependencies (install, "
-			"add, update, list)\n");
+		        "add, update, list)\n");
 		fprintf(stream,
 		        "  fmt [--check] <files> format source files "
-			"canonically\n");
+		        "canonically\n");
 		fprintf(stream,
 		        "  test [--filter <pat>] run tests under tests/\n");
 		fprintf(stream,
 		        "  sync [options]        sync installed standard "
-			"library\n");
+		        "library\n");
 		fprintf(stream,
 		        "  native-unload <lib> <mod> test clean dynamic module "
-			"unload\n\n");
+		        "unload\n\n");
 
 		fprintf(stream, "options:\n");
 		fprintf(stream,
 		        "  -e <code>             evaluate inline code and "
-			"exit\n");
+		        "exit\n");
 		fprintf(stream,
 		        "  -                     read script from stdin\n");
 		fprintf(stream, "  -h, --help            show this help\n");
 		fprintf(stream,
 		        "  -v, --version         show version (use --verbose "
-			"for details)\n");
+		        "for details)\n");
 		fprintf(stream,
 		        "  --quiet               suppress repl banner\n\n");
 
 		fprintf(stream, "inspection:\n");
 		fprintf(stream,
 		        "  --check               parse and verify without "
-			"executing\n");
+		        "executing\n");
 		fprintf(stream,
 		        "  --trace               trace bytecode "
-			"instructions\n");
+		        "instructions\n");
 		fprintf(stream,
 		        "  --dump-bytecode       disassemble bytecode before "
-			"execution\n");
+		        "execution\n");
 		fprintf(stream,
 		        "  --profile             print runtime performance "
-			"counters\n");
+		        "counters\n");
 		fprintf(stream,
 		        "  --stats               print compiler and constant "
-			"table statistics\n\n");
+		        "table statistics\n\n");
 
 		fprintf(stream, "diagnostics:\n");
 		fprintf(stream,
@@ -1056,14 +1056,14 @@ static void print_usage(FILE *stream)
 		        "  --warnings=<mode>     default, none, or all\n");
 		fprintf(stream,
 		        "  --explain <code>      explain a diagnostic error "
-			"code (e.g. E0001)\n");
+		        "code (e.g. E0001)\n");
 		fprintf(stream,
 		        "  --fix                 apply machine-applicable "
-			"compiler fixes\n\n");
+		        "compiler fixes\n\n");
 
 		fprintf(stream,
 		        "run without arguments to start the interactive "
-			"repl.\n");
+		        "repl.\n");
 	}
 }
 
@@ -1195,46 +1195,46 @@ static void print_sync_usage(FILE *stream)
 	if (c) {
 		fprintf(stream,
 		        "usage: \x1b[1;36mflint sync\x1b[0m "
-			"\x1b[33m[options]\x1b[0m\n\n");
+		        "\x1b[33m[options]\x1b[0m\n\n");
 		fprintf(stream,
 		        "download standard library modules and install "
-			"locally.\n\n");
+		        "locally.\n\n");
 
 		fprintf(stream, "\x1b[1moptions:\x1b[0m\n");
 		fprintf(stream,
 		        "  \x1b[33m--dry-run\x1b[0m            simulate fetch "
-			"without writing files\n");
+		        "without writing files\n");
 		fprintf(stream,
 		        "  \x1b[33m--ref=<ref>\x1b[0m          git ref or tag "
-			"(default: %s)\n",
+		        "(default: %s)\n",
 		        SYNC_DEFAULT_REF);
 		fprintf(stream,
 		        "  \x1b[33m--url=<base>\x1b[0m         base url "
-			"(default: github)\n");
+		        "(default: github)\n");
 		fprintf(stream,
 		        "  \x1b[33m-h\x1b[0m, \x1b[33m--help\x1b[0m           "
-			"show this help\n\n");
+		        "show this help\n\n");
 
 		fprintf(stream, "\x1b[1menvironment:\x1b[0m\n");
 		fprintf(stream,
 		        "  \x1b[32mFLINT_STDLIB\x1b[0m         override target "
-			"directory (~/.flint/stdlib)\n");
+		        "directory (~/.flint/stdlib)\n");
 		fprintf(stream,
 		        "  \x1b[32mFLINT_STDLIB_URL\x1b[0m     override "
-			"default base url\n");
+		        "default base url\n");
 		fprintf(stream,
 		        "  \x1b[32mFLINT_STDLIB_REF\x1b[0m     override "
-			"default git ref\n");
+		        "default git ref\n");
 	} else {
 		fprintf(stream, "usage: flint sync [options]\n\n");
 		fprintf(stream,
 		        "download standard library modules and install "
-			"locally.\n\n");
+		        "locally.\n\n");
 
 		fprintf(stream, "options:\n");
 		fprintf(stream,
 		        "  --dry-run        simulate fetch without writing "
-			"files\n");
+		        "files\n");
 		fprintf(stream,
 		        "  --ref=<ref>      git ref or tag (default: %s)\n",
 		        SYNC_DEFAULT_REF);
@@ -1369,7 +1369,7 @@ static void print_fmt_usage(FILE *stream)
 	if (c) {
 		fprintf(stream,
 		        "usage: \x1b[1;36mflint fmt\x1b[0m "
-			"\x1b[33m[--check]\x1b[0m \x1b[32m<files>\x1b[0m\n\n");
+		        "\x1b[33m[--check]\x1b[0m \x1b[32m<files>\x1b[0m\n\n");
 		fprintf(stream,
 		        "rewrite each file in canonical layout: 4-space\n");
 		fprintf(stream,
@@ -1381,10 +1381,10 @@ static void print_fmt_usage(FILE *stream)
 		fprintf(stream, "\x1b[1moptions:\x1b[0m\n");
 		fprintf(stream,
 		        "  \x1b[33m--check\x1b[0m              list files that "
-			"would change, rewrite nothing\n");
+		        "would change, rewrite nothing\n");
 		fprintf(stream,
 		        "  \x1b[33m-h\x1b[0m, \x1b[33m--help\x1b[0m            "
-			"   show this help\n");
+		        "   show this help\n");
 	} else {
 		fprintf(stream, "usage: flint fmt [--check] <files>\n\n");
 		fprintf(stream,
@@ -1398,7 +1398,7 @@ static void print_fmt_usage(FILE *stream)
 		fprintf(stream, "options:\n");
 		fprintf(stream,
 		        "  --check            list files that would change, "
-			"rewrite nothing\n");
+		        "rewrite nothing\n");
 		fprintf(stream, "  -h, --help         show this help\n");
 	}
 }
@@ -1410,7 +1410,7 @@ static void print_test_usage(FILE *stream)
 	if (c) {
 		fprintf(stream,
 		        "usage: \x1b[1;36mflint test\x1b[0m \x1b[33m[--filter "
-			"<pat>]\x1b[0m\n\n");
+		        "<pat>]\x1b[0m\n\n");
 		fprintf(stream,
 		        "run every *_test.fl under tests/, each in a fresh\n");
 		fprintf(stream,
@@ -1421,10 +1421,10 @@ static void print_test_usage(FILE *stream)
 		fprintf(stream, "\x1b[1moptions:\x1b[0m\n");
 		fprintf(stream,
 		        "  \x1b[33m--filter <pat>\x1b[0m      only tests whose "
-			"name has <pat>\n");
+		        "name has <pat>\n");
 		fprintf(stream,
 		        "  \x1b[33m-h\x1b[0m, \x1b[33m--help\x1b[0m            "
-			"   show this help\n");
+		        "   show this help\n");
 	} else {
 		fprintf(stream, "usage: flint test [--filter <pat>]\n\n");
 		fprintf(stream,
@@ -1437,7 +1437,7 @@ static void print_test_usage(FILE *stream)
 		fprintf(stream, "options:\n");
 		fprintf(stream,
 		        "  --filter <pat>     only tests whose name has "
-			"<pat>\n");
+		        "<pat>\n");
 		fprintf(stream, "  -h, --help         show this help\n");
 	}
 }
@@ -1449,14 +1449,14 @@ static void print_native_unload_usage(FILE *stream)
 	if (c) {
 		fprintf(stream,
 		        "usage: \x1b[1;36mflint native-unload\x1b[0m "
-			"\x1b[32m<lib> <mod>\x1b[0m\n\n");
+		        "\x1b[32m<lib> <mod>\x1b[0m\n\n");
 		fprintf(stream,
 		        "load a compiled module, then immediately ask it to\n");
 		fprintf(stream,
 		        "shut down and unload. the answer is almost always\n");
 		fprintf(stream,
 		        "busy: exported functions stay callable for the "
-			"life\n");
+		        "life\n");
 		fprintf(stream,
 		        "of the VM, so the library stays loaded. busy exits\n");
 		fprintf(stream,
@@ -1465,7 +1465,7 @@ static void print_native_unload_usage(FILE *stream)
 		fprintf(stream, "\x1b[1moptions:\x1b[0m\n");
 		fprintf(stream,
 		        "  \x1b[33m-h\x1b[0m, \x1b[33m--help\x1b[0m            "
-			"   show this help\n");
+		        "   show this help\n");
 	} else {
 		fprintf(stream, "usage: flint native-unload <lib> <mod>\n\n");
 		fprintf(stream,
@@ -1474,7 +1474,7 @@ static void print_native_unload_usage(FILE *stream)
 		        "shut down and unload. the answer is almost always\n");
 		fprintf(stream,
 		        "busy: exported functions stay callable for the "
-			"life\n");
+		        "life\n");
 		fprintf(stream,
 		        "of the VM, so the library stays loaded. busy exits\n");
 		fprintf(stream,
@@ -2031,25 +2031,25 @@ int main(int argc, char *argv[])
 			if (c) {
 				fprintf(stderr,
 				        "\x1b[1mflint native\x1b[0m was "
-					"removed in 0.13.2: "
+				        "removed in 0.13.2: "
 				        "native modules load through "
-					"\x1b[1;36mimport\x1b[0m.\n");
+				        "\x1b[1;36mimport\x1b[0m.\n");
 				fprintf(stderr,
 				        "write \x1b[32mimport mymod\x1b[0m "
-					"where mymod.so sits "
+				        "where mymod.so sits "
 				        "beside the script, in "
-					"\x1b[32mflint_modules/\x1b[0m, or in "
+				        "\x1b[32mflint_modules/\x1b[0m, or in "
 				        "the standard library.\n");
 			} else {
 				fprintf(stderr,
 				        "flint native was removed in 0.13.2: "
 				        "native modules load through "
-					"import.\n");
+				        "import.\n");
 				fprintf(stderr,
 				        "write `import mymod` where mymod.so "
-					"sits "
+				        "sits "
 				        "beside the script, in flint_modules/, "
-					"or in "
+				        "or in "
 				        "the standard library.\n");
 			}
 			return 64;

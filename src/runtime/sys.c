@@ -447,7 +447,8 @@ static char *pkg_declared_lib(const char *package_dir, bool *declared)
 {
 	*declared = false;
 	char manifest[8192];
-	if (snprintf(manifest, sizeof(manifest), "%s/flint.toml", package_dir) >=
+	if (snprintf(
+	            manifest, sizeof(manifest), "%s/flint.toml", package_dir) >=
 	        (int)sizeof(manifest))
 		return NULL;
 	FILE *file = fopen(manifest, "r");
@@ -495,8 +496,8 @@ static char *pkg_declared_lib(const char *package_dir, bool *declared)
 			break;
 		*end = '\0';
 		size_t len = strlen(p);
-		if (len < 4 || strcmp(p + len - 3, ".fl") != 0 ||
-		        p[0] == '/' || strchr(p, '\\') != NULL)
+		if (len < 4 || strcmp(p + len - 3, ".fl") != 0 || p[0] == '/' ||
+		        strchr(p, '\\') != NULL)
 			break;
 		bool unsafe = false;
 		const char *part = p;
@@ -522,7 +523,11 @@ static char *pkg_declared_lib(const char *package_dir, bool *declared)
 			break;
 		entry = malloc(dir_len + len + 2);
 		if (entry != NULL)
-			snprintf(entry, dir_len + len + 2, "%s/%s", package_dir, p);
+			snprintf(entry,
+			        dir_len + len + 2,
+			        "%s/%s",
+			        package_dir,
+			        p);
 		break;
 	}
 	fclose(file);
@@ -571,14 +576,16 @@ char *sys_resolve_module(const char *path)
 					found = pkg_declared_lib(
 					        dir_main, &has_declared_lib);
 					if (!has_declared_lib) {
-						size_t need = strlen(dir_main) + 9;
+						size_t need =
+						        strlen(dir_main) + 9;
 						char *main_file = malloc(need);
 						if (main_file != NULL) {
 							snprintf(main_file,
 							        need,
 							        "%s/main.fl",
 							        dir_main);
-							found = pkg_candidate(main_file);
+							found = pkg_candidate(
+							        main_file);
 							free(main_file);
 						}
 						/*
@@ -586,22 +593,37 @@ char *sys_resolve_module(const char *path)
 						 * itself, e.g. levenshtein/levenshtein.fl.
 						 */
 						if (found == NULL) {
-							size_t need_named = strlen(dir_main) + 1 +
-							        pathlen + 3 + 1;
-							char *named = malloc(need_named);
+							size_t need_named =
+							        strlen(dir_main) +
+							        1 + pathlen +
+							        3 + 1;
+							char *named = malloc(
+							        need_named);
 							if (named != NULL) {
-								snprintf(named, need_named, "%s/%s.fl",
-								        dir_main, path);
-								found = pkg_candidate(named);
+								snprintf(named,
+								        need_named,
+								        "%s/"
+								        "%s.fl",
+								        dir_main,
+								        path);
+								found = pkg_candidate(
+								        named);
 								free(named);
 							}
 						}
 						if (found == NULL) {
-							size_t need2 = strlen(dir_main) + 4;
-							char *flat = malloc(need2);
+							size_t need2 =
+							        strlen(dir_main) +
+							        4;
+							char *flat =
+							        malloc(need2);
 							if (flat != NULL) {
-								snprintf(flat, need2, "%s.fl", dir_main);
-								found = pkg_candidate(flat);
+								snprintf(flat,
+								        need2,
+								        "%s.fl",
+								        dir_main);
+								found = pkg_candidate(
+								        flat);
 								free(flat);
 							}
 						}

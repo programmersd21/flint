@@ -519,7 +519,9 @@ static char *socket_fetch(const Url *u,
 		buf_append(&req, hbuf, strlen(hbuf));
 	}
 	if (!has_ua) {
-		buf_append(&req, "User-Agent: flint/0.14.0\r\n", strlen("User-Agent: flint/0.14.0\r\n"));
+		buf_append(&req,
+		        "User-Agent: flint/0.14.0\r\n",
+		        strlen("User-Agent: flint/0.14.0\r\n"));
 	}
 	if (!has_accept) {
 		buf_append(&req, "Accept: */*\r\n", 13);

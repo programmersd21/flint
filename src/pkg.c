@@ -874,12 +874,17 @@ static bool pkg_ensure_mirror_unlocked(const char *mirror,
 				break;
 			}
 			if (errno != EEXIST) {
-				snprintf(error, error_size, "cannot create mirror staging directory");
+				snprintf(error,
+				        error_size,
+				        "cannot create mirror staging "
+				        "directory");
 				return false;
 			}
 		}
 		if (!made_staging) {
-			snprintf(error, error_size, "cannot create mirror staging directory");
+			snprintf(error,
+			        error_size,
+			        "cannot create mirror staging directory");
 			return false;
 		}
 		char *argv[] = {"git",
@@ -901,7 +906,9 @@ static bool pkg_ensure_mirror_unlocked(const char *mirror,
 		if (lstat(mirror, &st) == 0) {
 			if (!pkg_remove_tree(mirror)) {
 				(void)pkg_remove_tree(staging);
-				snprintf(error, error_size, "cannot remove damaged mirror");
+				snprintf(error,
+				        error_size,
+				        "cannot remove damaged mirror");
 				return false;
 			}
 		} else if (errno != ENOENT) {
@@ -1412,34 +1419,34 @@ static void pkg_usage(FILE *stream)
 	if (c) {
 		fprintf(stream,
 		        "usage: \x1b[1;36mflint pkg\x1b[0m "
-			"\x1b[32m<command>\x1b[0m "
-			"\x1b[33m[options]\x1b[0m\n\n");
+		        "\x1b[32m<command>\x1b[0m "
+		        "\x1b[33m[options]\x1b[0m\n\n");
 		fprintf(stream,
 		        "manage dependencies declared in flint.toml.\n\n");
 
 		fprintf(stream, "\x1b[1mcommands:\x1b[0m\n");
 		fprintf(stream,
 		        "  \x1b[32minstall\x1b[0m            resolve manifest "
-			"dependencies into flint_modules/\n");
+		        "dependencies into flint_modules/\n");
 		fprintf(stream,
 		        "  \x1b[32madd\x1b[0m \x1b[33m<path|url>\x1b[0m     "
-			"add dependency to flint.toml and install\n");
+		        "add dependency to flint.toml and install\n");
 		fprintf(stream,
 		        "  \x1b[32mupdate\x1b[0m \x1b[33m[name]\x1b[0m      "
-			"re-resolve git pins and reinstall\n");
+		        "re-resolve git pins and reinstall\n");
 		fprintf(stream,
 		        "  \x1b[32mlist\x1b[0m               list installed "
-			"packages from flint.lock\n\n");
+		        "packages from flint.lock\n\n");
 
 		fprintf(stream,
 		        "\x1b[1mmanifest format (flint.toml):\x1b[0m\n");
 		fprintf(stream, "  name = \"../path\"\n");
 		fprintf(stream,
 		        "  name = { path = \"../path\", version = \"^1.0.0\" "
-			"}\n");
+		        "}\n");
 		fprintf(stream,
 		        "  name = { git = \"https://...\", rev = \"v1.0.0\" "
-			"}\n");
+		        "}\n");
 	} else {
 		fprintf(stream, "usage: flint pkg <command> [options]\n\n");
 		fprintf(stream,
@@ -1448,25 +1455,25 @@ static void pkg_usage(FILE *stream)
 		fprintf(stream, "commands:\n");
 		fprintf(stream,
 		        "  install           resolve manifest dependencies "
-			"into flint_modules/\n");
+		        "into flint_modules/\n");
 		fprintf(stream,
 		        "  add <path|url>    add dependency to flint.toml and "
-			"install\n");
+		        "install\n");
 		fprintf(stream,
 		        "  update [name]     re-resolve git pins and "
-			"reinstall\n");
+		        "reinstall\n");
 		fprintf(stream,
 		        "  list              list installed packages from "
-			"flint.lock\n\n");
+		        "flint.lock\n\n");
 
 		fprintf(stream, "manifest format (flint.toml):\n");
 		fprintf(stream, "  name = \"../path\"\n");
 		fprintf(stream,
 		        "  name = { path = \"../path\", version = \"^1.0.0\" "
-			"}\n");
+		        "}\n");
 		fprintf(stream,
 		        "  name = { git = \"https://...\", rev = \"v1.0.0\" "
-			"}\n");
+		        "}\n");
 	}
 }
 
@@ -3097,7 +3104,9 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 			        base_dir,
 			        list[i].path);
 		if (path_len < 0 || (size_t)path_len >= sizeof(manifest_path)) {
-			snprintf(error, error_size, "dependency manifest path too long");
+			snprintf(error,
+			        error_size,
+			        "dependency manifest path too long");
 			*success = false;
 			return list;
 		}
@@ -3172,7 +3181,9 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 			        base_dir,
 			        list[i].path);
 		if (path_len < 0 || (size_t)path_len >= sizeof(manifest_path)) {
-			snprintf(error, error_size, "dependency manifest path too long");
+			snprintf(error,
+			        error_size,
+			        "dependency manifest path too long");
 			*success = false;
 			return list;
 		}
@@ -3229,7 +3240,9 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 					nested[k].path = NULL;
 					pkg_free_deps(nested, nested_count);
 					free(nested);
-					snprintf(error, error_size, "out of memory");
+					snprintf(error,
+					        error_size,
+					        "out of memory");
 					*success = false;
 					return list;
 				}
