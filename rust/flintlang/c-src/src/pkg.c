@@ -861,8 +861,14 @@ static bool pkg_ensure_mirror(const char *mirror,
 		        (char *)mirror,
 		        NULL};
 		if (pkg_git(argv, NULL, 1) != 0) {
+			/*
+			 * git can leave a partial destination when a clone fails.
+			 * Remove it so the next attempt can start cleanly rather
+			 * than failing forever on a non-empty cache directory.
+			 */
+			(void)pkg_remove_tree(mirror);
 			snprintf(error, error_size, "cannot clone '%s'", url);
-			return NULL;
+			return false;
 		}
 		return true;
 	}
