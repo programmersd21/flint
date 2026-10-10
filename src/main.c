@@ -1952,12 +1952,12 @@ int main(int argc, char *argv[])
 				                        0 ||
 				                strcmp(argv[arg + 1], "-v") ==
 				                        0)) {
-					printf("  language:        0.13.1\n");
-					printf("  runtime:         0.13.1\n");
-					printf("  package format:  0.13.1\n");
-					printf("  bytecode:        0.13.1\n");
+					printf("  language:        0.14.0\n");
+					printf("  runtime:         0.14.0\n");
+					printf("  package format:  0.14.0\n");
+					printf("  bytecode:        0.14.0\n");
 					printf("  native abi:      1\n");
-					printf("  lockfile:        0.13.1\n");
+					printf("  lockfile:        0.14.0\n");
 				}
 			} else {
 				printf("flint %s\n", FLINT_VERSION);
@@ -1966,12 +1966,12 @@ int main(int argc, char *argv[])
 				                        0 ||
 				                strcmp(argv[arg + 1], "-v") ==
 				                        0)) {
-					printf("  language:        0.13.1\n");
-					printf("  runtime:         0.13.1\n");
-					printf("  package format:  0.13.1\n");
-					printf("  bytecode:        0.13.1\n");
+					printf("  language:        0.14.0\n");
+					printf("  runtime:         0.14.0\n");
+					printf("  package format:  0.14.0\n");
+					printf("  bytecode:        0.14.0\n");
 					printf("  native abi:      1\n");
-					printf("  lockfile:        0.13.1\n");
+					printf("  lockfile:        0.14.0\n");
 				}
 			}
 			return 0;
