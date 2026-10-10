@@ -3707,6 +3707,53 @@ static bool starts_a_statement(TokenType type)
 }
 
 /*
+ * A literal arm pattern: a number, a string, true, false, or nil.
+ *
+ * The subject copy is already on the stack; this emits the literal after
+ * it, compares the two, and returns the jump a non-matching value takes.
+ * Either path leaves exactly the comparison boolean, which the caller
+ * pops. A leading minus is part of a numeric pattern, not a second
+ * operation, because `-1` as two tokens would otherwise parse as a
+ * subtraction with a missing left side.
+ */
+static int match_literal_test(int subject)
+{
+	bool negate = false;
+	if (match(TOKEN_MINUS)) {
+		if (!check(TOKEN_NUMBER)) {
+			error("expect a number after '-' in a match arm.");
+			return -1;
+		}
+		negate = true;
+	}
+
+	TokenType kind = state.parser.current.type;
+	advance();
+	emit_bytes(OP_GET_LOCAL, (uint8_t)subject);
+	switch (kind) {
+	case TOKEN_NUMBER:
+		number(false);
+		break;
+	case TOKEN_STRING:
+		string(false);
+		break;
+	case TOKEN_TRUE:
+	case TOKEN_FALSE:
+	case TOKEN_NIL:
+		literal(false);
+		break;
+	default:
+		error("expect a number, string, true, false, or nil in a "
+		      "match arm.");
+		return -1;
+	}
+	if (negate)
+		emit_byte(OP_NEGATE);
+	emit_byte(OP_EQUAL);
+	return emit_jump(OP_JUMP_IF_FALSE);
+}
+
+/*
  * `match subject { arm ... }`
  *
  * An arm is a variant (`R.Ok()`, or `R.Ok(x)` to bind the payload), a
@@ -3740,13 +3787,12 @@ static void match_statement(void)
 	                : NULL;
 
 	/*
-	 * The subject is already on the stack, so it becomes the hidden
-	 * local *at the slot it already occupies*. add_local() would take
-	 * the next one and every OP_GET_LOCAL below would read whatever
-	 * that slot happened to hold -- the same trap let_destructure
-	 * handles by pushing one NIL per name first, and the same reason:
-	 * a local is a stack slot, and claiming one without a value under
-	 * it aliases something.
+	 * The subject is already on the stack, so claiming the local *is*
+	 * how it becomes that slot: expression() left the value on top of
+	 * the stack, and add_local() takes the slot that value already
+	 * occupies. There is no SET_LOCAL and no POP here. Emitting either
+	 * would first duplicate the subject and then remove it, leaving the
+	 * local's slot without the value the arms read.
 	 */
 	Token hidden = {TOKEN_IDENTIFIER,
 	        " match",
@@ -3754,51 +3800,9 @@ static void match_statement(void)
 	        state.parser.previous.line,
 	        false,
 	        state.parser.previous.offset};
-	/*
-	 * The subject is already on the operand stack, so declaring the
-	 * local *is* how it becomes that slot -- the same discipline the
-	 * for-loop's hidden end and step use, and for the same reason: a
-	 * local is a stack slot, and a value sitting on the stack when the
-	 * slot is claimed is what the slot then names. Declaring it and
-	 * also storing to it would consume the value twice.
-	 */
-	/*
-	 * The subject is already on the operand stack when its slot is
-	 * claimed, so the two are in step by the compiler's convention -- a
-	 * local is a stack slot, and the value sitting on the stack when
-	 * the slot is taken is what the slot then names. Storing it as well
-	 * would consume the value twice, which is why the first arm of a
-	 * match and the second have to agree: the *next* match's subject
-	 * lands on the next free slot, and each match releases its own.
-	 */
-	/*
-	 * The subject is on the operand stack and becomes a local: a local is
-	 * a stack slot, and the value sitting on the stack when the slot is
-	 * claimed is what the slot then names. add_local() takes the next
-	 * free slot -- slot 0 is the callee, so the first is 1 -- and
-	 * OP_SET_LOCAL puts the subject where the arms will read it from.
-	 *
-	 * The OP_POP after it is the assignment's own leftover: SET_LOCAL
-	 * peeks, because an assignment is an expression, so the value has to
-	 * be dropped explicitly. One net value on the stack, one filled slot,
-	 * which is what every other declaration in the compiler does.
-	 */
-	/*
-	 * The subject becomes a local, and a local is a stack slot. slot 0 is
-	 * the callee in a function and in a script alike, so the first usable
-	 * slot is 1 -- add_local() takes the next free one, which at the top
-	 * level of a script is that first slot, and inside a function is the
-	 * one after whatever the parameters already claimed.
-	 */
-	/*
-	 * The initializer -- the value on top of the stack -- is stored into
-	 * the slot add_local() just took, exactly as `let` does.
-	 */
 	add_local(hidden, false);
 	mark_initialized();
 	int subject = state.current->local_count - 1;
-	emit_bytes(OP_SET_LOCAL, (uint8_t)subject);
-	emit_byte(OP_POP);
 	/*
 	 * One scope below the arms'. each arm opens a scope, and
 	 * end_scope() pops every local above the depth it returns to -- so a
@@ -3837,55 +3841,84 @@ static void match_statement(void)
 		seen_arm = true;
 		bool arm_consumed_block = false;
 		bool is_wildcard_arm = false;
+		Token bind_name = {TOKEN_EOF, NULL, 0, 0, false, 0};
+		bool bind_subject = false;
+		Token payload_name = {TOKEN_EOF, NULL, 0, 0, false, 0};
+		bool bind_payload = false;
+		bool has_test = false;
+		int next_arm = -1;
 
 		/*
-		 * peeked, not matched: an arm is a name followed by either a
-		 * dot (`R.Ok()`) or a brace (`binding { ... }`), and the name
-		 * has to survive the decision either way.
+		 * A literal pattern comes before the identifier check because a
+		 * number or string is not a name. The test leaves its boolean
+		 * for the shared arm handling below.
 		 */
-		/* match() has already consumed the `_`; advancing again would
-		 * step over the arm's brace. */
-		if (match(TOKEN_IDENTIFIER) &&
-		        state.parser.previous.length == 1 &&
-		        state.parser.previous.start[0] == '_') {
+		if (check(TOKEN_MINUS) || check(TOKEN_NUMBER) ||
+		        check(TOKEN_STRING) || check(TOKEN_TRUE) ||
+		        check(TOKEN_FALSE) || check(TOKEN_NIL)) {
+			next_arm = match_literal_test(subject);
+			if (state.parser.had_error)
+				return;
+			has_test = true;
+		} else if (match(TOKEN_IDENTIFIER) &&
+		           state.parser.previous.length == 1 &&
+		           state.parser.previous.start[0] == '_') {
+			/* `_` matches everything and binds nothing. Unlike the
+			 * branch below, there is no test boolean to clean up. */
 			has_wildcard = true;
 			is_wildcard_arm = true;
 		} else {
 			Token first = state.parser.previous;
-			consume(TOKEN_DOT,
-			        "expect '.' after an enum type, or write _ "
-			        "or a name to bind the value.");
-			consume(TOKEN_IDENTIFIER, "expect a variant name.");
-			Token variant_token = state.parser.previous;
-			ObjString *type_name = copy_string(
-			        state.vm, first.start, first.length);
-			ObjString *variant_name = copy_string(state.vm,
-			        variant_token.start,
-			        variant_token.length);
-			ObjEnumType *type =
-			        flint_lookup_enum(state.vm, type_name);
-
-			if (type == NULL) {
+			/*
+			 * Peeked, not matched: an arm is either `Type.Variant`
+			 * or a bare name that binds the whole subject. The name
+			 * has to survive the decision either way.
+			 */
+			if (!check(TOKEN_DOT)) {
 				/*
-				 * not an enum type, so the reader wrote a
-				 * name to bind the subject. that is a legal
-				 * arm and always matches -- no error, because
-				 * it is what someone who wrote one meant.
+				 * Not an enum type, so the reader wrote a name
+				 * to bind the subject. That is a legal arm and
+				 * always matches. The shared block handling
+				 * below declares it like any other local: the
+				 * subject copy is already on the stack when the
+				 * slot is claimed.
 				 */
-				emit_bytes(OP_GET_LOCAL, (uint8_t)subject);
-				add_local(first, false);
-				mark_initialized();
+				bind_name = first;
+				bind_subject = true;
 				has_wildcard = true;
 				is_wildcard_arm = true;
 			} else {
-				int tag = -1;
+				consume(TOKEN_DOT,
+				        "expect '.' after an enum type.");
+				consume(TOKEN_IDENTIFIER,
+				        "expect a variant name.");
+				Token variant_token = state.parser.previous;
+				ObjString *type_name = copy_string(
+				        state.vm, first.start, first.length);
+				ObjString *variant_name = copy_string(state.vm,
+				        variant_token.start,
+				        variant_token.length);
+				vm_push(state.vm, STR_VAL(type_name));
 				vm_push(state.vm, STR_VAL(variant_name));
+				ObjEnumType *type =
+				        flint_lookup_enum(state.vm, type_name);
+				int tag = -1;
 				Value tag_value;
-				if (table_get(&type->variants,
-				            variant_name,
-				            &tag_value))
+				if (type != NULL && table_get(&type->variants,
+				                            variant_name,
+				                            &tag_value))
 					tag = (int)AS_NUMBER(tag_value);
 				vm_pop(state.vm);
+				vm_pop(state.vm);
+				if (type == NULL) {
+					char message[192];
+					snprintf(message,
+					        sizeof(message),
+					        "unknown enum type '%s'.",
+					        type_name->chars);
+					error(message);
+					return;
+				}
 				if (tag < 0) {
 					char message[192];
 					snprintf(message,
@@ -3901,55 +3934,101 @@ static void match_statement(void)
 					covered[tag] = true;
 
 				/*
-				 * R.Ok() is a variant with no binding, and is the whole of what
-				 * an arm may be. R.Ok(x) -- binding the payload -- is not wired
-				 * up: the payload is on the stack by the time the arm compiles,
-				 * but the binding needs a slot the arm scope does not own, and
-				 * guessing one is how a value ends up read out of the wrong
-				 * place. an error saying so beats emitting something that reads
-				 * a slot it does not own.
+				 * R.Ok() matches the variant and discards its
+				 * payload; R.Ok(x) binds it. The parentheses are
+				 * part of the pattern, which is why an empty pair
+				 * is not a call: there is no receiver value here
+				 * to call.
 				 */
+				bool variant_has_payload =
+				        type->has_payload != NULL &&
+				        tag < type->variant_count &&
+				        type->has_payload[tag];
 				if (match(TOKEN_LEFT_PAREN)) {
 					if (check(TOKEN_RIGHT_PAREN)) {
 						advance();
 					} else {
-						error("a match arm cannot bind "
-						      "a payload yet; match "
-						      "the "
-						      "variant and read the "
-						      "value in the arm body.");
-						return;
+						consume(TOKEN_IDENTIFIER,
+						        "expect a payload "
+						        "name.");
+						payload_name =
+						        state.parser.previous;
+						consume(TOKEN_RIGHT_PAREN,
+						        "expect ')' after a "
+						        "payload name.");
+						if (!variant_has_payload) {
+							char message[192];
+							snprintf(message,
+							        sizeof(message),
+							        "variant %s.%s "
+							        "takes no "
+							        "value, so "
+							        "it has "
+							        "nothing to "
+							        "bind.",
+							        type_name
+							                ->chars,
+							        variant_name
+							                ->chars);
+							error(message);
+							return;
+						}
+						bind_payload = true;
 					}
 				}
 				/*
-				 * The arm test. MATCH_TAG replaces the subject with its
-				 * tag, EQUAL turns that into a boolean, and the jump peeks
-				 * it -- so on the path to the next arm the false value is
-		* still on the stack, and is dropped after that arm's
-				 * block rather than before it. */
+				 * The arm test. MATCH_TAG replaces the subject
+				 * copy with its tag and EQUAL turns that into a
+				 * boolean. JUMP_IF_FALSE peeks, so the boolean is
+				 * still on the stack on both paths; the taken
+				 * path pops it before the arm scope, and the
+				 * fall-through path pops it after the arm's exit
+				 * jump.
+				 */
 				emit_bytes(OP_GET_LOCAL, (uint8_t)subject);
 				emit_byte(OP_MATCH_TAG);
 				emit_constant(NUMBER_VAL((double)tag));
 				emit_byte(OP_EQUAL);
-				int next_arm = emit_jump(OP_JUMP_IF_FALSE);
-
-				consume(TOKEN_LEFT_BRACE,
-				        "expect '{' after a match arm.");
-				begin_scope();
-				block();
-				end_scope();
-				arm_ends[arm_count++] = emit_jump(OP_JUMP);
-				patch_jump(next_arm);
-				/* the failed test left its boolean behind */
-				emit_byte(OP_POP);
-				arm_consumed_block = true;
+				next_arm = emit_jump(OP_JUMP_IF_FALSE);
+				has_test = true;
 			}
+		}
+
+		if (has_test) {
+			emit_byte(OP_POP);
+			consume(TOKEN_LEFT_BRACE,
+			        "expect '{' after a match arm.");
+			begin_scope();
+			if (bind_payload) {
+				/*
+				 * The subject is still in its slot, so read it
+				 * again and extract the payload. The payload is
+				 * already on the stack when the binding claims
+				 * its slot, exactly like a `let` initializer.
+				 */
+				emit_bytes(OP_GET_LOCAL, (uint8_t)subject);
+				emit_byte(OP_MATCH_PAYLOAD);
+				add_local(payload_name, false);
+				mark_initialized();
+			}
+			block();
+			end_scope();
+			arm_ends[arm_count++] = emit_jump(OP_JUMP);
+			patch_jump(next_arm);
+			/* the failed test left its boolean behind */
+			emit_byte(OP_POP);
+			arm_consumed_block = true;
 		}
 
 		if (!arm_consumed_block) {
 			consume(TOKEN_LEFT_BRACE,
 			        "expect '{' after a match arm.");
 			begin_scope();
+			if (bind_subject) {
+				emit_bytes(OP_GET_LOCAL, (uint8_t)subject);
+				add_local(bind_name, false);
+				mark_initialized();
+			}
 			block();
 			end_scope();
 			arm_ends[arm_count++] = emit_jump(OP_JUMP);
@@ -4033,9 +4112,12 @@ static void match_statement(void)
 	for (int i = 0; i < arm_count; i++)
 		patch_jump(arm_ends[i]);
 
-	/* matched: the subject was a slot, not a stack value, so there is
-	 * nothing to pop -- the arms read it out of the frame and the
-	 * declaration below is what releases it. */
+	/* matched: release the subject's stack slot as well as its local.
+	 * The arms read it out of the frame, but it is still one operand
+	 * value; without this POP a match would leave its subject behind.
+	 * A match is a statement, so control continues with the stack
+	 * exactly as it found it. */
+	emit_byte(OP_POP);
 	state.current->local_count = subject;
 	int done = emit_jump(OP_JUMP);
 
@@ -4045,7 +4127,6 @@ static void match_statement(void)
 	        STR_VAL(copy_string(state.vm, "no match arm matched.", 20)));
 	emit_byte(OP_THROW);
 	patch_jump(done);
-	emit_byte(OP_NIL);
 }
 
 static void declaration(void)

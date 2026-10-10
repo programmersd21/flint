@@ -1,0 +1,79 @@
+# match payload binding, fall-through, and literal patterns.
+#
+# the subject slot used to be destroyed by the first failed arm test, so
+# any match whose first arm did not match crashed or misread. these cases
+# all failed before the 0.13.0 match rework.
+
+enum C { A, B(number) }
+
+# the roadmap repro: a payload binding inside a function
+fn f() {
+    match C.B(1) {
+        C.B(x) { print(x) }
+        _ { print("no") }
+    }
+}
+f()
+
+# fall-through: the first arm fails, the second reads the same subject
+fn g(v) {
+    match v {
+        C.A() { print("wrong arm ran") }
+        C.B() { print("second arm") }
+        _ { print("wrong arm ran") }
+    }
+}
+g(C.B(9))
+
+# a local declared in an arm body reads its own slot, not the test boolean
+fn h(v) {
+    match v {
+        C.A() { print("wrong arm ran") }
+        C.B() {
+            let y = 42
+            print(y)
+        }
+        _ { print("wrong arm ran") }
+    }
+}
+h(C.B(0))
+
+# binding the payload and using it
+fn k(v) {
+    match v {
+        C.A() { print("no payload") }
+        C.B(n) { print(n + 1) }
+        _ { print("wrong arm ran") }
+    }
+}
+k(C.B(41))
+
+# a bare name binds the whole subject
+fn b(v) {
+    match v {
+        C.A() { print("wrong arm ran") }
+        other { print("bound") }
+    }
+}
+b(C.B(3))
+
+# literal patterns: numbers, a negative, a string, and a wildcard
+fn lit(n) {
+    match n {
+        1 { print("one") }
+        -3 { print("neg three") }
+        "hi" { print("greeting") }
+        _ { print("other") }
+    }
+}
+lit(1)
+lit(-3)
+lit("hi")
+lit(99)
+
+# a match at the top level also falls through
+match C.A() {
+    C.B() { print("wrong arm ran") }
+    C.A() { print("top fallthrough") }
+    _ { print("wrong arm ran") }
+}

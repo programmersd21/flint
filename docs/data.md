@@ -424,8 +424,28 @@ for any other subject the compiler knows nothing, so a wildcard is
 required, and a value that matches no arm is a runtime error rather than a
 fall-through.
 
-two things are not supported: binding a payload in an arm (`Colour.Blue(n)`
-is an error saying so -- match the variant and read the value in the body),
-and matching a literal rather than a variant. `match` is also a name when a
-parenthesis follows it, because `glob.match` is a real function; the cost is
-one sharp edge, where `match (x) {` reads as a call.
+an arm can also bind a payload, match a literal, or bind the whole subject:
+
+```flint
+match Colour.Blue(7) {
+    Colour.Blue(n) { print(n) }
+    _ { print("other") }
+}
+
+match count {
+    1 { print("one") }
+    -3 { print("negative three") }
+    "hi" { print("greeting") }
+    _ { print("other") }
+}
+
+match value {
+    Colour.Red() { print("red") }
+    named { print(named) }
+}
+```
+
+a payload binding is allowed only for a variant declared with a payload;
+binding `Colour.Red(n)` is a compile-time error. `match` is also a name
+when a parenthesis follows it, because `glob.match` is a real function;
+the cost is one sharp edge, where `match (x) {` reads as a call.
