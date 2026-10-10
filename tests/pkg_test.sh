@@ -297,6 +297,37 @@ expect_contains "the lock records the nested source" "../base" \
 "$FLINT" pkg install >/dev/null 2>&1
 expect "reinstalling the chain succeeds" 0 "$?"
 
+# Cyclic path dependencies must stop with an error, not recurse indefinitely.
+mkdir -p "$WORK/cycle/a" "$WORK/cycle/b" "$WORK/cycle/app"
+cat > "$WORK/cycle/a/flint.toml" <<'EOF3'
+[package]
+name = "cycle-a"
+version = "1.0.0"
+
+[dependencies]
+cycle-b = { path = "../b" }
+EOF3
+cat > "$WORK/cycle/b/flint.toml" <<'EOF3'
+[package]
+name = "cycle-b"
+version = "1.0.0"
+
+[dependencies]
+cycle-a = { path = "../a" }
+EOF3
+cat > "$WORK/cycle/app/flint.toml" <<'EOF3'
+[package]
+name = "cycle-app"
+version = "0.1.0"
+
+[dependencies]
+cycle-a = { path = "../a" }
+EOF3
+cd "$WORK/cycle/app" || exit 1
+out=$("$FLINT" pkg install 2>&1) && status=0 || status=$?
+expect "cyclic dependencies fail" "1" "$([ "$status" -ne 0 ] && echo 1 || echo 0)"
+expect_contains "cycle failure is bounded and clear" "dependency chain is deeper than 32" "$out"
+
 cd "$WORK" || exit 1
 if [ "$failed" -ne 0 ]; then
 	echo "pkg tests: $checks checks, $failed failures"
