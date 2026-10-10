@@ -33,7 +33,7 @@ later; the host roots retained handles against the collector.
 
 ## Versions
 
-`flintlang-sys 0.13.2` binds ABI version 1; `abi_version()` asks the
+`flintlang-sys 0.14.0` binds ABI version 1; `abi_version()` asks the
 host at run time, which is the check that decides whether a module
 loads. The reviewed header copy lives in `c-api/`.
 
