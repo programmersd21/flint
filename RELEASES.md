@@ -1,5 +1,19 @@
 # releases
 
+## v0.14.0
+
+- Package imports support package-named single-file modules such as
+  `flint_modules/levenshtein/levenshtein.fl`, in addition to `main.fl`
+  and flat-module layouts.
+- Failed Git mirror clones clean up incomplete cache directories so a
+  subsequent package install can recover.
+- Document the package import resolution order and keep the standalone C
+  runtime and Rust-embedded C source synchronized.
+
+This is release preparation. Do not publish a `v0.14.0` tag or artifacts
+until PRs #10 and #11 are merged and the full `make validate` gate plus
+supported-platform checks have passed.
+
 ## v0.13.2
 
 native modules load through `import` -- no subcommand, no loader
