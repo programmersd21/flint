@@ -1101,6 +1101,26 @@ static bool pkg_copy_tree(const char *from, const char *to)
 /* remove a tree, for reinstalling over a previous copy. errors fail
  * loudly: a half-removed directory followed by a copy is a merged
  * one, and merged dependencies are how stale files haunt builds. */
+static bool pkg_remove_entry(const char *child)
+{
+	struct stat st;
+	int sr = pkg_stat_entry(child, &st);
+	if (sr < 0)
+		return false;
+	if (sr == 0 && S_ISDIR(st.st_mode))
+		return pkg_remove_tree(child);
+	if (remove(child) == 0)
+		return true;
+#ifdef _WIN32
+	/* a reparse point is removed as a link, never followed: it may be
+	 * a junction, which rmdir unlinks without recursing. remove()
+	 * first for symlinks to files. */
+	return rmdir(child) == 0;
+#else
+	return false;
+#endif
+}
+
 static bool pkg_remove_tree(const char *path)
 {
 	DIR *dir = opendir(path);
@@ -1117,27 +1137,7 @@ static bool pkg_remove_tree(const char *path)
 			ok = false;
 			break;
 		}
-		struct stat st;
-		int sr = pkg_stat_entry(child, &st);
-		if (sr < 0) {
-			free(child);
-			ok = false;
-			break;
-		}
-		if (sr == 0 && S_ISDIR(st.st_mode))
-			ok = pkg_remove_tree(child);
-		else if (sr == 0)
-			ok = remove(child) == 0;
-#ifdef _WIN32
-		/* a reparse point is removed as a link, never followed: it
-		 * may be a junction, which rmdir unlinks without
-		 * recursing. remove() first for symlinks to files. */
-		else if (remove(child) != 0)
-			ok = rmdir(child) == 0;
-#else
-		else
-			ok = remove(child) == 0;
-#endif
+		ok = pkg_remove_entry(child);
 		free(child);
 	}
 	closedir(dir);
