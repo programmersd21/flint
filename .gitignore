@@ -1,6 +1,8 @@
 broken/
 
-flint
+# the root binary only: a bare `flint` pattern would also ignore the
+# rust/flint crate directory, and the safe wrapper must be committed.
+/flint
 flint-debug
 flint-stress
 flint-goto*
@@ -10,6 +12,9 @@ build/
 *.d
 *.bin
 names.txt
+
+# the static embedding library is a build artifact (`make libflint.a`)
+libflint.a
 
 # release tarballs are built artifacts, not sources
 flint-v*.tar.gz

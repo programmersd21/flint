@@ -1,0 +1,15 @@
+[package]
+name = "flint"
+version = "0.13.0"
+edition = "2021"
+description = "Safe Rust embedding of the Flint scripting language runtime"
+license = "MIT"
+repository = "https://github.com/programmersd21/flint"
+build = "build.rs"
+
+[lib]
+name = "flint"
+path = "src/lib.rs"
+
+[dependencies]
+flint-sys = { path = "../flint-sys" }

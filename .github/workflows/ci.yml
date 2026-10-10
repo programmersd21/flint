@@ -53,6 +53,16 @@ jobs:
     - name: unit tests
       run: make unit
 
+    # The safe Rust embedding crate, against the real runtime. The build
+    # script runs `make libflint.a` itself, so this exercises the static
+    # library target too -- a host that cannot link the archive is a host
+    # the embedding story does not work for.
+    - name: rust formatting
+      run: cargo fmt --check --manifest-path rust/Cargo.toml
+
+    - name: rust embedding tests
+      run: cargo test --offline --manifest-path rust/Cargo.toml
+
     - name: debug build and disassembler
       run: make clean && make debug
 
@@ -157,3 +167,73 @@ jobs:
 
     - name: ccache stats
       run: ccache -s
+
+  # The Rust workspace: the safe `flint` embedding crate over `flint-sys`,
+  # built against the real C runtime this same checkout compiles. The
+  # crate's build script runs `make libflint.a` itself, so the runner
+  # needs the same C toolchain as the build job plus a Rust toolchain.
+  rust:
+    name: Rust workspace (fmt, clippy, test, examples)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+    - uses: actions/checkout@v5
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+    - name: formatting
+      run: cargo fmt --check
+    - name: lints
+      run: cargo clippy --workspace --all-targets -- -D warnings
+    - name: tests
+      run: cargo test --workspace
+    # The cdylib guest-module example has no third-party dependencies,
+    # so it builds offline; it proves the workspace still links the way
+    # `flint native` loads it. tui-native is excluded: it needs the
+    # registry for ratatui.
+    - name: guest-module example
+      run: cargo build --release --offline
+      working-directory: rust/examples/rust-native
+
+  # Portability probes: signal, not gate. Neither job blocks a push --
+  # both are continue-on-error -- because neither platform is claimed as
+  # supported until its probe goes green and stays green. Their job is to
+  # show exactly where the POSIX assumptions break, in CI, instead of in
+  # a user's terminal.
+  macos-probe:
+    name: macOS probe (clang, release + language + unit)
+    runs-on: macos-15
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v5
+    - name: release build
+      run: make clean && make release
+    - name: language tests
+      run: make test
+    - name: unit tests
+      run: make unit
+
+  windows-probe:
+    name: Windows probe (msys2, release build only)
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+    - uses: actions/checkout@v5
+    - uses: msys2/setup-msys2@v2
+      with:
+        update: true
+        install: >-
+          base-devel
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-make
+    # Compile only: the test scripts assume a POSIX shell, /tmp, and
+    # Unix utilities throughout, so running the suite here would test
+    # msys2 rather than flint. A green compile is the first fact; the
+    # suite follows when the scripts are portable.
+    - name: release build
+      run: make clean && make release

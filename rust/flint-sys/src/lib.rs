@@ -81,13 +81,7 @@ impl Value {
     /// A string, built from bytes. Flint strings are byte sequences, so this
     /// takes `&[u8]` rather than `&str` for the cases where they differ.
     pub fn string_from_bytes(m: Module, bytes: &[u8]) -> Value {
-        unsafe {
-            flint_sys_raw::fl_string(
-                m,
-                bytes.as_ptr() as *const c_char,
-                bytes.len(),
-            )
-        }
+        unsafe { flint_sys_raw::fl_string(m, bytes.as_ptr() as *const c_char, bytes.len()) }
     }
 
     /// A string from UTF-8 text.
@@ -259,12 +253,7 @@ impl Module {
     pub fn table_get(self, table: Value, key: &str) -> Option<Value> {
         let mut out = Value::nil();
         let ok = unsafe {
-            flint_sys_raw::fl_table_get(
-                table,
-                key.as_ptr() as *const c_char,
-                key.len(),
-                &mut out,
-            )
+            flint_sys_raw::fl_table_get(table, key.as_ptr() as *const c_char, key.len(), &mut out)
         };
         if ok != 0 {
             Some(out)
@@ -295,11 +284,7 @@ impl Module {
     }
 
     /// Raise with formatting.
-    pub fn raise_fmt(
-        self,
-        template: &str,
-        args: std::fmt::Arguments<'_>,
-    ) {
+    pub fn raise_fmt(self, template: &str, args: std::fmt::Arguments<'_>) {
         // rendered through a write to a String, which is how Arguments is
         // meant to be consumed without re-implementing format_args
         use std::fmt::Write;
@@ -430,9 +415,7 @@ pub mod flint_sys_raw {
         pub fn fl_module_func(
             module: FlModule,
             name: *const c_char,
-            f: Option<
-                extern "C" fn(FlModule, c_int, *const FlValue) -> FlValue,
-            >,
+            f: Option<extern "C" fn(FlModule, c_int, *const FlValue) -> FlValue>,
             arity: c_int,
         ) -> c_int;
         pub fn fl_module_vm(module: FlModule) -> *mut c_void;
@@ -440,34 +423,19 @@ pub mod flint_sys_raw {
         pub fn fl_nil() -> FlValue;
         pub fn fl_bool(value: c_int) -> FlValue;
         pub fn fl_number(value: f64) -> FlValue;
-        pub fn fl_string(
-            module: FlModule,
-            bytes: *const c_char,
-            length: usize,
-        ) -> FlValue;
+        pub fn fl_string(module: FlModule, bytes: *const c_char, length: usize) -> FlValue;
 
         pub fn fl_type(value: FlValue) -> c_int;
         pub fn fl_to_bool(value: FlValue) -> c_int;
         pub fn fl_to_number(value: FlValue, out: *mut f64) -> c_int;
-        pub fn fl_to_string(
-            value: FlValue,
-            bytes: *mut *const c_char,
-            length: *mut usize,
-        ) -> c_int;
+        pub fn fl_to_string(value: FlValue, bytes: *mut *const c_char, length: *mut usize)
+            -> c_int;
 
         pub fn fl_new_list(module: FlModule) -> FlValue;
         pub fn fl_new_table(module: FlModule) -> FlValue;
-        pub fn fl_list_push(
-            module: FlModule,
-            list: FlValue,
-            value: FlValue,
-        ) -> c_int;
+        pub fn fl_list_push(module: FlModule, list: FlValue, value: FlValue) -> c_int;
         pub fn fl_list_length(list: FlValue, out: *mut usize) -> c_int;
-        pub fn fl_list_get(
-            list: FlValue,
-            index: usize,
-            out: *mut FlValue,
-        ) -> c_int;
+        pub fn fl_list_get(list: FlValue, index: usize, out: *mut FlValue) -> c_int;
 
         pub fn fl_table_set(
             module: FlModule,
@@ -482,11 +450,7 @@ pub mod flint_sys_raw {
             key_length: usize,
             out: *mut FlValue,
         ) -> c_int;
-        pub fn fl_table_has(
-            table: FlValue,
-            key: *const c_char,
-            key_length: usize,
-        ) -> c_int;
+        pub fn fl_table_has(table: FlValue, key: *const c_char, key_length: usize) -> c_int;
         pub fn fl_table_length(table: FlValue, out: *mut usize) -> c_int;
 
         pub fn fl_retain(module: FlModule, value: FlValue) -> FlValue;

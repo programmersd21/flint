@@ -1,0 +1,4 @@
+[workspace]
+members = ["flint", "flint-sys"]
+exclude = ["examples/rust-native", "examples/tui-native"]
+resolver = "2"
