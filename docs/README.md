@@ -29,3 +29,5 @@ snippets here and are commented line by line.
 
 if something in here disagrees with the source, the source is right and this
 is a bug in the documentation.
+
+| [roadmap-0.13.md](roadmap-0.13.md) | what 0.13.0 is, verified from the source |
