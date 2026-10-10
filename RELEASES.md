@@ -1,5 +1,70 @@
 # releases
 
+## v0.13.1
+
+the release the CI probes wrote. 0.13.0 shipped Linux-green with two
+non-gating portability probes, and the probes spent the week finding
+real defects: a macOS stdlib lookup that never existed, Windows-only
+compile failures, test scripts with GNU assumptions, and tests that
+asserted one platform's child behavior as universal. every one below
+was found by a probe job, fixed, and re-proven by the same job.
+
+alongside the fixes, the seven deferred standard-library modules land:
+log, test, hash, debug, regex, compress, and signal. 0.13.0 deferred
+regex and compress as easy to write badly and hard to notice; they
+shipped here because each carries the proof the worry demanded --
+linear-time matching with no backtracking, and exact round-trips over
+all 256 byte values.
+
+### the probes and what they found
+
+- macOS built clean and failed every import: without `/proc/self/exe`
+  there was no executable-relative stdlib lookup. `_NSGetExecutablePath`
+  fills the branch, and the suite runs 150/150 on Apple silicon.
+- Windows mingw64 failed on loader-only symbols (`-Wunused` under
+  `-Werror`): the vtable implementations, installer, trampoline,
+  registry, and handle decoder are fenced behind `_WIN32` with the
+  loader, and the public entry points degrade through their existing
+  NULL-vtable fallbacks.
+- `pkg_test.sh` used GNU `sed -i`, invalid on BSD sed: in-place edits
+  go through a temp file plus `mv` now.
+- `process.fl` asserted GNU `ls` exit codes and a non-symlinked `/tmp`:
+  the failing child is `sh` exiting 3, and the cwd is `/`.
+- macOS `ld` resolves every symbol at link time, so test modules link
+  `-undefined dynamic_lookup` and resolve `fl_*` against the loading
+  host, as on Linux.
+- `--fix`'s atomic replace is POSIX-only, so Windows rewrites in place
+  and documents the failure mode.
+
+neither platform is claimed as supported: the probes stay
+`continue-on-error` signal, documented in `docs/platforms.md`, until
+each goes green and stays green.
+
+### the seven modules
+
+`import log` levels messages to stdout with per-logger levels and
+optional timestamps. `import test` runs checks and named cases, catches
+throws into failures, and `finish()` exits nonzero -- a suite file as a
+gate. `import hash` is djb2 plus hex, exact in doubles, and says
+non-cryptographic on the tin. `import debug` exposes the live call
+stack through one small read-only `__debug_frames` native, formats
+traces like the runtime, and dumps values. `import regex` is a Thompson
+NFA -- full match, leftmost-longest search, no backtracking, invalid
+patterns return nil. `import compress` is LZSS with a length-prefixed
+framing, exact round-trips, nil on corruption, documented for small
+payloads. `import signal` maps seven portable signal numbers and offers
+raise, kill-based send (POSIX-only), and pid -- with no handlers, ever,
+because a collector and async C handlers do not mix.
+
+### version and gates
+
+version metadata moves to 0.13.1. the gates hold: 157 language tests,
+the sanitizer and computed-goto suites, verifier, formatter, package,
+runner, native ABI, and Rust workspace checks all green on Linux. the
+macOS probe runs the language suite 150/150; the seven new module
+suites run inside the same runner and pass on Linux, with macOS
+confirmation awaiting the next probe run.
+
 ## v0.13.0
 
 the release that finishes what 0.12.0 deferred and makes embedding a
@@ -145,7 +210,9 @@ one makes a lockfile untrustworthy. value exchange and host callbacks
 on the engine API: each needs a lifetime story the engine side does not
 yet have, and an API that hands out dangling values would be worse than
 none. Windows and macOS support: probed, not claimed. `regex` and
-`compress`: easy to write badly and hard to notice.
+`compress` were deferred here as easy to write badly and hard to
+notice; both shipped in 0.13.1 with the proofs attached -- linear-time
+matching, exact round-trips.
 
 ### version and gates
 
