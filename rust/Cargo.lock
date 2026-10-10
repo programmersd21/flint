@@ -3,12 +3,12 @@
 version = 4
 
 [[package]]
-name = "flint"
-version = "0.13.0"
+name = "flintlang"
+version = "0.13.2"
 dependencies = [
- "flint-sys",
+ "flintlang-sys",
 ]
 
 [[package]]
-name = "flint-sys"
-version = "0.1.0"
+name = "flintlang-sys"
+version = "0.13.2"
