@@ -36,9 +36,27 @@ all 256 byte values.
 - `--fix`'s atomic replace is POSIX-only, so Windows rewrites in place
   and documents the failure mode.
 
-neither platform is claimed as supported: the probes stay
-`continue-on-error` signal, documented in `docs/platforms.md`, until
-each goes green and stays green.
+- `clock_ms()` was CPU time, which sits at zero on a fast machine and
+  failed its own test on Windows: it is monotonic wall time now, as the
+  docs already promised.
+- `glob.fl` hardcoded `/tmp`, absent on Windows: temp dirs come from
+  `os.tmpdir()` instead.
+- `process.fl` and `signal.fl` assert POSIX-only behavior, so the
+  runner prefers `.expected.windows` (and `.status.windows`) transcripts
+  beside the shared ones -- one file per contract, not a fork.
+- the rust cdylibs called `fl_*` host functions, which Linux leaves for
+  the loader: on Darwin they link one `-C link-arg` per word with
+  `-undefined dynamic_lookup`, and load as `.dylib`.
+- `ratatui` lives on the registry, so the tui example builds online
+  (version still pinned by its lockfile); zero-dependency crates stay
+  `--offline` and hermetic.
+- `-rdynamic` is ELF-only: mingw rejects it, and needs nothing in its
+  place because the Windows loader refuses up front.
+
+all three probes are green in CI -- 157 of 157 language tests on
+Linux, macOS, and Windows alike -- so `docs/platforms.md` now marks
+all three supported, and this release ships a tarball for each:
+linux-x86_64, macos-arm64, windows-x86_64.
 
 ### the seven modules
 
@@ -60,10 +78,9 @@ because a collector and async C handlers do not mix.
 
 version metadata moves to 0.13.1. the gates hold: 157 language tests,
 the sanitizer and computed-goto suites, verifier, formatter, package,
-runner, native ABI, and Rust workspace checks all green on Linux. the
-macOS probe runs the language suite 150/150; the seven new module
-suites run inside the same runner and pass on Linux, with macOS
-confirmation awaiting the next probe run.
+runner, native ABI, and Rust workspace checks all green on Linux --
+and the full language suite passes on macOS and Windows too, in CI,
+on the same commit this tag points at.
 
 ## v0.13.0
 
