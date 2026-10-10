@@ -1,5 +1,18 @@
 # releases
 
+## v0.14.0
+
+- Package imports now resolve a package-named single-file module such as
+  `flint_modules/levenshtein/levenshtein.fl`, in addition to the existing
+  `main.fl` and flat-module layouts. This fixes `import levenshtein` for
+  packages that publish a same-named module file.
+- Keep the C runtime and the Rust-embedded C source in sync.
+- The Git dependency package test now covers a package whose entry file is
+  named after the package.
+
+Release validation is pending; do not publish artifacts until the full
+`make validate` gate and supported-platform CI have passed.
+
 ## v0.13.2
 
 native modules load through `import` -- no subcommand, no loader
