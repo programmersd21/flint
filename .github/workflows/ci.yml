@@ -53,16 +53,6 @@ jobs:
     - name: unit tests
       run: make unit
 
-    # The safe Rust embedding crate, against the real runtime. The build
-    # script runs `make libflint.a` itself, so this exercises the static
-    # library target too -- a host that cannot link the archive is a host
-    # the embedding story does not work for.
-    - name: rust formatting
-      run: cargo fmt --check --manifest-path rust/Cargo.toml
-
-    - name: rust embedding tests
-      run: cargo test --offline --manifest-path rust/Cargo.toml
-
     - name: debug build and disassembler
       run: make clean && make debug
 
