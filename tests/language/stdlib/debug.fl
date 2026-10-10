@@ -1,0 +1,24 @@
+# debug -- frames name the caller, format renders traces.
+#
+# line numbers appear in the output below: they are this file's own
+# lines, so editing this file means re-recording the expectation, the
+# same way the error tests work.
+
+import debug
+
+fn probe() {
+    return debug.frames()
+}
+
+let fs = probe()
+print(fs[0].function)
+print(fs[1].function)
+print(debug.format(fs))
+
+try {
+    nosuchfn()
+} catch e {
+    print(debug.err_str(e))
+}
+
+debug.dump([1, {a: 2}])

@@ -1,0 +1,85 @@
+# signal -- process signals by number, in flint.
+#
+#     import signal
+#     print(signal.send(signal.pid(), 0))   # true: we exist
+#
+# signals are numbers: HUP 1, INT 2, QUIT 3, ABRT 6, KILL 9, PIPE 13,
+# TERM 15. those seven are the same on Linux, macOS, and the BSDs, and
+# they are the whole list -- USR1 is 10 on Linux and 30 on macOS, so a
+# module that named it would mean different things on different
+# machines, and cross-platform is the point here. raise() and send()
+# take a name or a number; an unknown name throws rather than guessing.
+#
+# raise(sig) delivers to this process, synchronously: raise() returns
+# to the caller, so no handler runs inside the collector and there is
+# no reentrancy question. with the default disposition INT and TERM end
+# the process, exactly like kill -INT on this pid -- that is the point,
+# not a side effect, so do not call it to see what happens.
+#
+# send(pid, sig) is kill(): signal 0 delivers nothing and asks whether
+# the pid exists and may be signalled, which is how a script checks on
+# a process it started. send is POSIX-only and reports an error on
+# Windows, which has no kill; raise works wherever C raise works.
+#
+# what is deliberately absent: handlers. a C signal handler may only
+# touch async-signal-safe state, and a VM with a collector is the
+# opposite of that. a program that needs to react to signals restarts
+# cleanly instead -- exit codes and supervisors, not callbacks.
+
+export const HUP = 1
+export const INT = 2
+export const QUIT = 3
+export const ABRT = 6
+export const KILL = 9
+export const PIPE = 13
+export const TERM = 15
+
+# a name or number -> a number, throwing on anything else. unknown
+# names throw because signal 0 would silently check existence when the
+# caller meant to terminate, and that misread kills nothing but learns
+# nothing either.
+fn signum(sig) {
+    if type(sig) == "string" {
+        if sig == "HUP" {
+            return HUP
+        }
+        if sig == "INT" {
+            return INT
+        }
+        if sig == "QUIT" {
+            return QUIT
+        }
+        if sig == "ABRT" {
+            return ABRT
+        }
+        if sig == "KILL" {
+            return KILL
+        }
+        if sig == "PIPE" {
+            return PIPE
+        }
+        if sig == "TERM" {
+            return TERM
+        }
+        throw "unknown signal '" + sig + "'; HUP INT QUIT ABRT KILL PIPE TERM"
+    }
+    return sig
+}
+
+# deliver a signal to this process. usually does not return: INT and
+# TERM end it under the default disposition.
+export fn raise(sig) {
+    return __signal_raise(signum(sig))
+}
+
+# deliver a signal to another process. signal 0 checks existence.
+# false when the pid is gone or un-signallable, which is an answer
+# rather than an error -- the process simply is not there.
+export fn send(pid, sig) {
+    return __signal_send(pid, signum(sig))
+}
+
+# this process's id, for send's first argument.
+export fn pid() {
+    return __signal_pid()
+}

@@ -1,0 +1,170 @@
+# compress -- LZSS compression for small byte strings, in flint.
+#
+#     import compress
+#     let packed = compress.compress("aaaabaaaab")
+#     print(compress.decompress(packed))
+#
+# the format: four bytes of original length, big-endian, then tokens
+# packed MSB-first behind one control byte per eight -- a 0 bit is a
+# literal byte, a 1 bit is a two-byte match with 12 bits of distance
+# back (1..4096) and 4 bits of length minus three (3..18). the length
+# prefix is what ends the stream: without it a short final group reads
+# its own padding as tokens, and inventing data is worse than four
+# bytes of framing. the decoder copies matches byte by byte, so
+# overlapping matches expand the way LZSS requires rather than the way
+# a slice would.
+#
+# decompress returns nil on truncated input, a bad length, or a match
+# reaching before the output starts, because a short read is
+# corruption, not a prefix. "" round-trips to "".
+#
+# the honest limits: the window search is quadratic, and every byte
+# passes through interpreter loops, so this is for configuration,
+# caches, and small payloads -- kilobytes, not disk images. a hot path
+# wants a C dependency (miniz), not a faster loop here. what it does
+# guarantee is exact round-trips, tested against adversarial inputs.
+
+import math
+
+const WINDOW = 4096
+const MIN_MATCH = 3
+const MAX_MATCH = 18
+
+# longest match of text[pos:] inside text[max(0,pos-WINDOW):pos].
+# returns [distance, length], or [0, 0] when nothing reaches MIN_MATCH.
+# first (leftmost) longest wins, which keeps the encoder deterministic:
+# the same input always packs to the same bytes.
+fn longest_match(text, pos) {
+    let n = len(text)
+    let best_len = 0
+    let best_dist = 0
+    let start = pos - WINDOW
+    if start < 0 {
+        start = 0
+    }
+    let cap = n - pos
+    if cap > MAX_MATCH {
+        cap = MAX_MATCH
+    }
+    let m = start
+    while m < pos {
+        let length = 0
+        while length < cap and text[m + length] == text[pos + length] {
+            length = length + 1
+        }
+        if length > best_len {
+            best_len = length
+            best_dist = pos - m
+        }
+        m = m + 1
+    }
+    if best_len < MIN_MATCH {
+        return [0, 0]
+    }
+    return [best_dist, best_len]
+}
+
+# text -> packed bytes: the four-byte length, then the token stream.
+# control bytes go out MSB-first, one per eight tokens; the last group
+# flushes short, and the length prefix -- not padding analysis -- is
+# what tells the decoder where the tokens stop.
+export fn compress(text) {
+    let n = len(text)
+    let out = chr(math.floor(n / 16777216) % 256) + chr(math.floor(n / 65536) % 256) + chr(math.floor(n / 256) % 256) + chr(n % 256)
+    let ctrl = 0
+    let bits = 0
+    let group = ""
+    let pos = 0
+    while pos < n {
+        let m = longest_match(text, pos)
+        if m[1] > 0 {
+            ctrl = ctrl * 2 + 1
+            let code = (m[0] - 1) + (m[1] - MIN_MATCH) * 4096
+            group = group + chr(math.floor(code / 256)) + chr(code % 256)
+            pos = pos + m[1]
+        } else {
+            ctrl = ctrl * 2
+            group = group + text[pos]
+            pos = pos + 1
+        }
+        bits = bits + 1
+        if bits == 8 {
+            out = out + chr(ctrl) + group
+            ctrl = 0
+            bits = 0
+            group = ""
+        }
+    }
+    if bits > 0 {
+        # short group: shift the flags up so the tokens read first.
+        let shift = 8 - bits
+        let i = 0
+        while i < shift {
+            ctrl = ctrl * 2
+            i = i + 1
+        }
+        out = out + chr(ctrl) + group
+    }
+    return out
+}
+
+# packed bytes -> text, or nil when the header is short, the stream
+# ends mid-token, or a match reaches before the output starts. decoding
+# stops at exactly the prefixed length, so trailing flag padding is
+# never read as data.
+export fn decompress(data) {
+    if len(data) < 4 {
+        return nil
+    }
+    let total = ord(data[0]) * 16777216 + ord(data[1]) * 65536 + ord(data[2]) * 256 + ord(data[3])
+    let out = ""
+    let i = 4
+    let n = len(data)
+    while len(out) < total {
+        if i >= n {
+            return nil
+        }
+        let ctrl = ord(data[i])
+        i = i + 1
+        let bit = 7
+        while bit >= 0 and len(out) < total {
+            let is_match = math.floor(ctrl / pow2(bit)) % 2 == 1
+            if not is_match {
+                if i >= n {
+                    return nil
+                }
+                out = out + data[i]
+                i = i + 1
+            } else {
+                if i + 1 >= n {
+                    return nil
+                }
+                let b1 = ord(data[i])
+                let b2 = ord(data[i + 1])
+                i = i + 2
+                let dist = (b1 % 16) * 256 + b2 + 1
+                let length = math.floor(b1 / 16) + MIN_MATCH
+                if dist > len(out) or dist < 1 {
+                    return nil
+                }
+                let k = 0
+                while k < length and len(out) < total {
+                    out = out + out[len(out) - dist]
+                    k = k + 1
+                }
+            }
+            bit = bit - 1
+        }
+    }
+    return out
+}
+
+fn pow2(n) {
+    let r = 1
+    let i = 0
+    while i < n {
+        r = r * 2
+        i = i + 1
+    }
+    return r
+}

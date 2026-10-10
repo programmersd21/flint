@@ -1,0 +1,5 @@
+4 passed, 3 failed
+FAIL: deliberate mismatch: expected 2, got 3
+FAIL: deliberate check
+FAIL: throwing case: undefined variable 'nosuchfn'.
+[4, 3]

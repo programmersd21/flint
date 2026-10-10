@@ -1,0 +1,12 @@
+probe
+<script>
+[line 10] in probe()
+[line 13] in <script>
+
+Error: undefined variable 'nosuchfn'.
+[
+  1,
+  {
+    a: 2,
+  },
+]

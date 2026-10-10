@@ -1,0 +1,25 @@
+# hash -- djb2 values and hex, checked against the definition.
+#
+# 5381 is the empty seed, and "hello" is 261238937: both are facts of
+# the algorithm, not of this implementation, so they pin it.
+
+import hash
+
+print(hash.djb2(""))
+print(hash.djb2("hello"))
+print(hash.hex("hello"))
+print(hash.hex(""))
+print(hash.hex("The quick brown fox jumps over the lazy dog"))
+
+# every value fits in 32 bits, including 256 distinct byte hashes
+let fits = true
+let i = 0
+while i < 256 {
+    let h = hash.djb2(chr(i))
+    if h < 0 or h >= 4294967296 {
+        fits = false
+    }
+    i = i + 1
+}
+print(fits)
+print(len(hash.hex("x")) == 8)

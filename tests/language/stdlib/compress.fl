@@ -1,0 +1,41 @@
+# compress -- exact round-trips, real shrinkage, and nil on garbage.
+#
+# packed bytes are never printed: command substitution cannot carry NUL
+# bytes, so the suite asserts lengths and round-trip equality instead
+# of snapshotting binary output.
+
+import compress
+
+fn rt(s) {
+    let packed = compress.compress(s)
+    print(compress.decompress(packed) == s)
+}
+
+# empty, tiny, incompressible, repetitive, overlapping
+rt("")
+rt("a")
+rt("abcdefgh")
+rt("aaaaaaaaaaaaaaaaaaaa")
+rt("aaaabaaaabaaaabaaaab")
+rt("abababababababababab")
+rt("the quick brown fox jumps over the lazy dog. the quick brown fox!")
+
+# all 256 byte values, NUL included, survive the trip
+let all = ""
+let i = 0
+while i < 256 {
+    all = all + chr(i)
+    i = i + 1
+}
+print(compress.decompress(compress.compress(all)) == all)
+
+# repetition shrinks; the header alone is 4 bytes
+print(len(compress.compress("")) == 4)
+print(len(compress.compress("aaaaaaaaaaaaaaaaaaaa")) < 20)
+
+# corruption is nil, not a prefix
+print(compress.decompress("short"))
+print(compress.decompress(chr(0) + chr(0) + chr(0) + chr(5) + "ab"))
+
+# trailing bytes past the prefixed length are ignored, not decoded
+print(compress.decompress(compress.compress("abc") + "junk"))

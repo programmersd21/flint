@@ -1,0 +1,22 @@
+# log -- levels filter, names prefix, timestamps optional.
+#
+# timestamps are off throughout: the clock moves, and a test that
+# asserts the time is a test that fails at midnight.
+
+import log
+
+let l = log.new("srv")
+l.timestamps = false
+log.debug(l, "hidden")
+log.info(l, "up")
+log.warn(l, "careful")
+log.error(l, "bad")
+
+# the level gates before formatting: nothing below it prints
+l.level = log.WARN
+log.info(l, "hidden too")
+log.error(l, "still here")
+
+# numeric levels order the same way: 2 is WARN whatever it is called
+l.level = 2
+log.warn(l, "numbers work")

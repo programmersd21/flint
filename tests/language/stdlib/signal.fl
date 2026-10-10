@@ -1,0 +1,38 @@
+# signal -- numbers, self-checks, and invalid input.
+#
+# nothing here delivers a lethal signal: raise(INT) would end the test
+# runner, so the suite exercises everything around it -- constants,
+# pid(), send-to-self with 0, dead pids, unknown names, bad numbers --
+# and leaves delivery to the documented contract.
+
+import signal
+
+print(signal.pid() > 0)
+print(signal.INT)
+print(signal.TERM)
+print(signal.KILL)
+
+# signal 0 checks existence without delivering. there is deliberately
+# no delivery test: send(pid, TERM) to self would end the runner, and
+# the unknown-name case below already proves names go through the map.
+print(signal.send(signal.pid(), 0))
+print(signal.send(999999, 0))
+
+# unknown names throw a catchable error, not a guess
+try {
+    signal.send(1, "NOPE")
+} catch e {
+    print(e)
+}
+
+# bad numbers fail at the boundary, not in kill()
+try {
+    signal.send(-1, 0)
+} catch e {
+    print("bad pid refused")
+}
+try {
+    signal.raise(2.5)
+} catch e {
+    print("fractional signal refused")
+}

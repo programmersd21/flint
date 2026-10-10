@@ -1,0 +1,48 @@
+# regex -- full matches, searches, classes, and invalid patterns.
+#
+# every true/false below was checked against the syntax in lib/regex.fl,
+# not against another engine: flint bytes are the domain, and . matches
+# newlines here the way byte-oriented means.
+
+import regex
+
+# literals, any, and repetition
+print(regex.match("a+b", "aaab"))
+print(regex.match("a+b", "b"))
+print(regex.match("a*b", "b"))
+print(regex.match("a?b", "b"))
+print(regex.match("ab", "abc"))
+print(regex.match("a.c", "abc"))
+print(regex.match(".*", "anything\nat all"))
+
+# alternation and groups
+print(regex.match("a|b", "b"))
+print(regex.match("(ab)+", "abab"))
+print(regex.match("(a|b)*c", "ababc"))
+print(regex.match("colou?r", "colour"))
+
+# classes, negation, ranges, escapes
+print(regex.match("[a-z]+", "hello"))
+print(regex.match("[^0-9]+", "abc"))
+print(regex.match("[^0-9]+", "ab1"))
+print(regex.match("\\d+", "123"))
+print(regex.match("\\w+@\\w+", "a1@z9"))
+print(regex.match("[a\\-z]", "-"))
+
+# anchors
+print(regex.match("^hi$", "hi"))
+print(regex.match("^hi$", "hi!"))
+print(regex.find("a+$", "xxaa"))
+
+# find: leftmost-longest, byte indices, nil when absent
+print(regex.find("a+", "xxaay"))
+print(regex.find("[0-9]+", "ab12cd345"))
+print(regex.find("z+", "abc"))
+print(regex.find("a*", "b"))
+
+# invalid patterns are nil, not false and not throws
+print(regex.match("(a", "a"))
+print(regex.match("[abc", "a"))
+print(regex.match("a\\", "a"))
+print(regex.match("*a", "a"))
+print(regex.find("(a", "a"))

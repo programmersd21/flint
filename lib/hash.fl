@@ -1,0 +1,62 @@
+# hash -- small, fast, non-cryptographic hashes, in flint.
+#
+#     import hash
+#     print(hash.djb2("hello"))   # a number you can bucket by
+#
+# djb2 over the string's bytes: h = h * 33 + byte, kept exact by doing
+# every step below 2^53 (flint numbers are doubles, and doubles count
+# integers exactly that far) and reduced mod 2^32 at the end, so the
+# answer fits wherever a 32-bit hash is expected.
+#
+# this is for hash tables, checksums of convenience, and sharding -- not
+# for security. it is not SHA-256 (the package manager has a real one in
+# C, with vectors), and nothing here should authenticate anything. a
+# non-cryptographic hash that said otherwise would be a lie with good
+# avalanche.
+#
+# everything counts bytes, not characters, like the rest of flint.
+
+import math
+
+# text -> a number in [0, 2^32). "" hashes to 5381, the empty seed,
+# which is the algorithm's defined answer rather than a special case.
+export fn djb2(text) {
+    let h = 5381
+    let i = 0
+    while i < len(text) {
+        h = (h * 33 + ord(text[i])) % 4294967296
+        i = i + 1
+    }
+    return h
+}
+
+# text -> eight lowercase hex digits. the same value as djb2, rendered
+# for the places hashes are spelled in hex: filenames, cache keys.
+# floor, not truncation by indexing: h / 16^k is fractional whenever
+# the low nibbles are nonzero, and a fractional index is an error
+# rather than a guess about which nibble was meant.
+export fn hex(text) {
+    let h = djb2(text)
+    let digits = "0123456789abcdef"
+    let out = ""
+    let i = 0
+    while i < 8 {
+        # nibble from the top down, so the string reads most-significant
+        # first. pow16 takes the digit position, not a bit count: the
+        # divisor for position i is 16^(7-i).
+        let nibble = math.floor(h / pow16(7 - i)) % 16
+        out = out + digits[nibble]
+        i = i + 1
+    }
+    return out
+}
+
+fn pow16(n) {
+    let r = 1
+    let i = 0
+    while i < n {
+        r = r * 16
+        i = i + 1
+    }
+    return r
+}

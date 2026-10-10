@@ -1,0 +1,413 @@
+# regex -- small regular expressions by Thompson NFA, in flint.
+#
+#     import regex
+#     print(regex.match("a+b", "aaab"))     # true
+#     print(regex.find("a+", "xxaay"))      # [2, 4]
+#
+# match() is a full match, anchored at both ends; find() searches and
+# returns [start, end] byte indices of the leftmost-longest match, or
+# nil. an invalid pattern makes both return nil, because a typo that
+# matched nothing would be a silent wrong answer, and raising would
+# make every match site a try block.
+#
+# the syntax: literals, `.` for any byte, `* + ?`, `|` alternation,
+# `(...)` grouping, `[...]` classes with ranges and `[^...]` negation,
+# `^ $` anchors, and `\` escapes (a backslash before anything else is
+# that thing literally, plus \d \w \s for digit, word, space). matching
+# is linear in text times pattern states -- no backtracking, so no
+# catastrophic input exists.
+#
+# what is not here: captures (no groups to name), backreferences (which
+# need the backtracking this refuses to do), {m,n} counts (write xx*),
+# and unicode classes. bytes, like the rest of flint: `.` matches \n,
+# and a multibyte character is a run of independent bytes.
+#
+# the construction is Thompson's, one function per grammar rule, with
+# fragments as [start, outs] and outs as [state, slot] pairs patched
+# when the target is known. states are tables so patching is assignment.
+
+# --- construction ---
+
+fn new_state(st, kind) {
+    push(st, {kind: kind, ch: "", set: "", neg: false, out: -1, out1: -1, last: 0})
+    return len(st) - 1
+}
+
+fn patch(st, outs, target) {
+    for o in outs {
+        if o[1] == 0 {
+            st[o[0]].out = target
+        } else {
+            st[o[0]].out1 = target
+        }
+    }
+}
+
+fn append_outs(a, b) {
+    let out = []
+    for o in a {
+        push(out, o)
+    }
+    for o in b {
+        push(out, o)
+    }
+    return out
+}
+
+# [...] from pos (pat[pos] == '['). returns [set, neg, newpos] or nil.
+fn parse_class(pat, pos) {
+    let n = len(pat)
+    let i = pos + 1
+    let neg = false
+    if i < n and pat[i] == "^" {
+        neg = true
+        i = i + 1
+    }
+    let set = ""
+    # a ] first is literal, so []a] is the set {], a}: without this the
+    # empty class would be unrepresentable and ] unwritable.
+    if i < n and pat[i] == "]" {
+        set = set + "]"
+        i = i + 1
+    }
+    while i < n and pat[i] != "]" {
+        if pat[i] == "\\" and i + 1 < n {
+            set = set + pat[i + 1]
+            i = i + 2
+        } else if i + 2 < n and pat[i + 1] == "-" and pat[i + 2] != "]" {
+            # a range. backwards (z-a) is literal characters, not an
+            # error: the pattern still means something readable.
+            let lo = ord(pat[i])
+            let hi = ord(pat[i + 2])
+            if lo <= hi {
+                let c = lo
+                while c <= hi {
+                    set = set + chr(c)
+                    c = c + 1
+                }
+                i = i + 3
+            } else {
+                set = set + pat[i]
+                i = i + 1
+            }
+        } else {
+            set = set + pat[i]
+            i = i + 1
+        }
+    }
+    if i >= n {
+        return nil
+    }
+    return [set, neg, i + 1]
+}
+
+# \e from pos (pat[pos] == '\'). returns [kind, payload, neg, newpos]:
+# kind "lit" carries the character, kind "cls" a set string. nil when
+# the backslash ends the pattern.
+fn parse_escape(pat, pos) {
+    if pos + 1 >= len(pat) {
+        return nil
+    }
+    let e = pat[pos + 1]
+    if e == "d" {
+        return ["cls", "0123456789", false, pos + 2]
+    }
+    if e == "w" {
+        return ["cls", "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_", false, pos + 2]
+    }
+    if e == "s" {
+        return ["cls", " \t\n\r", false, pos + 2]
+    }
+    return ["lit", e, false, pos + 2]
+}
+
+# one atom from pos. returns [frag, newpos] or nil. frag is [start, outs];
+# an epsilon atom is a pass-through state, so even the empty concat has
+# a start to wire.
+fn parse_atom(st, pat, pos) {
+    let n = len(pat)
+    if pos >= n {
+        return nil
+    }
+    let c = pat[pos]
+    if c == "(" {
+        let r = parse_alt(st, pat, pos + 1)
+        if r == nil {
+            return nil
+        }
+        if r[1] >= n or pat[r[1]] != ")" {
+            return nil
+        }
+        return [r[0], r[1] + 1]
+    }
+    if c == "[" {
+        let r = parse_class(pat, pos)
+        if r == nil {
+            return nil
+        }
+        let s = new_state(st, "class")
+        st[s].set = r[0]
+        st[s].neg = r[1]
+        return [[s, [[s, 0]]], r[2]]
+    }
+    if c == "\\" {
+        let r = parse_escape(pat, pos)
+        if r == nil {
+            return nil
+        }
+        if r[0] == "cls" {
+            let s = new_state(st, "class")
+            st[s].set = r[1]
+            return [[s, [[s, 0]]], r[3]]
+        }
+        let s = new_state(st, "char")
+        st[s].ch = r[1]
+        return [[s, [[s, 0]]], r[3]]
+    }
+    if c == "." {
+        let s = new_state(st, "any")
+        return [[s, [[s, 0]]], pos + 1]
+    }
+    if c == "^" {
+        let s = new_state(st, "start")
+        return [[s, [[s, 0]]], pos + 1]
+    }
+    if c == "$" {
+        let s = new_state(st, "end")
+        return [[s, [[s, 0]]], pos + 1]
+    }
+    if c == ")" or c == "|" or c == "*" or c == "+" or c == "?" {
+        return nil
+    }
+    let s = new_state(st, "char")
+    st[s].ch = c
+    return [[s, [[s, 0]]], pos + 1]
+}
+
+fn parse_repeat(st, pat, pos) {
+    let r = parse_atom(st, pat, pos)
+    if r == nil {
+        return nil
+    }
+    let frag = r[0]
+    pos = r[1]
+    while pos < len(pat) {
+        let c = pat[pos]
+        if c != "*" and c != "+" and c != "?" {
+            break
+        }
+        if c == "*" {
+            let s = new_state(st, "split")
+            st[s].out = frag[0]
+            patch(st, frag[1], s)
+            frag = [s, [[s, 1]]]
+        } else if c == "+" {
+            let s = new_state(st, "split")
+            st[s].out = frag[0]
+            patch(st, frag[1], s)
+            frag = [frag[0], [[s, 1]]]
+        } else {
+            let s = new_state(st, "split")
+            st[s].out = frag[0]
+            frag = [s, append_outs(frag[1], [[s, 1]])]
+        }
+        pos = pos + 1
+    }
+    return [frag, pos]
+}
+
+fn parse_concat(st, pat, pos) {
+    let n = len(pat)
+    # the empty concat is an epsilon state, not a missing fragment:
+    # `a|` and `()` both contain one, and both are legal.
+    let e = new_state(st, "eps")
+    let frag = [e, [[e, 0]]]
+    let first = true
+    while pos < n {
+        let c = pat[pos]
+        if c == ")" or c == "|" {
+            break
+        }
+        let r = parse_repeat(st, pat, pos)
+        if r == nil {
+            return nil
+        }
+        if first {
+            frag = r[0]
+            first = false
+        } else {
+            patch(st, frag[1], r[0][0])
+            frag = [frag[0], r[0][1]]
+        }
+        pos = r[1]
+    }
+    return [frag, pos]
+}
+
+fn parse_alt(st, pat, pos) {
+    let r = parse_concat(st, pat, pos)
+    if r == nil {
+        return nil
+    }
+    let frag = r[0]
+    pos = r[1]
+    while pos < len(pat) and pat[pos] == "|" {
+        let r2 = parse_concat(st, pat, pos + 1)
+        if r2 == nil {
+            return nil
+        }
+        let s = new_state(st, "split")
+        st[s].out = frag[0]
+        st[s].out1 = r2[0][0]
+        frag = [s, append_outs(frag[1], r2[0][1])]
+        pos = r2[1]
+    }
+    return [frag, pos]
+}
+
+# pattern text -> {states, start, run} or nil when invalid.
+fn compile_pat(pat) {
+    let st = []
+    let r = parse_alt(st, pat, 0)
+    if r == nil or r[1] != len(pat) {
+        return nil
+    }
+    let accept = new_state(st, "match")
+    patch(st, r[0][1], accept)
+    return {states: st, start: r[0][0], run: 0}
+}
+
+# --- simulation ---
+
+# epsilon closure with position context: start/end states only pass
+# when the position proves them, and pass through to their out.
+fn addstate(prog, lst, idx, pos, n, stamp) {
+    let st = prog.states
+    if idx < 0 {
+        return
+    }
+    let s = st[idx]
+    if s.last == stamp {
+        return
+    }
+    s.last = stamp
+    if s.kind == "split" {
+        addstate(prog, lst, s.out, pos, n, stamp)
+        addstate(prog, lst, s.out1, pos, n, stamp)
+        return
+    }
+    if s.kind == "eps" {
+        addstate(prog, lst, s.out, pos, n, stamp)
+        return
+    }
+    if s.kind == "start" or s.kind == "end" {
+        let ok = (s.kind == "start" and pos == 0) or (s.kind == "end" and pos == n)
+        if ok {
+            addstate(prog, lst, s.out, pos, n, stamp)
+        }
+        return
+    }
+    push(lst, idx)
+}
+
+fn in_set(set, ch) {
+    let i = 0
+    while i < len(set) {
+        if set[i] == ch {
+            return true
+        }
+        i = i + 1
+    }
+    return false
+}
+
+fn step_states(prog, clist, ch, pos, n, nlist, stamp) {
+    let st = prog.states
+    for idx in clist {
+        let s = st[idx]
+        let hit = false
+        if s.kind == "char" {
+            hit = s.ch == ch
+        } else if s.kind == "any" {
+            hit = true
+        } else if s.kind == "class" {
+            hit = in_set(s.set, ch)
+            if s.neg {
+                hit = not hit
+            }
+        }
+        if hit {
+            addstate(prog, nlist, s.out, pos + 1, n, stamp)
+        }
+    }
+}
+
+fn is_accept(prog, lst) {
+    for idx in lst {
+        if prog.states[idx].kind == "match" {
+            return true
+        }
+    }
+    return false
+}
+
+# full simulation from byte `from`; longest accepting end, or -1.
+# the dedup stamp is fresh for every closure -- initial and each step --
+# because a state reached at one position must be reachable again at the
+# next: a stamp per run is what made `a*` match "" but never "aaa". the
+# counter only grows, so a stamp is never reused within or across runs.
+fn longest_from(prog, text, from) {
+    let n = len(text)
+    let clist = []
+    let nlist = []
+    prog.run = prog.run + 1
+    addstate(prog, clist, prog.start, from, n, prog.run)
+    let best = -1
+    if is_accept(prog, clist) {
+        best = from
+    }
+    let pos = from
+    while pos < n {
+        prog.run = prog.run + 1
+        step_states(prog, clist, text[pos], pos, n, nlist, prog.run)
+        clist = nlist
+        nlist = []
+        pos = pos + 1
+        if is_accept(prog, clist) {
+            best = pos
+        }
+    }
+    return best
+}
+
+# pattern text -> bool. true only when the whole text matches; nil when
+# the pattern is invalid, which is distinct from false the way a typo
+# is distinct from a non-match.
+export fn match(pattern, text) {
+    let prog = compile_pat(pattern)
+    if prog == nil {
+        return nil
+    }
+    return longest_from(prog, text, 0) == len(text)
+}
+
+# pattern text -> [start, end] of the leftmost-longest match, or nil
+# when nothing matches (or the pattern is invalid). end is exclusive,
+# so text[start:end]... rather: the match is the bytes start..end-1,
+# and an empty match reads [s, s].
+export fn find(pattern, text) {
+    let prog = compile_pat(pattern)
+    if prog == nil {
+        return nil
+    }
+    let n = len(text)
+    let s = 0
+    while s <= n {
+        let end = longest_from(prog, text, s)
+        if end >= 0 {
+            return [s, end]
+        }
+        s = s + 1
+    }
+    return nil
+}

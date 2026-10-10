@@ -1,0 +1,22 @@
+# test -- checks record and continue, crashes become failures.
+#
+# finish() is not called: it exits, and a passing suite exits 0 by
+# falling off the end. the summary and the counts are the assertions.
+
+import test
+
+test.eq(1 + 1, 2, "addition")
+test.eq(1 + 1, 3, "deliberate mismatch")
+test.check(1 == 1, "equality holds")
+test.check(false, "deliberate check")
+
+test.run("passing case", fn() {
+    test.eq(2 * 3, 6, "inside")
+})
+test.run("throwing case", fn() {
+    nosuchfn()
+    test.eq(1, 2, "unreached")
+})
+
+let counts = test.summary()
+print(counts)

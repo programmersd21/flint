@@ -1,0 +1,75 @@
+# log -- leveled logging to stdout, in flint.
+#
+#     import log
+#     let logger = log.new("server")
+#     log.info(logger, "listening")
+#
+# a logger is a table {name, level}; messages below the level are dropped
+# before they are formatted, so a debug line in a hot loop costs a table
+# lookup when info is on, not a timestamp. levels are numbers -- DEBUG 0,
+# INFO 1, WARN 2, ERROR 3 -- so `logger.level = log.WARN` reads plainly
+# and comparing them needs no lookup.
+#
+# output goes to stdout through print, one line per message, because
+# flint has no stderr handle: `[level] name: message`, with the epoch
+# time first when the logger wants it. `log.new` timestamps; set
+# `logger.timestamps = false` for stable test output.
+
+import time
+
+export const DEBUG = 0
+export const INFO = 1
+export const WARN = 2
+export const ERROR = 3
+
+# name -> a logger at INFO with timestamps on.
+export fn new(name) {
+    return {name: name, level: INFO, timestamps: true}
+}
+
+# the level's name, for the line prefix. unknown numbers print as-is,
+# because a level from arithmetic is still orderable.
+fn level_name(level) {
+    if level == DEBUG {
+        return "DEBUG"
+    }
+    if level == INFO {
+        return "INFO"
+    }
+    if level == WARN {
+        return "WARN"
+    }
+    if level == ERROR {
+        return "ERROR"
+    }
+    return str(level)
+}
+
+# the shared write path. below-level messages return before touching
+# the clock, which is the only performance claim this module makes.
+fn write(logger, level, message) {
+    if level < logger.level {
+        return nil
+    }
+    let line = "[" + level_name(level) + "] " + logger.name + ": " + message
+    if logger.timestamps {
+        line = str(time.now()) + " " + line
+    }
+    print(line)
+}
+
+export fn debug(logger, message) {
+    write(logger, DEBUG, message)
+}
+
+export fn info(logger, message) {
+    write(logger, INFO, message)
+}
+
+export fn warn(logger, message) {
+    write(logger, WARN, message)
+}
+
+export fn error(logger, message) {
+    write(logger, ERROR, message)
+}

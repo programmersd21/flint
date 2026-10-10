@@ -1,0 +1,88 @@
+# test -- a test runner that fits in one import, in flint.
+#
+#     import test
+#     test.eq(1 + 1, 2, "addition")
+#     test.run("division", fn() {
+#         test.check(4 / 2 == 2, "halving")
+#     })
+#     test.finish()
+#
+# checks record failures and continue, so one run reports everything
+# broken rather than stopping at the first. run() catches a thrown
+# error and records it as the case's failure, so a crashing case fails
+# instead of aborting the suite. finish() prints the summary and exits
+# nonzero when anything failed -- which is what makes `flint check.fl`
+# usable as a gate rather than as reading material.
+#
+# state lives in module tables, not globals the script can see: counts
+# and the failure list are kept here and read through summary().
+
+let passed = 0
+let failed = 0
+let failures = []
+
+# reset the counts, for a suite that runs in phases. ordinary suites
+# never call this; it exists so the runner's own tests can.
+export fn reset() {
+    passed = 0
+    failed = 0
+    failures = []
+}
+
+fn record(ok, message) {
+    if ok {
+        passed = passed + 1
+    } else {
+        failed = failed + 1
+        push(failures, message)
+    }
+}
+
+# a condition that must hold. the message names the expectation, and is
+# the whole of what prints on failure -- `test.check(x > 0, "positive")`
+# rather than an expression nobody can read back later.
+export fn check(cond, message) {
+    record(cond == true, message)
+}
+
+# two values that must be equal, compared with ==. on mismatch the
+# failure names both sides, because "expected 3, got 4" locates the bug
+# and "assertion failed" does not.
+export fn eq(a, b, message) {
+    if a == b {
+        record(true, message)
+    } else {
+        record(false, message + ": expected " + str(a) + ", got " + str(b))
+    }
+}
+
+# run one case by name. a throw inside body becomes a failure carrying
+# the error's message, not an aborted suite.
+export fn run(name, body) {
+    try {
+        body()
+        passed = passed + 1
+    } catch e {
+        failed = failed + 1
+        push(failures, name + ": " + e.message)
+    }
+}
+
+# [passed, failed]. the failure messages print here too, one per line,
+# because a count without the names is a summary of nothing.
+export fn summary() {
+    print(str(passed) + " passed, " + str(failed) + " failed")
+    for f in failures {
+        print("FAIL: " + f)
+    }
+    return [passed, failed]
+}
+
+# summary, then exit(1) when anything failed. a suite file ends with
+# this call and nothing else needs saying.
+export fn finish() {
+    summary()
+    if failed > 0 {
+        exit(1)
+    }
+}

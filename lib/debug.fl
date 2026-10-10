@@ -1,0 +1,64 @@
+# debug -- see what the program is doing, in flint.
+#
+#     import debug
+#     print(debug.format(debug.frames()))
+#
+# frames() is the call stack right now, innermost first: a list of
+# {function, line} tables. format() renders one the way an uncaught
+# error prints, so a caught error's context reads like the trace the
+# runtime would have shown. dump(v) prints a value across lines for
+# inspection, through pretty_print.
+#
+# what this is not: a debugger. there are no breakpoints, no stepping,
+# and no variable inspection -- frames carry names and lines, not
+# locals, because locals live in slots the collector may reuse the
+# moment a value dies. anything finer would inspect memory that no
+# longer means what it meant.
+
+import pretty_print
+
+# the live call stack, innermost first. each entry is {function, line};
+# the script level names itself "<script>", as in traces. entry zero is
+# the caller: the __debug_frames call itself is dropped, because a stack
+# whose first frame is always this function tells nobody anything.
+# read-only: it builds fresh values and changes nothing about the
+# running program.
+export fn frames() {
+    let all = __debug_frames()
+    let out = []
+    let i = 1
+    while i < len(all) {
+        push(out, all[i])
+        i = i + 1
+    }
+    return out
+}
+
+# frames, or an explicit list in the same shape, rendered one per line:
+# `[line 12] in serve()`. the same rendering as an uncaught error, so a
+# log line and a crash agree on what a frame looks like -- including the
+# script level, which the runtime spells `in <script>` with no parens.
+export fn format(frames) {
+    let out = ""
+    for f in frames {
+        if f.function == "<script>" {
+            out = out + "[line " + str(f.line) + "] in <script>\n"
+        } else {
+            out = out + "[line " + str(f.line) + "] in " + f.function + "()\n"
+        }
+    }
+    return out
+}
+
+# a value printed across lines for inspection. strings print bare and
+# nesting indents, because this is for reading, not for serializing --
+# the output is not parseable back, and does not pretend to be.
+export fn dump(v) {
+    pretty_print.pretty_print(v)
+}
+
+# the shape of a caught error, spelled out: every catch binds {type,
+# message}, and nothing else. err_str(e) is the one line worth logging.
+export fn err_str(e) {
+    return e.type + ": " + e.message
+}
