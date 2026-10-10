@@ -1,6 +1,6 @@
 [package]
 name = "flintlang"
-version = "0.14.0"
+version = "0.13.2"
 edition = "2021"
 description = "Safe Rust embedding of the Flint scripting language runtime"
 license = "MIT"
@@ -14,4 +14,4 @@ name = "flintlang"
 path = "src/lib.rs"
 
 [dependencies]
-flintlang-sys = { version = "0.14.0", path = "../flintlang-sys" }
+flintlang-sys = { version = "0.13.2", path = "../flintlang-sys" }
