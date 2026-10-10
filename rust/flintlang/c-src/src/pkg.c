@@ -83,7 +83,7 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
         char *error,
         size_t error_size,
         int from,
-        bool *ok);
+        bool *success);
 
 /*
  * Run git and capture its stdout. argv[0] is "git", the rest are plain
@@ -2931,14 +2931,14 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
         char *error,
         size_t error_size,
         int from,
-        bool *ok)
+        bool *success)
 {
 	if (from == 0 && depth > 32) {
 		snprintf(error,
 		        error_size,
 		        "dependency chain is deeper than 32 -- is there a "
 		        "cycle?");
-		*ok = false;
+		*success = false;
 		return list;
 	}
 
@@ -2968,9 +2968,10 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 			        "%s/%s/flint.toml",
 			        base_dir,
 			        list[i].path);
-		if (!pkg_load(manifest_path, &child, error, error_size))
-			*ok = false;
+		if (!pkg_load(manifest_path, &child, error, error_size)) {
+			*success = false;
 			return list;
+		}
 		PkgDep *nested = NULL;
 		int nested_count = 0;
 		bool ok = pkg_collect_deps(
@@ -2978,7 +2979,7 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 		pkg_free_manifest(&child);
 		if (!ok) {
 			pkg_free_deps(nested, nested_count);
-			*ok = false;
+			*success = false;
 			return list;
 		}
 		added += nested_count;
@@ -2998,7 +2999,7 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 		PkgDep *bigger = realloc(list, (size_t)grown * sizeof(PkgDep));
 		if (bigger == NULL) {
 			snprintf(error, error_size, "out of memory");
-			*ok = false;
+			*success = false;
 			return list;
 		}
 		list = bigger;
@@ -3036,9 +3037,10 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 			        "%s/%s/flint.toml",
 			        base_dir,
 			        list[i].path);
-		if (!pkg_load(manifest_path, &child, error, error_size))
-			*ok = false;
+		if (!pkg_load(manifest_path, &child, error, error_size)) {
+			*success = false;
 			return list;
+		}
 		PkgDep *nested = NULL;
 		int nested_count = 0;
 		bool ok = pkg_collect_deps(
@@ -3046,7 +3048,7 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 		pkg_free_manifest(&child);
 		if (!ok) {
 			pkg_free_deps(nested, nested_count);
-			*ok = false;
+			*success = false;
 			return list;
 		}
 		for (int k = 0; k < nested_count; k++) {
@@ -3091,5 +3093,6 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 	        depth + 1,
 	        error,
 	        error_size,
-	        start);
+	        start,
+        success);
 }
