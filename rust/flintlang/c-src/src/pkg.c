@@ -851,7 +851,10 @@ static bool pkg_ensure_mirror_unlocked(const char *mirror,
 		snprintf(error, error_size, "path too long");
 		return false;
 	}
-	if (access(head, F_OK) != 0) {
+	struct stat mirror_stat;
+		bool mirror_is_link = lstat(mirror, &mirror_stat) == 0 &&
+		                      S_ISLNK(mirror_stat.st_mode);
+	if (mirror_is_link || access(head, F_OK) != 0) {
 		char staging[4352];
 		bool made_staging = false;
 		for (unsigned int attempt = 0; attempt < 100; attempt++) {
