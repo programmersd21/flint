@@ -1,5 +1,160 @@
 # releases
 
+## v0.13.0
+
+the release that finishes what 0.12.0 deferred and makes embedding a
+supported claim. `match` binds payloads and matches literals, the
+lockfile carries content hashes, native modules have an explicit
+lifecycle, and a host program -- C or Rust -- can create an engine, run
+source, and free it, all tested.
+
+### match binds payloads and matches literals
+
+`Colour.Blue(n)` works now. 0.12.0 refused it at compile time because the
+subject's slot was destroyed by the arm bookkeeping: the subject value
+was stored and popped instead of being claimed where it sat, so every
+read after the first saw the wrong slot. the fix claims the slot the
+value already occupies -- the same discipline `let` uses -- pops each
+arm's test boolean on both paths, and releases the subject at the exit,
+so a match is stack-neutral.
+
+```flint
+match Colour.Blue(7) {
+    Colour.Blue(n) { print(n) }   # 7
+    _ { print("other") }
+}
+
+match count {
+    1 { print("one") }
+    -3 { print("negative three") }
+    "hi" { print("greeting") }
+    _ { print("other") }
+}
+```
+
+literal patterns take numbers (including negatives), strings, `true`,
+`false`, and `nil`, compared with the existing equality. a bare name
+still binds the whole subject, and binding a payload of a variant
+declared without one is a compile-time error. exhaustiveness still
+applies only where it can be proved: a known-enum subject needs every
+variant or a wildcard, anything else needs a wildcard.
+
+### lockfile content hashes
+
+a lockfile that pins a commit is reproducible against movement of the
+branch, not against tampering with the object. every installed tree is
+now hashed -- SHA-256 over sorted relative paths and file bytes, with
+dotfiles, symlinks, and metadata excluded so a checkout hashes
+identically everywhere -- and the digest is recorded beside the pin as
+`content`. reinstalling an unchanged pin verifies the tree in place
+without touching the network (`verified shout 0.2.0`); a fresh
+materialization whose bytes differ from the recorded hash stops the
+install, keeps the old lock, and removes the suspect tree. path
+dependencies are live source, so their hash is recorded, not enforced.
+locks written before content hashes still install; the next install
+records the hashes. the SHA-256 implementation is dependency-free and
+covered by FIPS vectors.
+
+### native modules: an explicit lifecycle
+
+`flint native-unload LIB.so MOD` asks a loaded module to shut down and
+unload. the request quiesces the module -- running calls finish, new
+calls are refused -- then checks every route to native code in the order
+that matters: active calls, retained handles, registered functions. the
+library closes only when nothing references it; otherwise the answer is
+busy and names what holds it:
+
+```
+busy: module 'mymod' is busy: 1 retained handle(s) outstanding -- release them and ask again
+```
+
+busy is the structured answer, not a failure, so the exit status stays 0.
+in practice the answer is always busy today -- registration puts the
+module's functions into the VM's globals for as long as the VM lives --
+and the documentation says so rather than letting you discover it.
+nothing is ever force-closed. failed loads now close what they opened:
+a library whose entry point is missing or whose init fails is `dlclose`d
+before the error is reported.
+
+### embedding: a C engine API and a safe Rust crate
+
+`include/flint.h` grows three functions, and adding functions does not
+change the ABI version:
+
+```c
+FlEngine *fl_engine_new(void);
+void fl_engine_free(FlEngine *engine);
+int fl_engine_run(FlEngine *engine, const char *source, const char *name);
+```
+
+run returns the CLI's exit codes -- 0, 64, 65, 70 -- so a host and a
+script agree on what happened. diagnostics go to stderr in the CLI's
+rendering. `make libflint.a` builds the static runtime hosts link
+against. values are deliberately not exchanged across this API: run
+source, read the code. a small honest API beats a wide speculative one.
+
+`rust/flint` is the safe wrapper over it: an `Engine` you create and
+drop, a `run` that takes `&str`, and an `Error` enum mirroring the exit
+codes. ordinary use needs no `unsafe`. the crate is `!Send` and `!Sync`
+by construction, and a process-wide lock serializes every engine
+operation, because the compiler keeps process-global scanner state --
+two threads must not touch flint at once on any engines. eleven
+integration tests run against the real runtime, including parallel
+engines proving the lock holds, plus a runnable example (`cargo run
+--example embed`).
+
+threading, in one place: flint is single-threaded. one thread for
+flint, period; a multithreaded host puts one mutex around all engine
+use. this is stated in `flint.h`, in the crate docs, and in the tests.
+
+### csv, toml, url, datetime
+
+`import csv` parses RFC-4180-tolerant text into rows, reads objects
+against a header row, and stringifies back with minimal quoting.
+everything is strings, because csv has no numbers. an unterminated
+quote returns nil.
+
+`import toml` reads the configuration files flint itself reads: the
+grammar the package manager parses -- sections, key/value lines,
+comments, inline tables -- plus numbers, booleans, and single-line
+arrays. a duplicate key or section is malformed rather than last-wins.
+
+`import url` splits a URL into scheme, user, host, port, path, query
+and fragment, and builds one back. a missing piece reads as `""`, and
+structural nonsense (a non-digit port) returns nil.
+
+`import datetime` does calendar dates in UTC and nothing else: dates as
+tables, epoch seconds both ways, formatting. local time is deliberately
+absent -- a formatter that depends on the machine's timezone is right
+on one machine and wrong on the next.
+
+### portability probes
+
+CI keeps its Linux gates and gains two non-gating probes both marked
+`continue-on-error`: a macOS job (release, language, unit) and a
+Windows msys2 job (release build). neither platform is claimed as
+supported until its probe goes green and stays green; their job is to
+show where the POSIX assumptions break, in CI, instead of in a user's
+terminal.
+
+### still deferred, and why
+
+a package registry: hosting is not a language problem. a full version
+solver: a resolver that picks the first conflict rather than the right
+one makes a lockfile untrustworthy. value exchange and host callbacks
+on the engine API: each needs a lifetime story the engine side does not
+yet have, and an API that hands out dangling values would be worse than
+none. Windows and macOS support: probed, not claimed. `regex` and
+`compress`: easy to write badly and hard to notice.
+
+### version and gates
+
+version metadata moves to 0.13.0. `make quick` and `make validate`
+remain the two gates; the counts move with the release: 150 language
+tests, 31 native ABI checks, 40 package checks, 5 SHA-256 checks, 11
+Rust integration tests plus a doctest. `cargo fmt --check` and `cargo
+test` on the workspace join CI.
+
 ## v0.12.0
 
 the release that adds the first user-defined kind of value. structs are

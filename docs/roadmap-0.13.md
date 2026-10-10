@@ -5,6 +5,14 @@ verified, and what is not. written from the source rather than from earlier
 plans, because the plans were wrong more than once and the code is the only
 thing that can be trusted here.
 
+status: items 1-4 below landed in 0.13.0 (payload binding plus literal
+patterns in `src/frontend/compiler.c` with `tests/language/data/
+match_payload.fl`; SHA-256 content hashes in `src/util/sha256.c` and
+`src/pkg.c` with `tests/unit/test_sha256.c`; the `flint` crate over a new
+`fl_engine_*` API in `src/engine.c`; the `native-unload` request lifecycle
+in `src/ext.c`). items 5-7 remain future work, as `RELEASES.md` states.
+the audit stays as written; `RELEASES.md` is the record of what shipped.
+
 every finding is labelled by severity and by how sure I am. a defect I could
 reproduce is one; a suspicion from reading is another, and the difference
 matters more than the label.
