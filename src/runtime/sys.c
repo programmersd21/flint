@@ -568,6 +568,165 @@ char *sys_resolve_module(const char *path)
 	return out;
 }
 
+/* native suffixes, in per-directory search order. .so first because it
+ * is what Linux and the test suite produce; a module is found under
+ * whatever suffix it was built with. */
+static const char *native_suffixes[] = {".so", ".dylib", ".dll"};
+static const size_t native_suffix_count = 3;
+
+bool sys_is_native_path(const char *path)
+{
+	size_t len = strlen(path);
+	for (size_t i = 0; i < native_suffix_count; i++) {
+		size_t sl = strlen(native_suffixes[i]);
+		if (len > sl &&
+		        strcmp(path + len - sl, native_suffixes[i]) == 0)
+			return true;
+	}
+	return false;
+}
+
+/* first readable <stem><suffix>, malloc'd, or NULL. */
+static char *native_with_stem(const char *stem)
+{
+	size_t stemlen = strlen(stem);
+	for (size_t i = 0; i < native_suffix_count; i++) {
+		size_t sl = strlen(native_suffixes[i]);
+		if (stemlen > (size_t)-1 - sl - 1)
+			continue;
+		size_t need = stemlen + sl + 1;
+		char *out = malloc(need);
+		if (out == NULL)
+			return NULL;
+		snprintf(out, need, "%s%s", stem, native_suffixes[i]);
+		if (access(out, R_OK) == 0)
+			return out;
+		free(out);
+	}
+	return NULL;
+}
+
+char *sys_resolve_native(const char *name)
+{
+	char *found = NULL;
+	if (name == NULL || !is_library_name(name))
+		return NULL;
+	/*
+	 * Beside the importing script first: the maturin-develop flow
+	 * drops the built .so next to the code that imports it, and the
+	 * script's own directory is the least surprising place to look.
+	 */
+	if (source_dir != NULL && source_dir[0] != '\0') {
+		size_t dirlen = strlen(source_dir);
+		size_t namelen = strlen(name);
+		if (dirlen <= (size_t)-1 - namelen - 2) {
+			size_t need = dirlen + 1 + namelen + 1;
+			char *stem = malloc(need);
+			if (stem != NULL) {
+				snprintf(stem, need, "%s/%s", source_dir, name);
+				found = native_with_stem(stem);
+				free(stem);
+			}
+		}
+		if (found != NULL)
+			return found;
+	}
+	/* installed packages, flat: flint_modules/<name>.so, the native
+	 * sibling of the flat one-file .fl package. */
+	{
+		const char *root = pkg_project_root(source_dir);
+		if (root != NULL) {
+			char *stem = pkg_join3(root, "flint_modules", name);
+			if (stem != NULL) {
+				found = native_with_stem(stem);
+				free(stem);
+			}
+			if (found != NULL)
+				return found;
+		}
+	}
+	/* the standard library directory last, mirroring source. */
+	{
+		const char *dir = stdlib_dir();
+		if (dir[0] != '\0') {
+			size_t dirlen = strlen(dir);
+			size_t namelen = strlen(name);
+			if (dirlen <= (size_t)-1 - namelen - 2) {
+				size_t need = dirlen + 1 + namelen + 1;
+				char *stem = malloc(need);
+				if (stem != NULL) {
+					snprintf(
+					        stem, need, "%s/%s", dir, name);
+					found = native_with_stem(stem);
+					free(stem);
+				}
+			}
+			if (found != NULL)
+				return found;
+		}
+	}
+	return NULL;
+}
+
+/*
+ * A sibling .fl for a bare library name: <source_dir>/<name>.fl when it
+ * reads, else NULL. The resolver never learned this rule -- bare names
+ * jump straight to the standard library -- so it lives in the import
+ * fallback beside the native search, where the order is stated once:
+ * sibling source, then native anywhere, with the standard library .fl
+ * already tried first by the resolver itself. Only bare names: a quoted
+ * "x.fl" is a path the user spelled, not a name to search for.
+ */
+char *sys_resolve_sibling(const char *name)
+{
+	if (name == NULL || !is_library_name(name))
+		return NULL;
+	if (source_dir == NULL || source_dir[0] == '\0')
+		return NULL;
+	size_t dirlen = strlen(source_dir);
+	size_t namelen = strlen(name);
+	if (dirlen > (size_t)-1 - namelen - 5)
+		return NULL;
+	size_t need = dirlen + 1 + namelen + 3 + 1;
+	char *out = malloc(need);
+	if (out == NULL)
+		return NULL;
+	snprintf(out, need, "%s/%s.fl", source_dir, name);
+	if (access(out, R_OK) == 0)
+		return out;
+	free(out);
+	return NULL;
+}
+
+/*
+ * The loader's module name for a resolved .so path: the basename minus
+ * its suffix. "librust_native.dylib" becomes "librust_native", which is
+ * what `import "librust_native.so" as rust` would otherwise have to
+ * spell out. A path with no suffix keeps its basename; the caller only
+ * passes resolved native paths, so that arm is the belt beside the
+ * caller's braces.
+ */
+char *sys_native_module_name(const char *path)
+{
+	const char *base = strrchr(path, '/');
+	base = base != NULL ? base + 1 : path;
+	size_t len = strlen(base);
+	for (size_t i = 0; i < native_suffix_count; i++) {
+		size_t sl = strlen(native_suffixes[i]);
+		if (len > sl &&
+		        strcmp(base + len - sl, native_suffixes[i]) == 0) {
+			len -= sl;
+			break;
+		}
+	}
+	char *out = malloc(len + 1);
+	if (out == NULL)
+		return NULL;
+	memcpy(out, base, len);
+	out[len] = '\0';
+	return out;
+}
+
 /* whether the installed standard library answers to this bare name.
  * `pkg add` refuses such names, so an installed package never shadows
  * the library by accident: the collision is caught at install time,

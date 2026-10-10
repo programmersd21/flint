@@ -89,6 +89,38 @@ bool sys_module_file_exists(const char *name);
 bool sys_stdlib_has(const char *name);
 
 /*
+ * True when a path names a native shared object: .so, .dylib, or .dll.
+ * The loader refuses Windows outright, so .dll matches here only to
+ * report that refusal against the file the user meant.
+ */
+bool sys_is_native_path(const char *path);
+
+/*
+ * Resolve a bare library name to a native shared object, or NULL.
+ *
+ * Same directories as source, same order: beside the importing script,
+ * installed packages, standard library. The caller only asks after the
+ * .fl lookup failed, so source always wins and a stale .so never
+ * shadows edited source. The caller frees the result.
+ */
+char *sys_resolve_native(const char *name);
+
+/*
+ * The loader's module name for a resolved .so path: the basename minus
+ * its suffix, malloc'd. "librust_native.dylib" becomes "librust_native",
+ * which is what `import "librust_native.so" as rust` would otherwise
+ * have to spell out. The caller frees the result.
+ */
+char *sys_native_module_name(const char *path);
+
+/*
+ * A sibling <source_dir>/<name>.fl for a bare library name, or NULL.
+ * See the implementation for why this lives in the import fallback
+ * rather than the resolver. The caller frees the result.
+ */
+char *sys_resolve_sibling(const char *name);
+
+/*
  * The directory `flint sync` installs into: $FLINT_STDLIB when set, else
  * $HOME/.flint/stdlib, which is where `make install` puts it. NULL when
  * neither is available.

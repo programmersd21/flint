@@ -918,9 +918,15 @@ bool vm_value_to_index(
  */
 void vm_define_native(VM *vm, const char *name, NativeFn function, int arity)
 {
+	/*
+	 * Stack-top relative, not stack[0]: registration happens at startup
+	 * with an empty stack, but also mid-execution when an import loads
+	 * a native module, and absolute indices then read the running
+	 * script's slots instead of the two values just pushed.
+	 */
 	vm_push(vm, STR_VAL(copy_string(vm, name, (int)strlen(name))));
 	vm_push(vm, OBJ_VAL(new_native(vm, function, arity)));
-	table_set(vm, vm->globals, AS_STRING(vm->stack[0]), vm->stack[1]);
+	table_set(vm, vm->globals, AS_STRING(peek(vm, 1)), peek(vm, 0));
 	vm_pop(vm);
 	vm_pop(vm);
 }
@@ -939,7 +945,7 @@ void vm_define_native_with_data(
 	vm_push(vm, STR_VAL(copy_string(vm, name, (int)strlen(name))));
 	vm_push(vm,
 	        OBJ_VAL(new_native_with_data(vm, function, arity, user_data)));
-	table_set(vm, vm->globals, AS_STRING(vm->stack[0]), vm->stack[1]);
+	table_set(vm, vm->globals, AS_STRING(peek(vm, 1)), peek(vm, 0));
 	vm_pop(vm);
 	vm_pop(vm);
 }

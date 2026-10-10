@@ -10,6 +10,7 @@
  */
 #include "native.h"
 #include "common.h"
+#include "../ext.h"
 #include "memory.h"
 #include "native_math.h"
 #include "object.h"
@@ -858,6 +859,78 @@ static Value package_error_ctor(VM *vm, int argc, Value *argv)
  * import of the same path reports the failure rather than retrying a
  * half-initialised module.
  */
+
+/*
+ * Append one export to the bag, growing it. Shared by the source path
+ * (export-marked entries) and the native path below (every registered
+ * entry: for a native module registration IS export -- fl_module_func
+ * is the export list, and init cannot register anything else).
+ */
+static void bag_add(VM *vm, ObjTable *bag, ObjString *name, Value value)
+{
+	vm_push(vm, STR_VAL(name));
+	if (bag->count == bag->capacity) {
+		int old = bag->capacity;
+		bag->capacity = old > 0 ? old * 2 : 8;
+		bag->keys = GROW_ARRAY(
+		        vm, ObjString *, bag->keys, old, bag->capacity);
+		bag->values =
+		        GROW_ARRAY(vm, Value, bag->values, old, bag->capacity);
+	}
+	bag->keys[bag->count] = name;
+	bag->values[bag->count] = value;
+	bag->count++;
+	vm_pop(vm);
+}
+
+/*
+ * Push a fresh module environment, shared by the source and native
+ * import paths: registered natives and top-level definitions land here
+ * and nowhere else. Returns false after reporting when imports nest too
+ * deep; on success *env_out holds the table, *saved_out the importer's,
+ * and vm->globals points at the fresh one. The caller restores both on
+ * every path out, exactly like the source path always has.
+ */
+static bool import_push_env(VM *vm, Table **env_out, Table **saved_out)
+{
+	if (vm->globals_count >= FL_MODULE_DEPTH + 1) {
+		vm_runtime_error(vm,
+		        "modules nested more than %d deep. is an import "
+		        "loop that the cycle check missed?",
+		        FL_MODULE_DEPTH);
+		return false;
+	}
+	Table *saved_globals = vm->globals;
+	int want = vm->globals_used + 1;
+	if (want > vm->globals_capacity) {
+		int old_cap = vm->globals_capacity;
+		int fresh = old_cap * 2;
+		if (fresh < want)
+			fresh = want;
+		Table **grown = GROW_ARRAY(vm,
+		        Table *,
+		        vm->globals_envs,
+		        (size_t)old_cap,
+		        (size_t)fresh);
+		for (int i = old_cap; i < fresh; i++)
+			grown[i] = NULL;
+		vm->globals_envs = grown;
+		vm->globals_capacity = fresh;
+	}
+	vm->globals_envs[vm->globals_used] = ALLOCATE(vm, Table, 1);
+	table_init(vm->globals_envs[vm->globals_used]);
+	/* Remember the table pointer for this module. We can't read it by
+	 * index at export-table build time because nested imports push their
+	 * own tables on top, shifting globals_used. */
+	Table *module_env = vm->globals_envs[vm->globals_used];
+	vm->globals_used++;
+	vm->globals = vm->globals_envs[vm->globals_used - 1];
+	vm->globals_count++;
+	*env_out = module_env;
+	*saved_out = saved_globals;
+	return true;
+}
+
 static Value import_file_native(VM *vm, int argc, Value *argv)
 {
 	if (argc != 1) {
@@ -935,8 +1008,94 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 		return NIL_VAL;
 	}
 
+	/*
+	 * Source wins, twice over. Only when the resolved .fl cannot even
+	 * be opened does a bare library name fall further: first a sibling
+	 * .fl beside the importer (which the resolver never tries for bare
+	 * names), then the native search. Edited source must never lose to
+	 * a stale shared object, in either directory. The probe costs one
+	 * open and close per import. The .fl key above was only read,
+	 * never marked, so switching keys cleans up after itself by
+	 * construction -- there is no stale mark to undo.
+	 */
+	{
+		FILE *probe = fopen(path, "rb");
+		if (probe != NULL) {
+			fclose(probe);
+		} else if (!sys_is_native_path(path)) {
+			char *alt = sys_resolve_sibling(raw);
+			if (alt == NULL)
+				alt = sys_resolve_native(raw);
+			if (alt != NULL) {
+				vm_pop(vm); /* the .fl key */
+				free(path);
+				path = alt;
+				key = copy_string(vm, path, (int)strlen(path));
+				vm_push(vm, STR_VAL(key));
+			}
+		}
+	}
+
 	/* mark in flight before running, so a cycle inside sees this */
 	table_set(vm, &vm->modules, key, NIL_VAL);
+
+	/*
+	 * A resolved native path takes a different road from here: no
+	 * source to read, no bytecode to run. The loader registers the
+	 * module's functions into the fresh environment below, and every
+	 * one of them becomes an export -- for a native module,
+	 * registration IS export, and init can register nothing else.
+	 */
+	if (sys_is_native_path(path)) {
+		Table *saved_globals = NULL;
+		Table *module_env = NULL;
+		if (!import_push_env(vm, &module_env, &saved_globals)) {
+			table_set(vm, &vm->modules, key, FALSE_VAL);
+			vm_pop(vm); /* the key */
+			free(path);
+			return NIL_VAL;
+		}
+		char *modname = sys_native_module_name(path);
+		char error[512];
+		bool ok;
+		if (modname == NULL) {
+			snprintf(error,
+			        sizeof(error),
+			        "out of memory loading '%s'.",
+			        raw);
+			ok = false;
+		} else {
+			ok = fl_ext_load_native(
+			        vm, path, modname, error, sizeof(error));
+			free(modname);
+		}
+		if (!ok) {
+			vm->globals_count--;
+			vm->globals = saved_globals;
+			table_set(vm, &vm->modules, key, FALSE_VAL);
+			vm_pop(vm); /* the key */
+			free(path);
+			vm_runtime_error(vm, "%s", error);
+			if (vm->has_pending)
+				vm_throw_value(vm, vm->pending_error);
+			return NIL_VAL;
+		}
+		ObjTable *bag = new_flint_table(vm);
+		vm_push(vm, OBJ_VAL(bag));
+		for (int i = 0; i < module_env->capacity; i++) {
+			ObjString *name = module_env->entries[i].key;
+			if (name == NULL)
+				continue;
+			bag_add(vm, bag, name, module_env->entries[i].value);
+		}
+		vm->globals_count--;
+		vm->globals = saved_globals;
+		table_set(vm, &vm->modules, key, OBJ_VAL(bag));
+		vm_pop(vm); /* the bag */
+		vm_pop(vm); /* the key */
+		free(path);
+		return OBJ_VAL(bag);
+	}
 
 	FILE *file = fopen(path, "rb");
 	if (file == NULL) {
@@ -1018,58 +1177,19 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 	fclose(file);
 
 	/*
-	 * Push a fresh environment. The module's top-level definitions go
-	 * here and nowhere else, and `vm->globals` points at it for the
-	 * duration, so the bytecode needs no change to be isolated.
+	 * A fresh environment for the module to run in. See
+	 * import_push_env: the helper holds the whole shape, comments
+	 * included, so the two import paths cannot drift apart here.
 	 */
-	if (vm->globals_count >= FL_MODULE_DEPTH + 1) {
-		vm_runtime_error(vm,
-		        "modules nested more than %d deep. is an import "
-		        "loop that the cycle check missed?",
-		        FL_MODULE_DEPTH);
+	Table *saved_globals = NULL;
+	Table *module_env = NULL;
+	if (!import_push_env(vm, &module_env, &saved_globals)) {
 		free(buffer);
 		table_set(vm, &vm->modules, key, FALSE_VAL);
 		vm_pop(vm);
 		free(path);
 		return NIL_VAL;
 	}
-
-	/*
-	 * Save the importer's environment and install a fresh one.
-	 *
-	 * Every import gets a new environment, even two imports in a row at
-	 * the same depth. globals_used is the high-water mark of slots ever
-	 * taken and only grows: reusing a slot would hand the second module
-	 * the first module's table, and its `scale` would already be defined
-	 * as a const -- which is how two unrelated modules ended up reporting
-	 * "cannot redefine constant" against each other's names.
-	 */
-	Table *saved_globals = vm->globals;
-	int want = vm->globals_used + 1;
-	if (want > vm->globals_capacity) {
-		int old_cap = vm->globals_capacity;
-		int fresh = old_cap * 2;
-		if (fresh < want)
-			fresh = want;
-		Table **grown = GROW_ARRAY(vm,
-		        Table *,
-		        vm->globals_envs,
-		        (size_t)old_cap,
-		        (size_t)fresh);
-		for (int i = old_cap; i < fresh; i++)
-			grown[i] = NULL;
-		vm->globals_envs = grown;
-		vm->globals_capacity = fresh;
-	}
-	vm->globals_envs[vm->globals_used] = ALLOCATE(vm, Table, 1);
-	table_init(vm->globals_envs[vm->globals_used]);
-	/* Remember the table pointer for this module. We can't read it by
-	 * index at export-table build time because nested imports push their
-	 * own tables on top, shifting globals_used. */
-	Table *module_env = vm->globals_envs[vm->globals_used];
-	vm->globals_used++;
-	vm->globals = vm->globals_envs[vm->globals_used - 1];
-	vm->globals_count++;
 
 	/*
 	 * Run the module with the resolver pointed at its own directory,
@@ -1154,23 +1274,10 @@ static Value import_file_native(VM *vm, int argc, Value *argv)
 			continue;
 		if (!module_env->entries[i].is_exported)
 			continue;
-		Value value = module_env->entries[i].value;
-		vm_push(vm, STR_VAL(name));
 		/* a Flint-level table, so `import geometry` gives
 		 * `geometry.area(5)` through ordinary field access rather
 		 * than through anything import-specific. */
-		if (bag->count == bag->capacity) {
-			int old = bag->capacity;
-			bag->capacity = old > 0 ? old * 2 : 8;
-			bag->keys = GROW_ARRAY(
-			        vm, ObjString *, bag->keys, old, bag->capacity);
-			bag->values = GROW_ARRAY(
-			        vm, Value, bag->values, old, bag->capacity);
-		}
-		bag->keys[bag->count] = name;
-		bag->values[bag->count] = value;
-		bag->count++;
-		vm_pop(vm);
+		bag_add(vm, bag, name, module_env->entries[i].value);
 	}
 
 	free(buffer);
