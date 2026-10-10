@@ -160,7 +160,7 @@ expect "lock pins a 40-char commit" "40" "${#pin}"
 
 # A damaged mirror cache must heal instead of making every retry fail.
 mirror=
-for candidate in "$HOME"/.flint/git/*; do
+for candidate in "$HOME"/.flint/git/shout-*; do
 	[ -d "$candidate" ] && { mirror=$candidate; break; }
 done
 expect "git mirror cache exists" "yes" "$([ -n "$mirror" ] && echo yes || echo no)"
