@@ -164,6 +164,10 @@ for candidate in "$HOME"/.flint/git/gitsrc-*; do
 	[ -d "$candidate" ] && { mirror=$candidate; break; }
 done
 expect "git mirror cache exists" "yes" "$([ -n "$mirror" ] && echo yes || echo no)"
+if [ -z "$mirror" ]; then
+	echo "cannot test mirror recovery without a mirror path" >&2
+	exit 1
+fi
 rm -rf flint_modules/shout
 rm -f "$mirror/HEAD" "$mirror/config"
 out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
