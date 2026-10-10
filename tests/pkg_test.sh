@@ -164,7 +164,7 @@ for candidate in "$HOME"/.flint/git/gitsrc-*; do
 	[ -d "$candidate" ] && { mirror=$candidate; break; }
 done
 expect "git mirror cache exists" "yes" "$([ -n "$mirror" ] && echo yes || echo no)"
-rm -f "$mirror/HEAD"
+rm -f "$mirror/HEAD" "$mirror/config"
 out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
 expect "damaged mirror install fails while clearing cache" "1" "$([ "$code" -ne 0 ] && echo 1 || echo 0)"
 out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
