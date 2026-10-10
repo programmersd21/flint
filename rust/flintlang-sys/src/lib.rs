@@ -8,7 +8,7 @@
 //! What a native module looks like from here:
 //!
 //! ```ignore
-//! use flint_sys::{Module, Value};
+//! use flintlang_sys::{Module, Value};
 //!
 //! unsafe extern "C" fn add(m: Module, argc: i32, argv: *const Value) -> Value {
 //!     let a = Value::arg(m, argv, 0).as_number().unwrap_or(0.0);

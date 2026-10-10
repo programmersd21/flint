@@ -6,7 +6,7 @@
 //! `Result`, not on printed text. A run that prints the right thing and
 //! returns the wrong code is a failure, and these tests say so.
 
-use flint::{Engine, Error};
+use flintlang::{Engine, Error};
 
 #[test]
 fn runs_clean_source() {
@@ -119,6 +119,6 @@ fn errors_display() {
 
 #[test]
 fn abi_version_agrees_with_sys() {
-    assert_eq!(flint::abi_version(), flint_sys::ABI_VERSION);
-    assert!(flint::abi_version() >= 1);
+    assert_eq!(flintlang::abi_version(), flintlang_sys::ABI_VERSION);
+    assert!(flintlang::abi_version() >= 1);
 }

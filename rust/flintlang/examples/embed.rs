@@ -7,7 +7,7 @@
 //! No arguments runs a small built-in demo. The exit code mirrors the
 //! run: 0 for success, 65 for a compile error, 70 for a runtime error.
 
-use flint::{Engine, Error};
+use flintlang::{Engine, Error};
 use std::process::ExitCode;
 
 fn main() -> ExitCode {

@@ -5,7 +5,7 @@
 //! tells you which of the CLI's exit codes the run produced.
 //!
 //! ```rust
-//! let engine = flint::Engine::new().expect("out of memory");
+//! let engine = flintlang::Engine::new().expect("out of memory");
 //! engine.run(r#"print("hello from flint")"#, Some("hello.fl")).unwrap();
 //! ```
 //!
@@ -41,9 +41,9 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::ptr::NonNull;
 
-/// The ABI version this crate was built against, taken from `flint-sys`
+/// The ABI version this crate was built against, taken from `flintlang-sys`
 /// rather than repeated here so the two cannot disagree.
-pub const ABI_VERSION: u32 = flint_sys::ABI_VERSION;
+pub const ABI_VERSION: u32 = flintlang_sys::ABI_VERSION;
 
 /// The runtime process-global lock. See the crate documentation: the C
 /// side keeps compiler and scanner state outside any engine, so every
@@ -64,7 +64,7 @@ fn hold_process_lock() -> std::sync::MutexGuard<'static, ()> {
 
 /// The ABI version the linked runtime reports.
 ///
-/// Equal to [`flint_sys::ABI_VERSION`]; a mismatch means the static
+/// Equal to [`flintlang_sys::ABI_VERSION`]; a mismatch means the static
 /// library and the headers disagree, and nothing should run.
 pub fn abi_version() -> u32 {
     unsafe { raw::fl_abi_version() }
@@ -72,7 +72,7 @@ pub fn abi_version() -> u32 {
 
 /// Whether the linked runtime implements a capability tag.
 ///
-/// See [`flint_sys::capabilities`].
+/// See [`flintlang_sys::capabilities`].
 pub fn has_capability(capability: u32) -> bool {
     unsafe { raw::fl_has_capability(capability) != 0 }
 }
@@ -200,7 +200,7 @@ impl Drop for Engine {
 /// The engine side of the C ABI. Nothing else in this crate touches C.
 ///
 /// Kept minimal on purpose: the three engine functions and the version
-/// query. Everything module-side lives in `flint-sys`, and the two do
+/// query. Everything module-side lives in `flintlang-sys`, and the two do
 /// not share declarations, so a change on one side cannot silently
 /// redeclare the other.
 mod raw {

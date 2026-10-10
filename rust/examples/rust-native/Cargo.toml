@@ -10,4 +10,4 @@ name = "rust_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-flint-sys = { path = "../../flint-sys" }
+flintlang-sys = { path = "../../flintlang-sys" }

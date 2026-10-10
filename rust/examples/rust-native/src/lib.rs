@@ -15,7 +15,7 @@
 //! Build:  cargo build --release
 //! Load:   flint native target/release/librust_native.so rust_native script.fl
 
-use flint_sys::{catch_unwind_result, Module, Outcome, Value};
+use flintlang_sys::{catch_unwind_result, Module, Outcome, Value};
 
 // Panics carry a payload that is not Send; this is the one place the
 // boundary needs care, and `catch_unwind` is what makes it a problem rather
@@ -78,13 +78,13 @@ extern "C" fn describe(m: Module, _argc: i32, argv: *const Value) -> Value {
     catch_unwind_result(m, || {
         let value = arg(m, argv, 0);
         let kind = match value.kind() {
-            flint_sys::Type::Nil => "nil",
-            flint_sys::Type::Bool => "bool",
-            flint_sys::Type::Number => "number",
-            flint_sys::Type::String => "string",
-            flint_sys::Type::List => "list",
-            flint_sys::Type::Table => "table",
-            flint_sys::Type::Function => "function",
+            flintlang_sys::Type::Nil => "nil",
+            flintlang_sys::Type::Bool => "bool",
+            flintlang_sys::Type::Number => "number",
+            flintlang_sys::Type::String => "string",
+            flintlang_sys::Type::List => "list",
+            flintlang_sys::Type::Table => "table",
+            flintlang_sys::Type::Function => "function",
         };
         let table = m.new_table();
         m.table_set(table, "kind", Value::string(m, kind));
@@ -140,7 +140,7 @@ pub extern "C" fn flint_module_init(
     module: Module,
     abi_version: u32,
 ) -> i32 {
-    if abi_version != flint_sys::ABI_VERSION {
+    if abi_version != flintlang_sys::ABI_VERSION {
         return 1; // FL_INIT_ERROR
     }
     module.set_name("rust_native");

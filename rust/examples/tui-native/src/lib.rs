@@ -24,7 +24,7 @@ use std::io::Write;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
-use flint_sys::{catch_unwind_result, Module, Outcome, Value};
+use flintlang_sys::{catch_unwind_result, Module, Outcome, Value};
 
 /// Ratatui's `CrosstermBackend` over stdout, used for the real-terminal
 /// path. Render-only paths use Ratatui's `TestBackend` shape via an
@@ -109,13 +109,13 @@ extern "C" fn render_frame(m: Module, _argc: i32, argv: *const Value) -> Value {
         let list = unsafe { Value::arg(m, argv, 1) };
         let mut length = 0usize;
         let has_len = unsafe {
-            flint_sys_raw_len(list, &mut length)
+            flintlang_sys_raw_len(list, &mut length)
         };
         if has_len {
             for i in 0..length {
                 let mut element = Value::nil();
                 let ok = unsafe {
-                    flint_sys_raw_get(list, i, &mut element)
+                    flintlang_sys_raw_get(list, i, &mut element)
                 };
                 if ok != 0 {
                     if let Some(text) = element.as_str() {
@@ -142,11 +142,11 @@ unsafe extern "C" {
     fn raw_list_get(list: Value, index: usize, out: *mut Value) -> i32;
 }
 
-unsafe fn flint_sys_raw_len(list: Value, out: &mut usize) -> bool {
+unsafe fn flintlang_sys_raw_len(list: Value, out: &mut usize) -> bool {
     raw_list_length(list, out) != 0
 }
 
-unsafe fn flint_sys_raw_get(list: Value, index: usize, out: &mut Value) -> i32 {
+unsafe fn flintlang_sys_raw_get(list: Value, index: usize, out: &mut Value) -> i32 {
     raw_list_get(list, index, out)
 }
 
@@ -227,7 +227,7 @@ fn terminal_size() -> (u16, u16) {
 
 #[no_mangle]
 pub extern "C" fn flint_module_init(module: Module, abi_version: u32) -> i32 {
-    if abi_version != flint_sys::ABI_VERSION {
+    if abi_version != flintlang_sys::ABI_VERSION {
         return 1;
     }
     module.set_name("tui_native");
