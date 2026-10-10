@@ -35,6 +35,7 @@
 #include <unistd.h>
 #ifdef _WIN32
 #	include <direct.h> /* _mkdir, _chdir, _getcwd */
+#	include <process.h> /* _getpid */
 #	include <windows.h> /* GetModuleFileNameA, GetCurrentProcessId */
 #endif
 #ifdef __APPLE__
@@ -2391,6 +2392,88 @@ static Value time_str_native(VM *vm, int argc, Value *argv)
 	return STR_VAL(new_string(vm, buf, (int)strlen(buf)));
 }
 
+/* a signal number from a flint number, or -1 with an error raised.
+ * Integral and in range: signal 2.5 is not a signal, and neither is
+ * one the platform never heard of. */
+static int signal_number(VM *vm, Value value, const char *what)
+{
+	if (!IS_NUMBER(value) ||
+	        (double)(int)AS_NUMBER(value) != AS_NUMBER(value)) {
+		vm_runtime_error(vm, "%s must be a whole number.", what);
+		return -1;
+	}
+	int sig = (int)AS_NUMBER(value);
+	if (sig < 0 || sig > 128) {
+		vm_runtime_error(vm, "%s must be between 0 and 128.", what);
+		return -1;
+	}
+	return sig;
+}
+
+/*
+ * __signal_raise(sig) -> deliver a signal to this process.
+ *
+ * Synchronous -- raise() delivers to the caller before it returns --
+ * so there is no async handler running inside the collector and no
+ * reentrancy question. With the default disposition SIGINT/SIGTERM
+ * end the process, exactly like kill -INT on this pid; that is the
+ * point, not a side effect. There is deliberately no trap/handler
+ * API: a C signal handler may only touch async-signal-safe state, and
+ * a VM is the opposite of that.
+ */
+static Value signal_raise_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	int sig = signal_number(vm, argv[0], "signal number");
+	if (sig < 0)
+		return NIL_VAL;
+	return BOOL_VAL(raise(sig) == 0);
+}
+
+/*
+ * __signal_send(pid, sig) -> kill() a process, usually with 0.
+ *
+ * Signal 0 delivers nothing and is the point: it asks "does this pid
+ * exist and may I signal it" without touching the target, which is how
+ * a script checks for a process it started. POSIX-only; Windows has no
+ * kill, and mapping it onto TerminateProcess would change "signal this
+ * process" into "kill it", which is not the same operation.
+ */
+static Value signal_send_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	if (!IS_NUMBER(argv[0]) ||
+	        (double)(int)AS_NUMBER(argv[0]) != AS_NUMBER(argv[0]) ||
+	        AS_NUMBER(argv[0]) < 0) {
+		vm_runtime_error(vm, "process id must be a whole number.");
+		return NIL_VAL;
+	}
+	int sig = signal_number(vm, argv[1], "signal number");
+	if (sig < 0)
+		return NIL_VAL;
+#ifdef _WIN32
+	(void)argv;
+	vm_runtime_error(
+	        vm, "signal.send() needs a POSIX system in this release.");
+	return NIL_VAL;
+#else
+	return BOOL_VAL(kill((pid_t)AS_NUMBER(argv[0]), sig) == 0);
+#endif
+}
+
+/* __signal_pid() -> this process's id, for signal.send's first half. */
+static Value signal_pid_native(VM *vm, int argc, Value *argv)
+{
+	(void)vm;
+	(void)argc;
+	(void)argv;
+#ifdef _WIN32
+	return NUMBER_VAL((double)_getpid());
+#else
+	return NUMBER_VAL((double)getpid());
+#endif
+}
+
 void register_sys_natives(VM *vm)
 {
 	vm_define_native(vm, "args", args_native, 0);
@@ -2418,6 +2501,11 @@ void register_sys_natives(VM *vm)
 	vm_define_native(vm, "__now", time_now_native, 0);
 	vm_define_native(vm, "__clock_ms", clock_ms_native, 0);
 	vm_define_native(vm, "__sleep", sleep_native, 1);
+	/* signals: raise and send a number, own pid for the latter's
+	 * first argument. no handlers by design; see signal_raise_native. */
+	vm_define_native(vm, "__signal_raise", signal_raise_native, 1);
+	vm_define_native(vm, "__signal_send", signal_send_native, 2);
+	vm_define_native(vm, "__signal_pid", signal_pid_native, 0);
 	vm_define_native(vm, "__time_str", time_str_native, 1);
 
 	/* the os module is written in flint over these, like fs above. */

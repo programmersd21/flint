@@ -1231,6 +1231,73 @@ static Value slice_native(VM *vm, int argc, Value *argv)
 	return STR_VAL(out);
 }
 
+/*
+ * __debug_frames() -> a list of {function, line} tables, innermost
+ * first, for the debug module. Read-only: it walks the frames and
+ * builds fresh values, changing nothing, so calling it cannot perturb
+ * the program being inspected.
+ *
+ * Every value that can be collected is pushed before the next
+ * allocation, following fl_error_value's discipline: the list first,
+ * then each frame's table, then each key and string across the grows.
+ * A missed root here is a use-after-free that only shows up under
+ * collection pressure, which is exactly when someone calls this.
+ */
+static void debug_frame_set(
+        VM *vm, ObjTable *t, const char *key, int key_len, Value value)
+{
+	ObjString *k = copy_string(vm, key, key_len);
+	vm_push(vm, STR_VAL(k));
+	vm_push(vm, value);
+	if (t->count == t->capacity) {
+		int old = t->capacity;
+		t->capacity = old > 0 ? old * 2 : 8;
+		t->keys =
+		        GROW_ARRAY(vm, ObjString *, t->keys, old, t->capacity);
+		t->values = GROW_ARRAY(vm, Value, t->values, old, t->capacity);
+	}
+	t->keys[t->count] = k;
+	t->values[t->count] = value;
+	t->count++;
+	vm_pop(vm);
+	vm_pop(vm);
+}
+
+static Value debug_frames_native(VM *vm, int argc, Value *argv)
+{
+	(void)argc;
+	(void)argv;
+	ObjList *out = new_list(vm);
+	vm_push(vm, OBJ_VAL(out));
+	for (int i = vm->frame_count - 1; i >= vm->base_frame; i--) {
+		CallFrame *frame = &vm->frames[i];
+		ObjFunction *function = frame->closure->function;
+		size_t instruction =
+		        (size_t)(frame->ip - function->chunk.code - 1);
+		int line = function->chunk.lines[instruction];
+		ObjTable *one = new_flint_table(vm);
+		vm_push(vm, OBJ_VAL(one));
+		const char *name = function->name != NULL
+		                           ? function->name->chars
+		                           : "<script>";
+		ObjString *vname = new_string(vm, name, (int)strlen(name));
+		vm_push(vm, STR_VAL(vname));
+		debug_frame_set(vm, one, "function", 8, STR_VAL(vname));
+		vm_pop(vm);
+		debug_frame_set(vm, one, "line", 4, NUMBER_VAL((double)line));
+		if (out->capacity < out->count + 1) {
+			int old_cap = out->capacity;
+			out->capacity = GROW_CAPACITY(old_cap);
+			out->items = GROW_ARRAY(
+			        vm, Value, out->items, old_cap, out->capacity);
+		}
+		out->items[out->count++] = OBJ_VAL(one);
+		vm_pop(vm);
+	}
+	vm_pop(vm);
+	return OBJ_VAL(out);
+}
+
 void register_natives(VM *vm)
 {
 	vm_define_native(vm, "clock", clock_native, 0);
@@ -1244,6 +1311,10 @@ void register_natives(VM *vm)
 	vm_define_native(vm, "ModuleError", module_error_ctor, 1);
 	vm_define_native(vm, "PackageError", package_error_ctor, 1);
 	vm_define_native(vm, "__range_step_error", range_step_error_native, 0);
+	/* read-only frame inspection for the debug module. double
+	 * underscore because no script calls it directly: debug.frames()
+	 * is the contract, this is the mechanism. */
+	vm_define_native(vm, "__debug_frames", debug_frames_native, 0);
 	/* -1 for the arity because input() takes zero or one argument, and
 	 * a fixed-arity native cannot express that. the check is inside. */
 	vm_define_native(vm, "input", input_native, -1);
