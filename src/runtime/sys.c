@@ -37,6 +37,9 @@
 #	include <direct.h> /* _mkdir, _chdir, _getcwd */
 #	include <windows.h> /* GetModuleFileNameA, GetCurrentProcessId */
 #endif
+#ifdef __APPLE__
+#	include <mach-o/dyld.h> /* _NSGetExecutablePath */
+#endif
 
 /*
  * The command line, as one allocation.
@@ -194,9 +197,11 @@ static const char *stdlib_dir(void)
 		return cached;
 	}
 
-	/* next to the binary: readlink on /proc/self/exe rather than argv[0],
-	 * because argv[0] is whatever the shell felt like and /proc is where
-	 * the truth is. if it is not there, the other two still work. */
+	/* next to the binary: the executable's own path rather than
+	 * argv[0], because argv[0] is whatever the shell felt like.
+	 * /proc on Linux, _NSGetExecutablePath on macOS, GetModuleFileName
+	 * on Windows. When none of them answers, the home directory and
+	 * the compiled-in default below still work. */
 #ifdef _WIN32
 	{
 		char buf[4096];
@@ -212,6 +217,31 @@ static const char *stdlib_dir(void)
 				if (dirlen + 5 < sizeof(lib)) {
 					memcpy(lib, buf, dirlen);
 					memcpy(lib + dirlen, "\\lib", 5);
+					lib[dirlen + 4] = '\0';
+					if (access(lib, R_OK) == 0) {
+						cached = lib;
+						return cached;
+					}
+				}
+			}
+		}
+	}
+#elif defined(__APPLE__)
+	{
+		/* _NSGetExecutablePath can return a path with symlinks
+		 * unresolved; that is fine here, because only the
+		 * directory half is used and ../lib resolves through
+		 * the same links the executable itself did. */
+		char buf[4096];
+		uint32_t size = sizeof(buf);
+		if (_NSGetExecutablePath(buf, &size) == 0) {
+			char *slash = strrchr(buf, '/');
+			if (slash != NULL) {
+				static char lib[4096];
+				size_t dirlen = (size_t)(slash - buf);
+				if (dirlen + 5 < sizeof(lib)) {
+					memcpy(lib, buf, dirlen);
+					memcpy(lib + dirlen, "/lib", 5);
 					lib[dirlen + 4] = '\0';
 					if (access(lib, R_OK) == 0) {
 						cached = lib;

@@ -60,7 +60,9 @@ typedef struct {
 /* every library this process loaded, so an unload request can find it.
  * process-wide because dlopen is: two VMs loading one path share the
  * library, and unloading under one VM would pull it from under the
- * other. */
+ * other. POSIX-only like the loader: the Windows build keeps no
+ * registry because it loads nothing. */
+#ifndef _WIN32
 typedef struct ExtLoaded {
 	char path[1024];
 	void *lib;
@@ -69,6 +71,7 @@ typedef struct ExtLoaded {
 } ExtLoaded;
 
 static ExtLoaded *ext_loaded;
+#endif
 
 #define FL_EXT_MAX_ARGS 16
 
@@ -494,9 +497,11 @@ static const FlApi flint_api = {
         api_error_category,
 };
 
+#ifndef _WIN32
 static void set_api(const FlApi *table) { fl_api = table; }
 
 static void fl_ext_install_api(void) { set_api(&flint_api); }
+#endif /* the Windows loader refuses up front, so it installs nothing */
 
 /*
  * The functions an extension actually calls. Each reads the vtable slot
