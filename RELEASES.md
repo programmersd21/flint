@@ -7,12 +7,13 @@
   and flat-module layouts.
 - Failed Git mirror clones clean up incomplete cache directories so a
   subsequent package install can recover.
-- Document the package import resolution order and keep the standalone C
-  runtime and Rust-embedded C source synchronized.
+- Document package import resolution and keep the standalone C runtime
+  and Rust-embedded C source synchronized.
+- Clean up dependency expansion on errors and stop cyclic path dependencies
+  at the depth limit.
 
 This is release preparation. Do not publish a `v0.14.0` tag or artifacts
-until PRs #10 and #11 are merged and the full `make validate` gate plus
-supported-platform checks have passed.
+until PRs #10, #11, and #13 are merged and the release checks pass.
 
 ## v0.13.2
 
