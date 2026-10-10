@@ -291,6 +291,47 @@ void fl_raise_fmt(FlModule *module, const char *format, ...);
  * raise something narrower. "Error" when there is no current error. */
 const char *fl_error_category(void);
 
+/* ---------------------------------------------------------------------- */
+/* embedding: run flint from a host program                               */
+/* ---------------------------------------------------------------------- */
+
+/*
+ * An engine owns one VM: its globals, its collector, its loaded modules.
+ * Create one, run source on it, free it. Diagnostics go to stderr in the
+ * same rendering as the CLI, because there is one diagnostic printer and
+ * this is it.
+ *
+ * One engine per thread is not enough: the compiler keeps process
+ * globals (the scanner above all), so two threads must not touch flint
+ * at once on any engines. A multithreaded host serializes all engine use
+ * behind one mutex. Engines are independent for sequential use -- running
+ * source on one, then on another, is fine -- but sequential means
+ * sequential, on one thread.
+ *
+ * Values are not exchanged across this API yet: run source, read the exit
+ * code. That is the whole of what is sound today without a handle
+ * lifetime to stand on, and a small honest API beats a wide speculative
+ * one.
+ */
+typedef struct FlEngine FlEngine;
+
+/* Create an engine. NULL when out of memory. */
+FlEngine *fl_engine_new(void);
+
+/* Release an engine and everything it owns. Safe on NULL. After this
+ * returns, no handle, value, or callback obtained through the engine
+ * may be used. */
+void fl_engine_free(FlEngine *engine);
+
+/*
+ * Compile and run source, as if it were a file named `name` (used in
+ * diagnostics; may be NULL, which reads as "<source>"). Returns 0 on
+ * success, 64 for a NULL engine or source, 65 for a compile error, 70
+ * for a runtime error -- the CLI's exit codes, so a host and a script
+ * agree on what happened.
+ */
+int fl_engine_run(FlEngine *engine, const char *source, const char *name);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
