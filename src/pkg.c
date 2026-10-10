@@ -22,9 +22,12 @@
 #include "pkg.h"
 #include "sys.h"
 
+#include "sha256.h"
+
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,12 +35,15 @@
 #include <unistd.h>
 #ifndef _WIN32
 #	include <sys/wait.h>
+#else
+#	include <windows.h>
 #endif
 
 /* forward: defined with the file operations below, used by the git
  * layer above it. */
 static char *pkg_join(const char *a, const char *b);
 static bool pkg_remove_tree(const char *path);
+static char *pkg_dup(const char *text);
 
 /* a manifest in memory. values are heap strings the manifest owns. */
 typedef struct {
@@ -140,8 +146,11 @@ static int pkg_git(char *const argv[], char *out, size_t cap)
 #endif
 
 /* whether git exists at all. checked once per process, at first use:
- * every git failure after that is about the repository, not the tool. */
+ * every git failure after that is about the repository, not the tool.
+ * POSIX-only: without fork there is no git to check for. */
+#ifndef _WIN32
 static int pkg_git_present = -1;
+#endif
 
 static bool pkg_have_git(void)
 {
@@ -944,6 +953,30 @@ static bool pkg_materialize(const char *mirror,
 #endif
 }
 
+/* stat a tree entry: 0 with st filled, -1 on failure, 1 when the
+ * entry is a link and must be skipped rather than followed. Links are
+ * symlinks on POSIX (lstat) and reparse points on Windows (attributes:
+ * stat would follow them). Copying or hashing through one would read
+ * outside the tree being installed, so the walks skip them exactly as
+ * they skip anything that is not a regular file or directory. */
+static int pkg_stat_entry(const char *path, struct stat *st)
+{
+#ifdef _WIN32
+	DWORD attrs = GetFileAttributesA(path);
+	if (attrs == INVALID_FILE_ATTRIBUTES)
+		return -1;
+	if ((attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+		return 1;
+	return stat(path, st) == 0 ? 0 : -1;
+#else
+	if (lstat(path, st) != 0)
+		return -1;
+	if (S_ISLNK(st->st_mode))
+		return 1;
+	return 0;
+#endif
+}
+
 /* join two path components. NULL on overflow or allocation failure. */
 static char *pkg_join(const char *a, const char *b)
 {
@@ -1043,17 +1076,21 @@ static bool pkg_copy_tree(const char *from, const char *to)
 			break;
 		}
 		struct stat st;
-		if (lstat(src, &st) != 0) {
+		int sr = pkg_stat_entry(src, &st);
+		if (sr < 0) {
 			free(src);
 			free(dst);
 			ok = false;
 			break;
 		}
-		if (S_ISDIR(st.st_mode)) {
+		if (sr == 0 && S_ISDIR(st.st_mode)) {
 			ok = pkg_copy_tree(src, dst);
-		} else if (S_ISREG(st.st_mode)) {
+		} else if (sr == 0 && S_ISREG(st.st_mode)) {
 			ok = pkg_copy_file(src, dst);
 		}
+		/* anything else -- links, fifos, sockets -- is left out,
+		 * for the same reason dotfiles are: that history is not
+		 * the dependency. */
 		free(src);
 		free(dst);
 	}
@@ -1081,19 +1118,193 @@ static bool pkg_remove_tree(const char *path)
 			break;
 		}
 		struct stat st;
-		if (lstat(child, &st) != 0) {
+		int sr = pkg_stat_entry(child, &st);
+		if (sr < 0) {
 			free(child);
 			ok = false;
 			break;
 		}
-		if (S_ISDIR(st.st_mode))
+		if (sr == 0 && S_ISDIR(st.st_mode))
 			ok = pkg_remove_tree(child);
+		else if (sr == 0)
+			ok = remove(child) == 0;
+#ifdef _WIN32
+		/* a reparse point is removed as a link, never followed: it
+		 * may be a junction, which rmdir unlinks without
+		 * recursing. remove() first for symlinks to files. */
+		else if (remove(child) != 0)
+			ok = rmdir(child) == 0;
+#else
 		else
 			ok = remove(child) == 0;
+#endif
 		free(child);
 	}
 	closedir(dir);
 	return ok && rmdir(path) == 0;
+}
+
+/* hash an installed tree into 64 hex characters: the `content` the lock
+ * records beside a pinned commit. what it covers, exactly:
+ *
+ *   - every regular file under dir, by path relative to dir
+ *   - paths joined with '/', so the hash is identical on every OS
+ *   - paths sorted byte-wise, because readdir order is the filesystem's
+ *     business, not ours
+ *   - file bytes, framed as path + NUL + u64-LE size + bytes, so two
+ *     different trees cannot frame the same stream
+ *
+ * what it skips: dotfiles and dot-directories, symlinks, and anything
+ * that is not a regular file -- the same filter pkg_copy_tree applies,
+ * because hashing what the copy would not have copied makes the hash a
+ * function of the source directory rather than of the installed tree.
+ * metadata (mtimes, modes, owners) is deliberately excluded: a git
+ * checkout restores bytes, not timestamps, so the same pin must hash
+ * the same on every machine.
+ *
+ * false on any I/O error or allocation failure. */
+static int pkg_name_compare(const void *a, const void *b)
+{
+	return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+static bool pkg_hash_file(FlSha256 *ctx, const char *relative, const char *full)
+{
+	FILE *in = fopen(full, "rb");
+	if (in == NULL)
+		return false;
+	if (fseek(in, 0, SEEK_END) != 0) {
+		fclose(in);
+		return false;
+	}
+	long size = ftell(in);
+	if (size < 0 || fseek(in, 0, SEEK_SET) != 0) {
+		fclose(in);
+		return false;
+	}
+	fl_sha256_update(ctx, relative, strlen(relative) + 1);
+	uint64_t n = (uint64_t)size;
+	uint8_t framed[8];
+	for (int i = 0; i < 8; i++)
+		framed[i] = (uint8_t)(n >> (8 * i));
+	fl_sha256_update(ctx, framed, sizeof(framed));
+	bool ok = true;
+	uint8_t buf[8192];
+	while (size > 0) {
+		size_t want =
+		        (size_t)size < sizeof(buf) ? (size_t)size : sizeof(buf);
+		size_t got = fread(buf, 1, want, in);
+		if (got == 0) {
+			ok = false;
+			break;
+		}
+		fl_sha256_update(ctx, buf, got);
+		size -= (long)got;
+	}
+	if (fclose(in) != 0)
+		ok = false;
+	return ok && size == 0;
+}
+
+static bool pkg_hash_walk(FlSha256 *ctx, const char *dir, const char *relative)
+{
+	DIR *stream = opendir(dir);
+	if (stream == NULL)
+		return false;
+	/* collected first, then sorted: readdir order must not leak into
+	 * the digest. */
+	char **names = NULL;
+	int count = 0;
+	int capacity = 0;
+	bool ok = true;
+	struct dirent *entry;
+	while (ok && (entry = readdir(stream)) != NULL) {
+		if (strcmp(entry->d_name, ".") == 0 ||
+		        strcmp(entry->d_name, "..") == 0 ||
+		        entry->d_name[0] == '.')
+			continue;
+		if (count == capacity) {
+			int grown = capacity == 0 ? 16 : capacity * 2;
+			char **bigger =
+			        realloc(names, (size_t)grown * sizeof(*names));
+			if (bigger == NULL) {
+				ok = false;
+				break;
+			}
+			names = bigger;
+			capacity = grown;
+		}
+		names[count] = pkg_dup(entry->d_name);
+		if (names[count] == NULL) {
+			ok = false;
+			break;
+		}
+		count++;
+	}
+	closedir(stream);
+	if (ok && count > 0) {
+		qsort(names, (size_t)count, sizeof(*names), pkg_name_compare);
+		for (int i = 0; i < count && ok; i++) {
+			char child_relative[4096];
+			if (relative[0] == '\0')
+				snprintf(child_relative,
+				        sizeof(child_relative),
+				        "%s",
+				        names[i]);
+			else
+				snprintf(child_relative,
+				        sizeof(child_relative),
+				        "%s/%s",
+				        relative,
+				        names[i]);
+			/* a relative path that does not fit is refused, not
+			 * truncated: a truncated path hashes a different tree
+			 * than the one installed. */
+			if (strlen(child_relative) >=
+			        sizeof(child_relative) - 1) {
+				ok = false;
+				break;
+			}
+			char *full = pkg_join(dir, names[i]);
+			if (full == NULL) {
+				ok = false;
+				break;
+			}
+			struct stat st;
+			int sr = pkg_stat_entry(full, &st);
+			if (sr < 0) {
+				free(full);
+				ok = false;
+				break;
+			}
+			if (sr == 0 && S_ISDIR(st.st_mode))
+				ok = pkg_hash_walk(ctx, full, child_relative);
+			else if (sr == 0 && S_ISREG(st.st_mode))
+				ok = pkg_hash_file(ctx, child_relative, full);
+			free(full);
+		}
+	}
+	for (int i = 0; i < count; i++)
+		free(names[i]);
+	free(names);
+	return ok;
+}
+
+static bool pkg_hash_tree(const char *dir, char out[65])
+{
+	FlSha256 ctx;
+	fl_sha256_init(&ctx);
+	if (!pkg_hash_walk(&ctx, dir, ""))
+		return false;
+	uint8_t digest[32];
+	fl_sha256_final(&ctx, digest);
+	char *hex = out;
+	for (int i = 0; i < 32; i++) {
+		snprintf(hex, 3, "%02x", digest[i]);
+		hex += 2;
+	}
+	*hex = '\0';
+	return true;
 }
 
 static void pkg_usage(FILE *stream)
@@ -1400,13 +1611,16 @@ static bool pkg_sane_name(const char *name)
 }
 
 /* a lock entry: what install resolved last time. commit is the pinned
- * git commit, or NULL for path dependencies, which are live source. */
+ * git commit, or NULL for path dependencies, which are live source.
+ * content is the sha256 of the installed tree, or NULL when the lock
+ * predates content hashes -- the next install records it. */
 typedef struct {
 	char *name;
 	char *version;
 	char *source;
 	char *rev;
 	char *commit;
+	char *content;
 } PkgLocked;
 
 static void pkg_free_locked(PkgLocked *locked, int count)
@@ -1417,6 +1631,7 @@ static void pkg_free_locked(PkgLocked *locked, int count)
 		free(locked[i].source);
 		free(locked[i].rev);
 		free(locked[i].commit);
+		free(locked[i].content);
 	}
 	free(locked);
 }
@@ -1486,6 +1701,19 @@ static bool pkg_read_lock(
 		entry->commit = (commit != NULL && commit[0] != '\0')
 		                        ? pkg_dup(commit)
 		                        : NULL;
+		/* a lock written before content hashes has no `content` key,
+		 * and a mangled one is not a hash: both read back as
+		 * unknown, and the next install records the real one. */
+		const char *content =
+		        pkg_get(&manifest, manifest.tables[i].name, "content");
+		entry->content = NULL;
+		if (content != NULL && strlen(content) == 64) {
+			bool hex = true;
+			for (int h = 0; h < 64 && hex; h++)
+				hex = isxdigit((unsigned char)content[h]) != 0;
+			if (hex)
+				entry->content = pkg_dup(content);
+		}
 		if (entry->name == NULL || entry->version == NULL ||
 		        entry->source == NULL) {
 			ok = false;
@@ -1499,13 +1727,15 @@ static bool pkg_read_lock(
 }
 
 /* a resolved dependency: owned name/version, borrowed source tree. for
- * git the tree is a commit pin; for path it is the live directory. */
+ * git the tree is a commit pin; for path it is the live directory.
+ * content is the installed tree's hash once known, "" until then. */
 typedef struct {
 	char *name;
 	char *version;
 	const char *source;
 	const char *rev;
 	char commit[41];
+	char content[65];
 	bool is_git;
 	bool have_commit;
 } PkgResolved;
@@ -1823,7 +2053,25 @@ done:
  * every git dependency. otherwise a git dependency whose manifest entry
  * matches the lock reinstalls its pinned commit -- no network, identical
  * bytes. path dependencies are live source and always re-read.
+ *
+ * Content hashes make "identical bytes" checkable rather than assumed.
+ * when the lock records a hash for a dependency and the tree already in
+ * flint_modules/ hashes to it, the dependency is verified in place and
+ * left alone. otherwise the tree is re-materialized and hashed again,
+ * and a pinned git commit whose fresh bytes do not match the recorded
+ * hash stops the install: the source changed under a pin, and blessing
+ * it silently is what a checksum is for. path sources are live, so
+ * their hash is recorded, not enforced across installs.
  */
+static int pkg_lock_index(
+        const PkgLocked *locked, int locked_count, const char *name)
+{
+	for (int k = 0; k < locked_count; k++) {
+		if (strcmp(locked[k].name, name) == 0)
+			return k;
+	}
+	return -1;
+}
 static int pkg_install_core(bool update_all, const char *update_one)
 {
 	char error[512];
@@ -1944,13 +2192,16 @@ static int pkg_install_core(bool update_all, const char *update_one)
 
 	PkgResolved *resolved = NULL;
 	char **workdirs = NULL;
+	bool *verified = NULL;
 	if (count > 0) {
 		resolved = calloc((size_t)count, sizeof(PkgResolved));
 		workdirs = calloc((size_t)count, sizeof(char *));
-		if (resolved == NULL || workdirs == NULL) {
+		verified = calloc((size_t)count, sizeof(bool));
+		if (resolved == NULL || workdirs == NULL || verified == NULL) {
 			fprintf(stderr, "flint pkg: out of memory\n");
 			free(resolved);
 			free(workdirs);
+			free(verified);
 			pkg_free_deps(deps, count);
 			pkg_free_locked(locked, locked_count);
 			return 74;
@@ -1961,6 +2212,62 @@ static int pkg_install_core(bool update_all, const char *update_one)
 		bool updating = update_all ||
 		                (update_one != NULL &&
 		                        strcmp(update_one, deps[i].name) == 0);
+		/* Verified in place: the lock records a content hash for
+		 * this pin, and the tree already in flint_modules/
+		 * hashes to it. Nothing is cloned, copied, or written;
+		 * the mirror is not even touched. Workdirs stay NULL so
+		 * a later failure cannot sweep a directory this run did
+		 * not create. */
+		if (!updating && deps[i].git != NULL) {
+			int li = pkg_lock_index(
+			        locked, locked_count, deps[i].name);
+			if (li >= 0 && locked[li].commit != NULL &&
+			        locked[li].content != NULL &&
+			        strcmp(locked[li].source, deps[i].git) == 0 &&
+			        ((locked[li].rev == NULL &&
+			                 deps[i].rev == NULL) ||
+			                (locked[li].rev != NULL &&
+			                        deps[i].rev != NULL &&
+			                        strcmp(locked[li].rev,
+			                                deps[i].rev) == 0))) {
+				char *dest =
+				        pkg_join("flint_modules", deps[i].name);
+				char have[65];
+				if (dest != NULL && access(dest, F_OK) == 0 &&
+				        pkg_hash_tree(dest, have) &&
+				        strcmp(have, locked[li].content) == 0) {
+					resolved[i].name =
+					        pkg_dup(locked[li].name);
+					resolved[i].version =
+					        pkg_dup(locked[li].version);
+					if (resolved[i].name == NULL ||
+					        resolved[i].version == NULL) {
+						fprintf(stderr,
+						        "flint pkg: out of "
+						        "memory\n");
+						free(resolved[i].name);
+						free(resolved[i].version);
+						free(dest);
+						code = 74;
+						break;
+					}
+					resolved[i].source = locked[li].source;
+					resolved[i].rev = locked[li].rev;
+					memcpy(resolved[i].commit,
+					        locked[li].commit,
+					        sizeof(resolved[i].commit));
+					memcpy(resolved[i].content,
+					        locked[li].content,
+					        sizeof(resolved[i].content));
+					resolved[i].is_git = true;
+					resolved[i].have_commit = true;
+					verified[i] = true;
+				}
+				free(dest);
+				if (verified[i])
+					continue;
+			}
+		}
 		if (deps[i].git != NULL) {
 			const char *pin = NULL;
 			for (int k = 0; k < locked_count; k++) {
@@ -2007,6 +2314,73 @@ static int pkg_install_core(bool update_all, const char *update_one)
 
 	FILE *lock = NULL;
 	if (code == 0) {
+		/* A reinstalled pin must byte-match the recorded hash.
+		 * Checked here, before flint.lock is opened for writing,
+		 * so a mismatch leaves the old lock -- the record of what
+		 * was trusted -- exactly as it was. Only the suspect trees
+		 * go; the next install retries them from the mirror. */
+		for (int i = 0; i < count && code == 0; i++) {
+			if (verified[i] || !resolved[i].is_git)
+				continue;
+			bool updating =
+			        update_all ||
+			        (update_one != NULL &&
+			                strcmp(update_one, deps[i].name) == 0);
+			if (updating)
+				continue;
+			int li = pkg_lock_index(
+			        locked, locked_count, deps[i].name);
+			if (li < 0 || locked[li].content == NULL ||
+			        locked[li].commit == NULL)
+				continue;
+			if (strcmp(locked[li].commit, resolved[i].commit) != 0)
+				continue;
+			char fresh[65];
+			if (workdirs[i] == NULL ||
+			        !pkg_hash_tree(workdirs[i], fresh)) {
+				fprintf(stderr,
+				        "flint pkg: cannot hash '%s'\n",
+				        deps[i].name);
+				code = 74;
+				break;
+			}
+			if (strcmp(fresh, locked[li].content) != 0) {
+				fprintf(stderr,
+				        "flint pkg: '%s' does not match "
+				        "flint.lock: commit %s installed "
+				        "different bytes than recorded -- "
+				        "check '%s', then `flint pkg update "
+				        "%s` to re-pin\n",
+				        deps[i].name,
+				        resolved[i].commit,
+				        deps[i].git,
+				        deps[i].name);
+				code = 74;
+				break;
+			}
+			memcpy(resolved[i].content,
+			        fresh,
+			        sizeof(resolved[i].content));
+		}
+	}
+	if (code != 0) {
+		for (int i = 0; i < count; i++) {
+			if (workdirs[i] != NULL)
+				pkg_remove_tree(workdirs[i]);
+			free(workdirs[i]);
+		}
+		for (int i = 0; i < count; i++) {
+			free(resolved[i].name);
+			free(resolved[i].version);
+		}
+		free(resolved);
+		free(workdirs);
+		free(verified);
+		pkg_free_deps(deps, count);
+		pkg_free_locked(locked, locked_count);
+		return code;
+	}
+	if (code == 0) {
 		if (!sys_make_dirs("flint_modules")) {
 			fprintf(stderr,
 			        "flint pkg: cannot create flint_modules/\n");
@@ -2052,24 +2426,44 @@ static int pkg_install_core(bool update_all, const char *update_one)
 			free(workdirs[i]);
 			workdirs[i] = dest;
 		}
+		/* what lands in the lock is hashed after it lands: the
+		 * digest describes the installed tree, not the source it
+		 * came from. verified-in-place trees carry theirs already;
+		 * everything else is hashed here, and an unhashable tree
+		 * is not recorded. */
+		if (resolved[i].content[0] == '\0') {
+			if (workdirs[i] == NULL ||
+			        !pkg_hash_tree(
+			                workdirs[i], resolved[i].content)) {
+				fprintf(stderr,
+				        "flint pkg: cannot hash '%s'\n",
+				        resolved[i].name);
+				code = 74;
+				break;
+			}
+		}
 		if (resolved[i].is_git)
 			fprintf(lock,
 			        "[[packages]]\nname = \"%s\"\nversion = "
 			        "\"%s\"\nsource = \"%s\"\nrev = \"%s\"\n"
-			        "commit = \"%s\"\n\n",
+			        "commit = \"%s\"\ncontent = \"%s\"\n\n",
 			        resolved[i].name,
 			        resolved[i].version,
 			        resolved[i].source,
 			        resolved[i].rev != NULL ? resolved[i].rev : "",
-			        resolved[i].commit);
+			        resolved[i].commit,
+			        resolved[i].content);
 		else
 			fprintf(lock,
 			        "[[packages]]\nname = \"%s\"\nversion = "
-			        "\"%s\"\nsource = \"%s\"\n\n",
+			        "\"%s\"\nsource = \"%s\"\ncontent = "
+			        "\"%s\"\n\n",
 			        resolved[i].name,
 			        resolved[i].version,
-			        resolved[i].source);
-		printf("installed %s %s\n",
+			        resolved[i].source,
+			        resolved[i].content);
+		printf("%s %s %s\n",
+		        verified[i] ? "verified" : "installed",
 		        resolved[i].name,
 		        resolved[i].version);
 	}
@@ -2118,6 +2512,7 @@ static int pkg_install_core(bool update_all, const char *update_one)
 	}
 	free(resolved);
 	free(workdirs);
+	free(verified);
 	pkg_free_deps(deps, count);
 	pkg_free_locked(locked, locked_count);
 	return code;

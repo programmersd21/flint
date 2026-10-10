@@ -47,6 +47,7 @@ installs it. `pkg add file:///tmp/gitlib` records
 name = "libfoo"
 version = "0.1.0"
 source = "/tmp/libfoo"
+content = "9f2d8a1b4c5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8"
 
 [[packages]]
 name = "gitlib"
@@ -54,7 +55,30 @@ version = "0.2.0"
 source = "file:///tmp/gitlib"
 rev = ""
 commit = "e62409edc3793e95d58fe7b75ab7ad48cf72472e"
+content = "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809"
 ```
+
+`content` is the SHA-256 of the installed tree: every regular file by
+its path relative to the package directory (sorted, `/`-separated) and
+its bytes. Dotfiles, symlinks, and file metadata are excluded, so a git
+checkout restores the same bytes -- and the same hash -- on every
+machine.
+
+What the hash means depends on the source:
+
+- A git pin is immutable, so its hash is enforced. Reinstalling an
+  unchanged pin whose tree is already in place verifies it without
+  touching the network or the mirror (`verified gitlib 0.2.0`). A fresh
+  materialization whose bytes differ from the recorded hash stops the
+  install: the source changed under a pin. The old lock is kept, the
+  suspect tree is removed, and `pkg update <name>` re-pins deliberately.
+- A path is live source, so its hash is recorded, not enforced: it
+  documents exactly what bytes were copied, and the next install
+  re-copies regardless.
+
+A lock written before content hashes has no `content` keys. It still
+installs; the next install records the hashes. `pkg list` output is
+unchanged.
 
 Each dependency lands in `flint_modules/<name>/` with its sources and
 its own `flint.toml`:

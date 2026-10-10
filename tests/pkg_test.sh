@@ -79,6 +79,17 @@ HI SAM" "$out"
 expect "reinstall keeps the module" "yes" \
 	"$([ -f flint_modules/greet/main.fl ] && echo yes || echo no)"
 
+# the lock records a content hash of what was copied
+content=$(sed -n '/^content = /s/content = "\(.*\)"/\1/p' flint.lock)
+expect "lock records a 64-char content hash" "64" "${#content}"
+
+# a modified tree heals from the live source on the next install
+echo "tampered" >> flint_modules/greet/main.fl
+out=$("$FLINT" pkg install 2>&1)
+expect_contains "modified tree reinstalls" "installed greet 1.2.0" "$out"
+expect "modified tree is healed" "no" \
+	"$(grep -q tampered flint_modules/greet/main.fl && echo yes || echo no)"
+
 # a version requirement that cannot hold fails loudly
 sed -i 's/version = "\^1.0.0"/version = "^9.0.0"/' flint.toml
 out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
@@ -161,6 +172,30 @@ fi
 
 out=$("$FLINT" pkg update nosuch 2>&1) && code=0 || code=$?
 expect_contains "update of an unknown name explains" "no dependency" "$out"
+
+# content hashes: recorded beside the pin, verified on reinstall,
+# enforced against tampering
+content=$(sed -n '/^content = /s/content = "\(.*\)"/\1/p' flint.lock)
+expect "git lock records a 64-char content hash" "64" "${#content}"
+
+out=$("$FLINT" pkg install 2>&1)
+expect_contains "unchanged reinstall verifies in place" "verified shout" "$out"
+
+cp flint.lock "$WORK/gitlock.good"
+first=$(sed -n '/^content = /s/content = "\(.\).*/\1/p' flint.lock)
+if [ "$first" = "0" ]; then rep=1; else rep=0; fi
+sed -i "s/^content = \"$first/content = \"$rep/" flint.lock
+rm -rf flint_modules
+out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
+expect "content mismatch exits non-zero" "1" "$([ $code -ne 0 ] && echo 1 || echo 0)"
+expect_contains "content mismatch names the package" "does not match flint.lock" "$out"
+expect "content mismatch keeps the lock" "yes" \
+	"$([ -f flint.lock ] && echo yes || echo no)"
+expect "content mismatch removes the suspect tree" "no" \
+	"$([ -d flint_modules/shout ] && echo yes || echo no)"
+cp "$WORK/gitlock.good" flint.lock
+"$FLINT" pkg install >/dev/null 2>&1
+expect "restored lock reinstalls the pin" "LOUDER zed" "$("$FLINT" use.fl 2>&1)"
 
 # a rev pins to that tag regardless of what the branch has since done
 cat > flint.toml <<'EOF'

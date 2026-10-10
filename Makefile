@@ -102,7 +102,7 @@ DBG_CFLAGS := -O0 -g3 -DFL_DEBUG_PRINT_CODE -DFL_DEBUG_TRACE_EXECUTION
 STR_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -DFL_GC_STRESS
 STR_LDFLAGS := -fsanitize=address,undefined
 
-.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto fmt-test pkg-test runner-test native-test quick validate
+.PHONY: all release debug stress test diagnostic-test unit bench check lint fmt fmt-check clean help install uninstall flint-goto fmt-test pkg-test runner-test native-test quick validate libflint.a
 .SUFFIXES:
 
 # If a compile fails partway, do not leave a truncated object behind. Make
@@ -196,7 +196,15 @@ LIB_OBJS := $(filter-out $(REL_DIR)/src/main.o,$(REL_OBJS))
 #
 # The .bin targets are ordinary files and get rebuilt only when something
 # changed. The test targets are phony and always run what they built.
-.PHONY: test_value test_chunk test_verify
+.PHONY: test_value test_chunk test_verify test_sha256
+
+# A static library of the runtime, for hosts that embed flint: C through
+# include/flint.h, Rust through rust/flint. Everything but main.c, so an
+# embedding program brings its own main. The objects are the release ones,
+# because a host should link what ships. Lives here, below LIB_OBJS,
+# because a prerequisite list expands where the rule is parsed.
+libflint.a: $(LIB_OBJS)
+	$(AR) rcs $@ $^
 
 test_value.bin: $(UNIT_DIR)/unit_value.o
 	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS)
@@ -205,6 +213,9 @@ test_chunk.bin: $(UNIT_DIR)/test_chunk.o $(LIB_OBJS)
 	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS)
 
 test_verify.bin: $(UNIT_DIR)/test_verify.o $(LIB_OBJS)
+	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS)
+
+test_sha256.bin: $(UNIT_DIR)/test_sha256.o $(LIB_OBJS)
 	$(CC) $(ALL_CFLAGS) $(REL_CFLAGS) $^ -o $@ $(LIBS)
 
 test_value: test_value.bin
@@ -216,6 +227,9 @@ test_chunk: test_chunk.bin
 test_verify: test_verify.bin
 	@./test_verify.bin
 
+test_sha256: test_sha256.bin
+	@./test_sha256.bin
+
 # Built in the release tree on purpose: these run under the same -Werror
 # baseline as the interpreter, so a header change that breaks them shows up
 # here rather than in CI.
@@ -225,7 +239,7 @@ $(UNIT_DIR)/%.o: tests/unit/%.c
 
 # Each test reports through its exit status, so make stops at the first
 # failure and names it rather than running the rest onto a broken build.
-unit: test_value test_chunk test_verify
+unit: test_value test_chunk test_verify test_sha256
 
 #
 # The computed-goto interpreter.
@@ -457,8 +471,8 @@ fmt-check:
 check: validate
 
 clean:
-	rm -rf $(BUILD) flint flint-debug flint-stress flint-goto \
-		test_value.bin test_chunk.bin test_verify.bin
+	rm -rf $(BUILD) flint flint-debug flint-stress flint-goto libflint.a \
+		test_value.bin test_chunk.bin test_verify.bin test_sha256.bin
 
 help:
 	@echo "make            release build          -> ./flint"
@@ -473,6 +487,7 @@ help:
 	@echo "make validate   minutes: everything, incl. sanitizers and goto"
 	@echo ""
 	@echo "flint-goto      computed-goto interpreter, 7-21% faster"
+	@echo "libflint.a      static runtime for embedding (C/Rust hosts)"
 	@echo "install         flint + lib to ~/.local/bin and ~/.flint/stdlib"
 	@echo "bench           benchmarks (bench/bench.py)"
 	@echo "lint            clang-tidy, policy in .clang-tidy"
