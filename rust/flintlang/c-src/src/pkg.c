@@ -2933,7 +2933,7 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
         int from,
         bool *success)
 {
-	if (from == 0 && depth > 32) {
+	if (depth > 32) {
 		snprintf(error,
 		        error_size,
 		        "dependency chain is deeper than 32 -- is there a "
@@ -2957,17 +2957,23 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 		 * reads as though it does not, and the lockfile should not
 		 * carry that spelling either.
 		 */
+		int path_len;
 		if (strcmp(base_dir, ".") == 0)
-			snprintf(manifest_path,
+			path_len = snprintf(manifest_path,
 			        sizeof(manifest_path),
 			        "%s/flint.toml",
 			        list[i].path);
 		else
-			snprintf(manifest_path,
+			path_len = snprintf(manifest_path,
 			        sizeof(manifest_path),
 			        "%s/%s/flint.toml",
 			        base_dir,
 			        list[i].path);
+		if (path_len < 0 || (size_t)path_len >= sizeof(manifest_path)) {
+			snprintf(error, error_size, "dependency manifest path too long");
+			*success = false;
+			return list;
+		}
 		if (!pkg_load(manifest_path, &child, error, error_size)) {
 			*success = false;
 			return list;
@@ -3026,17 +3032,23 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 		 * reads as though it does not, and the lockfile should not
 		 * carry that spelling either.
 		 */
+		int path_len;
 		if (strcmp(base_dir, ".") == 0)
-			snprintf(manifest_path,
+			path_len = snprintf(manifest_path,
 			        sizeof(manifest_path),
 			        "%s/flint.toml",
 			        list[i].path);
 		else
-			snprintf(manifest_path,
+			path_len = snprintf(manifest_path,
 			        sizeof(manifest_path),
 			        "%s/%s/flint.toml",
 			        base_dir,
 			        list[i].path);
+		if (path_len < 0 || (size_t)path_len >= sizeof(manifest_path)) {
+			snprintf(error, error_size, "dependency manifest path too long");
+			*success = false;
+			return list;
+		}
 		if (!pkg_load(manifest_path, &child, error, error_size)) {
 			*success = false;
 			return list;
