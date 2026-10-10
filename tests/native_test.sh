@@ -130,8 +130,10 @@ fi
 DYLIB_EXT="so"
 if [ "$(uname)" = "Darwin" ]; then
 	DYLIB_EXT="dylib"
-	# append, not assign: a caller-provided RUSTFLAGS stays in force.
-	RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-args=-undefined dynamic_lookup"
+	# one -C link-arg per word: link-args with a space splits into two
+	# argv entries and rustc reads the second as an input file. append,
+	# not assign: a caller-provided RUSTFLAGS stays in force.
+	RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=-undefined -C link-arg=dynamic_lookup"
 	export RUSTFLAGS
 fi
 # a failed build prints its log: "did not build, skipping" with no reason

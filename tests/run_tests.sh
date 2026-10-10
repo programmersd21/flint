@@ -64,6 +64,11 @@ for test_file in $(find tests/language -type f -name '*.fl' | sort); do
     fi
     stdin_file="$base.stdin"
     status_file="$base.status"
+    # exit codes diverge the same way output does: the posix process
+    # transcript ends failing, the windows refusal transcript passes.
+    if [ -n "$plat" ] && [ -f "$base.status.$plat" ]; then
+        status_file="$base.status.$plat"
+    fi
 
     [ -f "$expected" ] || continue
 
