@@ -3086,6 +3086,7 @@ static PkgDep *pkg_expand_deps(PkgDep *list,
 				nested[k].path = absolute;
 			}
 			list[count++] = nested[k];
+			memset(&nested[k], 0, sizeof(nested[k]));
 			*filled = count;
 		}
 		free(nested);
