@@ -137,10 +137,16 @@ if [ "$(uname)" = "Darwin" ]; then
 	export RUSTFLAGS
 fi
 # a failed build prints its log: "did not build, skipping" with no reason
-# is how a red platform hides for a month.
+# is how a red platform hides for a month. $2 selects the network:
+# "offline" for crates with no registry dependencies (hermetic), "online"
+# for ones the lockfile pins but the machine must download (ratatui).
 build_rust_module() {
-	# $1: manifest path. $2: log label.
-	if cargo build --release --offline --quiet \
+	# $1: manifest path. $2: log label. $3: offline or online.
+	net="--offline"
+	if [ "$3" = "online" ]; then
+		net=""
+	fi
+	if cargo build --release $net --quiet \
 		--manifest-path "$1" >"$WORK/cargo-$2.log" 2>&1; then
 		return 0
 	fi
@@ -149,7 +155,7 @@ build_rust_module() {
 	return 1
 }
 if command -v cargo >/dev/null 2>&1; then
-	if build_rust_module "$REPO/rust/examples/rust-native/Cargo.toml" rust; then
+	if build_rust_module "$REPO/rust/examples/rust-native/Cargo.toml" rust offline; then
 		ok
 		cat > "$WORK/rust.fl" <<'RFL'
 print(sum(5))
@@ -185,7 +191,7 @@ fi
 # the shape that matters: flint asks for a frame, ratatui draws one, and
 # what comes back across the abi is text. nothing of ratatui crosses.
 if command -v cargo >/dev/null 2>&1; then
-	if build_rust_module "$REPO/rust/examples/tui-native/Cargo.toml" tui; then
+	if build_rust_module "$REPO/rust/examples/tui-native/Cargo.toml" tui online; then
 		ok
 		cat > "$WORK/tui.fl" <<'TFL'
 let rows = render_frame("demo", ["one", "two"])
