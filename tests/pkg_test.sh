@@ -158,6 +158,14 @@ expect "git import works" "HEY zed" "$("$FLINT" use.fl 2>&1)"
 pin=$(sed -n '/^commit = /s/commit = "\(.*\)"/\1/p' flint.lock)
 expect "lock pins a 40-char commit" "40" "${#pin}"
 
+# A damaged mirror cache must heal instead of making every retry fail.
+mirror=$(find "$HOME/.flint/git" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+expect "git mirror cache exists" "yes" "$([ -n "$mirror" ] && echo yes || echo no)"
+rm -f "$mirror/HEAD"
+out=$("$FLINT" pkg install 2>&1) && code=0 || code=$?
+expect "install recovers a mirror missing HEAD" "0" "$code"
+expect "recovered mirror still imports" "HEY zed" "$("$FLINT" use.fl 2>&1)"
+
 cat > "$WORK/gitsrc/main.fl" <<'EOF'
 export fn loud(who) {
     return "LOUDER " + who
