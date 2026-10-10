@@ -4,7 +4,7 @@ Safe, idiomatic embedding of the [Flint scripting language](https://github.com/p
 
 ```toml
 [dependencies]
-flintlang = "0.13.2"
+flintlang = "0.14.0"
 ```
 
 ```rust
@@ -44,8 +44,8 @@ builds target mingw-w64, matching the rest of the project.
 
 ## Versions
 
-This crate versions in lockstep with the language: `flintlang 0.13.2`
-embeds Flint 0.13.2. The `flintlang-sys` version tracks the wrapper, and
+This crate versions in lockstep with the language: `flintlang 0.14.0`
+embeds Flint 0.14.0. The `flintlang-sys` version tracks the wrapper, and
 the ABI version (`FL_ABI_VERSION`, currently 1) tracks the C header
 independently — a new function does not change it, a changed layout
 does.
