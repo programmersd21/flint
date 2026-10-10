@@ -52,6 +52,13 @@ expect_contains() {
 
 CC=${CC:-cc}
 CFLAGS="-std=c11 -Wall -Wextra -Werror -fPIC -shared -I$REPO/include"
+# macOS resolves every symbol at link time, while Linux leaves host
+# calls for the loader: -undefined dynamic_lookup is what makes a test
+# module behave the Linux way, resolving fl_* against the host that
+# dlopens it. dlopen itself takes the same .so name on both.
+if [ "$(uname)" = "Darwin" ]; then
+	CFLAGS="$CFLAGS -undefined dynamic_lookup"
+fi
 
 for name in hello_native bad_version no_symbol lifecycle; do
 	# shellcheck disable=SC2086

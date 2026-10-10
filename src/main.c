@@ -782,6 +782,22 @@ static int fix_file(const char *path, FlDiagFormat format, FlColorMode color)
 		return 65;
 	}
 
+#ifdef _WIN32
+	/* No atomic replace here: the temp-file, permission-copying dance
+	 * below is POSIX (lstat/fchmod/fsync have no Windows spelling in
+	 * a C11 build). --fix on Windows rewrites the file in place
+	 * rather than replacing it, and says so in the failure modes:
+	 * an interrupted write can leave a half-written file. */
+	bool ok = false;
+	FILE *file = fopen(path, "wb");
+	if (file != NULL) {
+		ok = fwrite(output, 1, output_len, file) == output_len;
+		if (ok && fflush(file) != 0)
+			ok = false;
+		if (fclose(file) != 0)
+			ok = false;
+	}
+#else
 	struct stat st;
 	if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
 		free(output);
@@ -831,14 +847,20 @@ static int fix_file(const char *path, FlDiagFormat format, FlColorMode color)
 	}
 	if (ok && rename(temp, path) != 0)
 		ok = false;
-	if (!ok)
+#endif
+	if (!ok) {
+#ifndef _WIN32
 		unlink(temp);
-	else
+#endif
+	} else {
 		printf("fixed: %s (%zu edit%s)\n",
 		        path,
 		        count,
 		        count == 1 ? "" : "s");
+	}
+#ifndef _WIN32
 	free(temp);
+#endif
 	free(output);
 	free(source);
 	vm_free(&vm);
