@@ -18,7 +18,12 @@ libbar = { path = "../libbar", version = "^1.0.0" }
 gitlib = { git = "https://example.com/gitlib.git", rev = "v1.0.0" }
 ```
 
-- `[package]` carries `name` and `version`.
+- `[package]` carries `name` and `version`. Optional `lib = "src/api.fl"`
+  selects the package's public module entry point, relative to the package root.
+  The path must name a `.fl` file inside the package. When `lib` is set, a
+  missing or invalid target is an error at import time; Flint does not silently
+  choose `main.fl` instead. Without `lib`, the legacy `main.fl`, same-named,
+  and flat-file layouts continue to work.
 - `[dependencies]` maps a name to a path string, a `{ path, version }`
   table, or a `{ git, rev, version }` table. `rev` may be empty, which
   tracks the default branch; the lock always pins the commit installed.
@@ -81,9 +86,17 @@ installs; the next install records the hashes. `pkg list` output is
 unchanged.
 
 Each dependency lands in `flint_modules/<name>/` with its sources and
-its own `flint.toml`. A package can expose its default module as
-`main.fl`, as a same-named file such as `levenshtein/levenshtein.fl`,
-or as a flat `flint_modules/<name>.fl` file.
+its own `flint.toml`. A package may declare its public module explicitly:
+
+```toml
+[package]
+name = "levenshtein"
+version = "1.0.0"
+lib = "src/levenshtein.fl"
+```
+
+Otherwise, Flint keeps the compatibility layouts: `main.fl`, a same-named
+file such as `levenshtein/levenshtein.fl`, or a flat `flint_modules/<name>.fl` file.
 
 ```text
 flint_modules/
@@ -108,8 +121,9 @@ import "gitlib/g.fl"
 print(g.greet())
 ```
 
-A bare name first checks installed packages in `flint_modules/`:
-`<name>/main.fl`, then `<name>/<name>.fl`, then the flat
+A bare name first checks installed packages in `flint_modules/`. If the
+package manifest declares `lib`, that path is the sole entry point. Otherwise,
+resolution checks `<name>/main.fl`, then `<name>/<name>.fl`, then the flat
 `<name>.fl` layout. If no package matches, the standard library is
 checked (so `import math` still imports the library). A quoted path with
 a `/` or a `.fl` extension can address a file relative to the importing
