@@ -1,0 +1,44 @@
+# toml -- the manifest shape, the extra values, and nil on malformed.
+#
+# the first document is a flint.toml by construction: what the package
+# manager accepts, this accepts, with nested tables where the manager
+# flattens.
+
+import toml
+
+let cfg = toml.parse("[package]\nname = \"demo\"\nversion = \"0.1.0\"\n" +
+    "[dependencies]\nlibfoo = \"../libfoo\"\n" +
+    "libbar = { path = \"../libbar\", version = \"^1.0.0\" }\n")
+print(cfg.package.name)
+print(cfg.dependencies.libfoo)
+print(cfg.dependencies.libbar.version)
+
+# numbers, booleans, arrays, dotted sections, nested inline tables
+let v = toml.parse("[a.b]\nc = 1\nflag = true\nratio = 1.5\n" +
+    "list = [1, 2]\nnested = { x = { y = \"deep\" } }\n")
+print(v.a.b.c)
+print(v.a.b.flag)
+print(v.a.b.ratio)
+print(v.a.b.list)
+print(v.a.b.nested.x.y)
+
+# [[array]] sections append
+let lock = toml.parse("[[packages]]\nname = \"a\"\n" +
+    "[[packages]]\nname = \"b\"\n")
+print(lock.packages[0].name)
+print(lock.packages[1].name)
+
+# escapes, and a comment that carries nothing
+let s = toml.parse("x = \"a\\nb\\t\\\\\"\n# trailing\n")
+print(s.x)
+
+# malformed reads as nil: empty values, duplicates, bad numbers,
+# unterminated strings, conflicting sections
+print(toml.parse("bad = \n"))
+print(toml.parse("x = 1\nx = 2\n"))
+print(toml.parse("[a]\n[a]\n"))
+print(toml.parse("x = 3.\n"))
+print(toml.parse("x = \"unterminated\n"))
+print(toml.parse("[a]\n[[a]]\n"))
+print(toml.parse(""))
+print(toml.parse("# only a comment\n"))

@@ -18,6 +18,9 @@ bottom rather than dipping in.
 | [errors.fl](errors.fl) | try/catch with a type filter, throwing, rethrowing, `finally` |
 | [files.fl](files.fl) | the fs and path modules: write a file, read it, clean up |
 | [json.fl](json.fl) | the json module: a round trip, and a parse error caught |
+| [url.fl](url.fl) | the url module: parse, edit, reassemble |
+| [datetime.fl](datetime.fl) | the datetime module: UTC dates as tables |
+| [toml.fl](toml.fl) | the toml module: a configuration file, read |
 | [http.fl](http.fl) | the http module, behind an env var so it cannot hang ci |
 | [terminal.fl](terminal.fl) | the terminal module: progress bar, spinner frames, a hyperlink |
 | [envconfig.fl](envconfig.fl) | the env module: PORT/DEBUG/HOST with fallbacks |
@@ -42,6 +45,9 @@ from the repository root:
 ./flint examples/errors.fl
 ./flint examples/files.fl
 ./flint examples/json.fl
+./flint examples/url.fl
+./flint examples/datetime.fl
+./flint examples/toml.fl
 ./flint examples/terminal.fl
 ./flint examples/envconfig.fl
 ./flint examples/argsdemo.fl hello --out result.txt

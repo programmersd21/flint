@@ -1,0 +1,256 @@
+# url -- split a URL into parts and build one back.
+#
+#     import url
+#     let u = url.parse("https://user@example.com:8080/p?q=1#frag")
+#     print(u.host)      # example.com
+#     print(u.port)      # 8080
+#     print(url.stringify(u))
+#
+# parse() returns a table with scheme, user, host, port, path, query and
+# fragment, all strings, or nil when the text is structurally malformed:
+# a port that is not digits, or an authority that cannot split. a missing
+# piece reads as "", so `u.port == ""` means "no port was written".
+#
+# components are returned raw -- still percent-encoded. the query layer is
+# where form encoding belongs, so query_parse() decodes and
+# query_stringify() encodes, through the encoding module; the rest of the
+# URL is transported exactly as written. stringify(parse(text)) is text
+# again, which is the property that makes this safe to edit through.
+#
+# everything counts bytes, like the rest of flint. IPv6 hosts in brackets
+# are understood; anything beyond RFC 3986's hierarchical and opaque
+# forms -- relative resolution, normalization -- is not here.
+
+import encoding
+
+# find the first index of needle in text at or after from, or -1.
+fn index_from(text, needle, from) {
+    let i = from
+    while i + len(needle) <= len(text) {
+        if slice(text, i, i + len(needle)) == needle {
+            return i
+        }
+        i += 1
+    }
+    return -1
+}
+
+fn find(text, needle) {
+    return index_from(text, needle, 0)
+}
+
+fn slice(text, from, to) {
+    let out = ""
+    let i = from
+    while i < to {
+        out += text[i]
+        i += 1
+    }
+    return out
+}
+
+fn is_scheme_char(c) {
+    let n = ord(c)
+    return (n >= 97 and n <= 122) or (n >= 65 and n <= 90) or
+    (n >= 48 and n <= 57) or n == 43 or n == 45 or n == 46
+}
+
+fn is_scheme_start(c) {
+    let n = ord(c)
+    return (n >= 97 and n <= 122) or (n >= 65 and n <= 90)
+}
+
+fn is_digits(text) {
+    if len(text) == 0 {
+        return false
+    }
+    let i = 0
+    while i < len(text) {
+        let n = ord(text[i])
+        if n < 48 or n > 57 {
+            return false
+        }
+        i += 1
+    }
+    return true
+}
+
+# text -> a parts table, or nil when malformed. has_authority records
+# whether a // introduced the authority, because "file:///x" and
+# "file:/x" parse to the same fields but stringify differently.
+export fn parse(text) {
+    let parts = {scheme: "", user: "", host: "", port: "", path: "",
+        query: "", fragment: "", has_authority: false}
+    let rest = text
+    # the fragment is cut first: a # later in the text never belongs to
+    # the query or the path.
+    let hash = find(rest, "#")
+    if hash >= 0 {
+        parts["fragment"] = slice(rest, hash + 1, len(rest))
+        rest = slice(rest, 0, hash)
+    }
+    let quest = find(rest, "?")
+    if quest >= 0 {
+        parts["query"] = slice(rest, quest + 1, len(rest))
+        rest = slice(rest, 0, quest)
+    }
+    # a scheme is letters followed by scheme characters, ending at the
+    # first colon. anything else leaves the whole text as path.
+    let colon = find(rest, ":")
+    if colon > 0 {
+        let candidate = slice(rest, 0, colon)
+        let ok = is_scheme_start(candidate[0])
+        let i = 1
+        while ok and i < len(candidate) {
+            ok = is_scheme_char(candidate[i])
+            i += 1
+        }
+        if ok {
+            parts["scheme"] = candidate
+            rest = slice(rest, colon + 1, len(rest))
+        }
+    }
+    if len(rest) >= 2 and slice(rest, 0, 2) == "//" {
+        parts["has_authority"] = true
+        rest = slice(rest, 2, len(rest))
+        let slash = find(rest, "/")
+        let authority = rest
+        if slash >= 0 {
+            authority = slice(rest, 0, slash)
+            rest = slice(rest, slash, len(rest))
+        } else {
+            rest = ""
+        }
+        # the user is everything up to the last @: userinfo cannot hold
+        # a raw @, so an earlier one is as malformed as a later split.
+        let at = -1
+        let k = 0
+        while k < len(authority) {
+            if authority[k] == "@" {
+                at = k
+            }
+            k += 1
+        }
+        if at >= 0 {
+            parts["user"] = slice(authority, 0, at)
+            authority = slice(authority, at + 1, len(authority))
+        }
+        # a bracketed host is IPv6: no port split inside the brackets.
+        if len(authority) > 0 and authority[0] == "[" {
+            let close = find(authority, "]")
+            if close < 0 {
+                return nil
+            }
+            parts["host"] = slice(authority, 0, close + 1)
+            let tail = slice(authority, close + 1, len(authority))
+            if len(tail) > 0 {
+                if tail[0] != ":" {
+                    return nil
+                }
+                parts["port"] = slice(tail, 1, len(tail))
+            }
+        } else {
+            let pcolon = -1
+            let j = 0
+            while j < len(authority) {
+                if authority[j] == ":" {
+                    pcolon = j
+                }
+                j += 1
+            }
+            if pcolon >= 0 {
+                parts["host"] = slice(authority, 0, pcolon)
+                parts["port"] = slice(authority, pcolon + 1,
+                    len(authority))
+            } else {
+                parts["host"] = authority
+            }
+        }
+        if parts["port"] != "" and is_digits(parts["port"]) == false {
+            return nil
+        }
+    }
+    parts["path"] = rest
+    return parts
+}
+
+# a parts table -> text. the inverse of parse(): every parseable URL
+# survives the round trip, including "file:///x", whose empty host still
+# keeps its // through has_authority. a hand-built table without that
+# key gets // exactly when a host, user, or port is present.
+export fn stringify(parts) {
+    let out = ""
+    if parts["scheme"] != "" {
+        out += parts["scheme"] + ":"
+    }
+    let auth = parts["has_authority"]
+    if auth == nil {
+        auth = parts["host"] != "" or parts["user"] != "" or
+        parts["port"] != ""
+    }
+    if auth {
+        out += "//"
+        if parts["user"] != "" {
+            out += parts["user"] + "@"
+        }
+        out += parts["host"]
+        if parts["port"] != "" {
+            out += ":" + parts["port"]
+        }
+    }
+    out += parts["path"]
+    if parts["query"] != "" {
+        out += "?" + parts["query"]
+    }
+    if parts["fragment"] != "" {
+        out += "#" + parts["fragment"]
+    }
+    return out
+}
+
+# a query string -> a table of decoded keys and values. a key without =
+# reads "" rather than failing, and a repeated key keeps its last value,
+# because a query string is transports, not schema. decoding errors throw
+# ValueError, exactly as encoding.url_decode documents.
+export fn query_parse(q) {
+    let out = {}
+    if len(q) == 0 {
+        return out
+    }
+    let i = 0
+    while i <= len(q) {
+        let amp = index_from(q, "&", i)
+        let piece = ""
+        if amp < 0 {
+            piece = slice(q, i, len(q))
+            i = len(q) + 1
+        } else {
+            piece = slice(q, i, amp)
+            i = amp + 1
+        }
+        let eq = find(piece, "=")
+        if eq < 0 {
+            out[encoding.url_decode(piece)] = ""
+        } else {
+            out[encoding.url_decode(slice(piece, 0, eq))] =
+            encoding.url_decode(slice(piece, eq + 1, len(piece)))
+        }
+    }
+    return out
+}
+
+# a table -> a query string, keys and values form-encoded. table order is
+# iteration order, so do not rely on the position of a pair.
+export fn query_stringify(t) {
+    let out = ""
+    let first = true
+    for k in keys(t) {
+        if first {
+            first = false
+        } else {
+            out += "&"
+        }
+        out += encoding.url_encode(k) + "=" + encoding.url_encode(t[k])
+    }
+    return out
+}

@@ -1,0 +1,34 @@
+# csv -- parsing, quoting, objects, and the failure paths.
+#
+# table printing is insertion-ordered here: every object has one key, so
+# there is no iteration order to lie about.
+
+import csv
+
+# plain fields, and a trailing newline ends the row rather than adding one
+print(csv.parse("a,b,c\n1,2,3\n"))
+
+# quoted fields: commas, newlines, and doubled quotes inside
+print(csv.parse("name,note\n\"doe, jane\",\"line one\nline two\"\n"))
+print(csv.parse("\"say \"\"hi\"\"\",ok\n"))
+
+# \r\n line endings read the same as \n
+print(csv.parse("a,b\r\nc,d\r\n"))
+
+# empty fields, an empty line, and empty text
+print(csv.parse("a,,c\n,\n"))
+print(csv.parse(""))
+
+# an unterminated quote is nil, not a half row
+print(csv.parse("\"abc,def"))
+
+# objects keyed by the header; a short row reads nil for the gap
+let people = csv.parse_objects("name,age\namy,30\nbo\n")
+print(people[0])
+print(people[1])
+print(csv.parse_objects(""))
+
+# stringify quotes only what needs it, and round-trips
+let rows = csv.parse("a,\"b,c\"\nd,e\n")
+print(csv.stringify(rows))
+print(csv.stringify([["plain", "with, comma", "with \"quote\""]]))

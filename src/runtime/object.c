@@ -617,30 +617,43 @@ void print_value(Value value) { print_value_to(stdout, value); }
  * first inside a release, and every caller then disagrees with every other
  * caller.
  *
- * Returns NULL when the rendering did not fit in `capacity`, having
- * reported it as a runtime error -- an unbounded grow-until-it-fits here
- * would be a way to exhaust memory from a str() call.
+ * Captured through a tmpfile rather than open_memstream: the latter is
+ * glibc-only, and the former is C89. The buffer is malloc'd and
+ * NUL-terminated; the caller frees it. NULL on any I/O or allocation
+ * failure.
  */
 char *flint_value_to_string(VM *vm, Value value)
 {
 	(void)vm;
-	/*
-	 * open_memstream grows its own buffer as the stream writes, so there
-	 * is no capacity to guess and no retry loop: whatever print() would
-	 * emit, this captures exactly. The result is NUL-terminated by the
-	 * stream, so it can go straight to new_string.
-	 */
-	char *buf = NULL;
-	size_t len = 0;
-	FILE *out = open_memstream(&buf, &len);
+	FILE *out = tmpfile();
 	if (out == NULL)
 		return NULL;
 	print_value_to(out, value);
-	fclose(out);
-	/* buf is non-NULL whenever open_memstream succeeded, even for an
-	 * empty write; only a failed allocation leaves it NULL. */
-	if (buf == NULL)
+	if (fflush(out) != 0) {
+		fclose(out);
 		return NULL;
+	}
+	if (fseek(out, 0, SEEK_END) != 0) {
+		fclose(out);
+		return NULL;
+	}
+	long len = ftell(out);
+	if (len < 0 || fseek(out, 0, SEEK_SET) != 0) {
+		fclose(out);
+		return NULL;
+	}
+	char *buf = malloc((size_t)len + 1);
+	if (buf == NULL) {
+		fclose(out);
+		return NULL;
+	}
+	size_t got = fread(buf, 1, (size_t)len, out);
+	fclose(out);
+	if (got != (size_t)len) {
+		free(buf);
+		return NULL;
+	}
+	buf[len] = '\0';
 	return buf;
 }
 

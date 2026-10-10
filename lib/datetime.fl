@@ -1,0 +1,278 @@
+# datetime -- calendar dates in flint, in UTC and nothing else.
+#
+#     import datetime
+#     print(datetime.format(datetime.today()))
+#
+# a date is a table {year, month, day, hour, min, sec, weekday}, with
+# weekday 0 for Sunday through 6 for Saturday. epoch seconds (the number
+# time.now() returns) convert both ways. local time is deliberately
+# absent: it depends on the machine's timezone, and a formatter that
+# depends on the machine is right on one machine and wrong on the next.
+#
+# the day count is Howard Hinnant's civil calendar algorithm, which is
+# exact over the whole proleptic Gregorian range flint numbers can hold.
+# everything here counts days and seconds as integers until the last
+# step, because a float cannot count seconds past 1973 without skipping.
+
+# days since 1970-01-01 for a civil date. March is month 0 here, which
+# puts the leap day at the end of the counted year, where it belongs.
+fn days_from_civil(y, m, d) {
+    let yy = y
+    if m <= 2 {
+        yy = y - 1
+    }
+    let era = 0
+    if yy >= 0 {
+        era = __trunc(yy / 400)
+    } else {
+        era = __trunc((yy - 399) / 400)
+    }
+    let yoe = yy - era * 400
+    let mp = m
+    if m > 2 {
+        mp = m - 3
+    } else {
+        mp = m + 9
+    }
+    let doy = __trunc((153 * mp + 2) / 5) + d - 1
+    let doe = yoe * 365 + __trunc(yoe / 4) - __trunc(yoe / 100) + doy
+    return era * 146097 + doe - 719468
+}
+
+# the inverse: a day count -> [year, month, day].
+fn civil_from_days(z) {
+    let zz = z + 719468
+    let era = 0
+    if zz >= 0 {
+        era = __trunc(zz / 146097)
+    } else {
+        era = __trunc((zz - 146096) / 146097)
+    }
+    let doe = zz - era * 146097
+    let yoe = __trunc((doe - __trunc(doe / 1460) + __trunc(doe / 36524) -
+            __trunc(doe / 146096)) / 365)
+    let y = yoe + era * 400
+    let doy = doe - (365 * yoe + __trunc(yoe / 4) - __trunc(yoe / 100))
+    let mp = __trunc((5 * doy + 2) / 153)
+    let d = doy - __trunc((153 * mp + 2) / 5) + 1
+    let m = mp
+    if mp < 10 {
+        m = mp + 3
+    } else {
+        m = mp - 9
+    }
+    if m <= 2 {
+        y = y + 1
+    }
+    return [y, m, d]
+}
+
+fn make_parts(y, mo, d, h, mi, s) {
+    let days = days_from_civil(y, mo, d)
+    let wd = (days + 4) % 7
+    if wd < 0 {
+        wd = wd + 7
+    }
+    return {year: y, month: mo, day: d, hour: h, min: mi, sec: s,
+        weekday: wd}
+}
+
+fn two(n) {
+    if n < 10 {
+        return "0" + str(n)
+    }
+    return str(n)
+}
+
+fn four(n) {
+    let out = str(n)
+    while len(out) < 4 {
+        out = "0" + out
+    }
+    return out
+}
+
+fn all_digits(text) {
+    if len(text) == 0 {
+        return false
+    }
+    let i = 0
+    while i < len(text) {
+        let n = ord(text[i])
+        if n < 48 or n > 57 {
+            return false
+        }
+        i += 1
+    }
+    return true
+}
+
+# epoch seconds -> a date table, in UTC. fractional seconds truncate
+# toward zero; negative epochs (before 1970) work the same as positive
+# ones, because the day count is floored, not truncated.
+export fn from_epoch(t) {
+    let secs = __trunc(t)
+    # truncated, not divided: flint numbers are doubles, and secs /
+    # 86400 is fractional. the remainder is recomputed by subtraction
+    # rather than %, because fmod keeps the dividend's sign.
+    let days = __trunc(secs / 86400)
+    let rem = secs - days * 86400
+    if rem < 0 {
+        days = days - 1
+        rem = rem + 86400
+    }
+    let ymd = civil_from_days(days)
+    return make_parts(ymd[0], ymd[1], ymd[2], __trunc(rem / 3600),
+        __trunc((rem % 3600) / 60), rem % 60)
+}
+
+# a date table -> epoch seconds, or nil when a field is out of range. a
+# February 30th is caught by converting back and comparing, rather than
+# by a table of month lengths with the leap-year rule duplicated in it.
+export fn to_epoch(p) {
+    let y = p["year"]
+    let mo = p["month"]
+    let d = p["day"]
+    let h = p["hour"]
+    let mi = p["min"]
+    let s = p["sec"]
+    if mo < 1 or mo > 12 or d < 1 or d > 31 {
+        return nil
+    }
+    if h < 0 or h > 23 or mi < 0 or mi > 59 or s < 0 or s > 60 {
+        return nil
+    }
+    let days = days_from_civil(y, mo, d)
+    let back = civil_from_days(days)
+    if back[0] != y or back[1] != mo or back[2] != d {
+        return nil
+    }
+    return days * 86400 + h * 3600 + mi * 60 + s
+}
+
+# "2026-10-10", "2026-10-10 12:34:56", "2026-10-10T12:34:56",
+# "2026-10-10T12:34:56Z" -> a date table, or nil when the text is not
+# one of those shapes. UTC only: an offset suffix is rejected rather
+# than silently applied or silently ignored.
+export fn parse(text) {
+    if len(text) < 10 {
+        return nil
+    }
+    let date = text
+    let clock = ""
+    if len(text) > 10 {
+        let sep = text[10]
+        if sep != " " and sep != "T" {
+            return nil
+        }
+        date = ""
+        let i = 0
+        while i < 10 {
+            date += text[i]
+            i += 1
+        }
+        clock = ""
+        let j = 11
+        while j < len(text) {
+            clock += text[j]
+            j += 1
+        }
+    }
+    if date[4] != "-" or date[7] != "-" {
+        return nil
+    }
+    let ys = ""
+    let ms = ""
+    let ds = ""
+    let i = 0
+    while i < 4 {
+        ys += date[i]
+        i += 1
+    }
+    i = 5
+    while i < 7 {
+        ms += date[i]
+        i += 1
+    }
+    i = 8
+    while i < 10 {
+        ds += date[i]
+        i += 1
+    }
+    if all_digits(ys) == false or all_digits(ms) == false or
+    all_digits(ds) == false {
+        return nil
+    }
+    let h = 0
+    let mi = 0
+    let s = 0
+    if clock != "" {
+        if len(clock) == 9 and clock[8] == "Z" {
+            let bare = ""
+            let k = 0
+            while k < 8 {
+                bare += clock[k]
+                k += 1
+            }
+            clock = bare
+        }
+        if len(clock) != 8 or clock[2] != ":" or clock[5] != ":" {
+            return nil
+        }
+        let hs = ""
+        let is = ""
+        let ss = ""
+        let k = 0
+        while k < 2 {
+            hs += clock[k]
+            k += 1
+        }
+        k = 3
+        while k < 5 {
+            is += clock[k]
+            k += 1
+        }
+        k = 6
+        while k < 8 {
+            ss += clock[k]
+            k += 1
+        }
+        if all_digits(hs) == false or all_digits(is) == false or
+        all_digits(ss) == false {
+            return nil
+        }
+        h = num(hs)
+        mi = num(is)
+        s = num(ss)
+    }
+    let trial = make_parts(num(ys), num(ms), num(ds), h, mi, s)
+    if to_epoch(trial) == nil {
+        return nil
+    }
+    return trial
+}
+
+# a date table -> "YYYY-MM-DD HH:MM:SS", zero-padded.
+export fn format(p) {
+    return four(p["year"]) + "-" + two(p["month"]) + "-" + two(p["day"]) +
+    " " + two(p["hour"]) + ":" + two(p["min"]) + ":" + two(p["sec"])
+}
+
+# now, as a date table in UTC. for tests, prefer fixed dates: this one
+# moves.
+export fn today() {
+    return from_epoch(__now())
+}
+
+# 0 for Sunday through 6 for Saturday, of a date table.
+export fn weekday(p) {
+    return p["weekday"]
+}
+
+# the weekday's name. the table carries the number; this is the string
+# for messages.
+export fn weekday_name(p) {
+    let names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday",
+        "Friday", "Saturday"]
+    return names[p["weekday"]]
+}

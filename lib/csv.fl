@@ -1,0 +1,159 @@
+# csv -- comma-separated values, in flint.
+#
+#     import csv
+#     let rows = csv.parse(read_file("data.csv"))
+#     print(rows[0])
+#
+# parse() turns text into a list of rows, each row a list of strings.
+# parse_objects() uses the first row as a header and returns a list of
+# tables. stringify() goes the other way. everything is strings: csv has
+# no numbers, and guessing which fields are numeric is how a leading zero
+# becomes a different value.
+#
+# the dialect is RFC 4180 with a tolerant reader: lines end with \n or
+# \r\n, a field may be wrapped in double quotes, and a doubled quote
+# inside a quoted field is one quote. a quote anywhere else is literal,
+# because rejecting a file over a stray quote helps nobody and silently
+# dropping it helps less. an unterminated quoted field makes parse()
+# return nil -- the file ended mid-field, so there is no row to return.
+#
+# everything here counts bytes, not characters, like the rest of flint.
+
+# text -> a list of rows, each a list of strings, or nil when a quoted
+# field never terminates. "" parses to [], and a trailing newline ends
+# the last row rather than starting an empty one.
+export fn parse(text) {
+    let rows = []
+    if len(text) == 0 {
+        return rows
+    }
+    let row = []
+    let field = ""
+    let quoted = false
+    let i = 0
+    let n = len(text)
+    while i < n {
+        let c = text[i]
+        if quoted {
+            if c == "\"" {
+                if i + 1 < n and text[i + 1] == "\"" {
+                    field += "\""
+                    i += 2
+                } else {
+                    quoted = false
+                    i += 1
+                }
+            } else {
+                field += c
+                i += 1
+            }
+        } else if c == "," {
+            push(row, field)
+            field = ""
+            i += 1
+        } else if c == "\"" and field == "" {
+            quoted = true
+            i += 1
+        } else if c == "\r" {
+            i += 1
+        } else if c == "\n" {
+            push(row, field)
+            field = ""
+            push(rows, row)
+            row = []
+            i += 1
+        } else {
+            field += c
+            i += 1
+        }
+    }
+    if quoted {
+        return nil
+    }
+    if len(row) > 0 or field != "" {
+        push(row, field)
+        push(rows, row)
+    }
+    return rows
+}
+
+# text -> a list of tables keyed by the first row, or nil when a quoted
+# field never terminates. a short row reads nil for the missing columns
+# and an extra column is ignored, because ragged csv is the common case
+# and an error would make the function unusable on real files. "" and a
+# header with no rows both parse to [].
+export fn parse_objects(text) {
+    let rows = parse(text)
+    if rows == nil {
+        return nil
+    }
+    if len(rows) == 0 {
+        return []
+    }
+    let header = rows[0]
+    let out = []
+    let r = 1
+    while r < len(rows) {
+        let obj = {}
+        let c = 0
+        while c < len(header) {
+            let value = nil
+            if c < len(rows[r]) {
+                value = rows[r][c]
+            }
+            obj[header[c]] = value
+            c += 1
+        }
+        push(out, obj)
+        r += 1
+    }
+    return out
+}
+
+# rows -> csv text, one \n-terminated line per row. a field containing a
+# comma, a quote, or a newline is wrapped in quotes with inner quotes
+# doubled; anything else is written bare, so plain numbers and words stay
+# readable. stringify(parse(text)) is text again whenever text ends each
+# line with \n.
+export fn stringify(rows) {
+    let out = ""
+    for row in rows {
+        let first = true
+        for field in row {
+            if first {
+                first = false
+            } else {
+                out += ","
+            }
+            out += quote_field(field)
+        }
+        out += "\n"
+    }
+    return out
+}
+
+fn quote_field(field) {
+    let needs = false
+    let i = 0
+    while i < len(field) {
+        let c = field[i]
+        if c == "," or c == "\"" or c == "\n" or c == "\r" {
+            needs = true
+        }
+        i += 1
+    }
+    if needs == false {
+        return field
+    }
+    let out = "\""
+    let j = 0
+    while j < len(field) {
+        if field[j] == "\"" {
+            out += "\"\""
+        } else {
+            out += field[j]
+        }
+        j += 1
+    }
+    return out + "\""
+}

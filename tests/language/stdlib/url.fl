@@ -1,0 +1,39 @@
+# url -- parse fields, round trips, and the failure paths.
+#
+# stringify(parse(text)) is text again for every shape below: that round
+# trip is the module's contract, and editing through the parts table is
+# what it is for.
+
+import url
+
+let u = url.parse("https://user@example.com:8080/p?q=1#frag")
+print(u.scheme)
+print(u.user)
+print(u.host)
+print(u.port)
+print(u.path)
+print(u.query)
+print(u.fragment)
+print(url.stringify(u))
+
+# an empty authority keeps its //, an opaque scheme keeps its colon,
+# and a relative reference stays relative
+print(url.stringify(url.parse("file:///tmp/x")))
+print(url.stringify(url.parse("mailto:foo@bar.com")))
+print(url.stringify(url.parse("/just/a/path")))
+print(url.stringify(url.parse("http://host")))
+
+# a bracketed host is one host, and the port after it is the port
+let v6 = url.parse("http://[::1]:80/x")
+print(v6.host)
+print(v6.port)
+
+# a port that is not digits is malformed, not a string. hosts are
+# split, not validated: unusual characters in a host are transported.
+print(url.parse("http://h:abc/x"))
+print(url.parse("http://h:80x/y"))
+
+# the query layer decodes and encodes; a key without = reads ""
+print(url.query_parse("a=1&b=x+y&flag"))
+print(url.query_stringify({a: "1"}))
+print(url.query_parse(""))

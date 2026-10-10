@@ -9,16 +9,22 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <netdb.h>
-#include <poll.h>
+#ifndef _WIN32
+#	include <netdb.h>
+#	include <poll.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/wait.h>
+#ifndef _WIN32
+#	include <sys/socket.h>
+#	include <sys/wait.h>
+#endif
 #include <time.h>
-#include <unistd.h>
+#ifndef _WIN32
+#	include <unistd.h>
+#endif
 
 #include "memory.h"
 #include "object.h"
@@ -30,6 +36,18 @@ typedef struct {
 	size_t len;
 	size_t cap;
 } Buf;
+
+/* strndup is POSIX, not C11, and Windows does not have it. Eight lines
+ * here beat a feature test in the build. */
+static char *http_strndup(const char *text, size_t length)
+{
+	char *out = malloc(length + 1);
+	if (out == NULL)
+		return NULL;
+	memcpy(out, text, length);
+	out[length] = '\0';
+	return out;
+}
 
 static void buf_init(Buf *b)
 {
@@ -160,10 +178,10 @@ static bool url_parse(const char *text, Url *u, char *err, size_t errlen)
 	const char *port_colon = memchr(rest, ':', (size_t)(host_end - rest));
 	if (port_colon != NULL) {
 		size_t hostlen = (size_t)(port_colon - rest);
-		u->host = strndup(rest, hostlen);
+		u->host = http_strndup(rest, hostlen);
 		size_t portlen = (size_t)(host_end - (port_colon + 1));
 		free(u->port);
-		u->port = strndup(port_colon + 1, portlen);
+		u->port = http_strndup(port_colon + 1, portlen);
 	} else {
 		size_t hostlen = (size_t)(host_end - rest);
 		if (hostlen == 0) {
@@ -171,7 +189,7 @@ static bool url_parse(const char *text, Url *u, char *err, size_t errlen)
 			url_free(u);
 			return false;
 		}
-		u->host = strndup(rest, hostlen);
+		u->host = http_strndup(rest, hostlen);
 	}
 
 	if (path_start != NULL) {
@@ -380,6 +398,24 @@ static char *socket_fetch(const Url *u,
         char *err,
         size_t errlen)
 {
+#ifdef _WIN32
+	/* Plain sockets need Winsock and the https path needs process
+	 * spawning; neither is ported. The caller turns this into the
+	 * usual {ok: false, error} table, so scripts see a value, not a
+	 * missing function. */
+	(void)u;
+	(void)method;
+	(void)body;
+	(void)body_len;
+	(void)headers;
+	(void)nheaders;
+	(void)timeout_ms;
+	(void)resp_len;
+	snprintf(err,
+	        errlen,
+	        "http is not supported on Windows in this release.");
+	return NULL;
+#else
 	struct addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
@@ -597,6 +633,7 @@ static char *socket_fetch(const Url *u,
 
 	*resp_len = resp.len;
 	return resp.data;
+#endif
 }
 
 static char *curl_fetch(const Url *u,
@@ -610,6 +647,22 @@ static char *curl_fetch(const Url *u,
         char *err,
         size_t errlen)
 {
+#ifdef _WIN32
+	/* Spawning curl needs process creation this release does not port.
+	 * Same contract as socket_fetch above: NULL with the reason. */
+	(void)u;
+	(void)method;
+	(void)body;
+	(void)body_len;
+	(void)headers;
+	(void)nheaders;
+	(void)timeout_ms;
+	(void)resp_len;
+	snprintf(err,
+	        errlen,
+	        "http is not supported on Windows in this release.");
+	return NULL;
+#else
 	int pipe_in[2];
 	int pipe_out[2];
 	if (pipe(pipe_in) < 0 || pipe(pipe_out) < 0) {
@@ -743,6 +796,7 @@ static char *curl_fetch(const Url *u,
 
 	*resp_len = b.len;
 	return b.data;
+#endif
 }
 
 static void set_table_field(VM *vm, ObjTable *t, const char *name, Value val)
@@ -920,12 +974,12 @@ static Value http_request_native(VM *vm, int argc, Value *argv)
 			            parsed_body_len,
 			            &final_body,
 			            &final_body_len)) {
-				final_body =
-				        strndup(body_start, parsed_body_len);
+				final_body = http_strndup(
+				        body_start, parsed_body_len);
 				final_body_len = parsed_body_len;
 			}
 		} else {
-			final_body = strndup(body_start, parsed_body_len);
+			final_body = http_strndup(body_start, parsed_body_len);
 			final_body_len = parsed_body_len;
 		}
 		resp.body = final_body;

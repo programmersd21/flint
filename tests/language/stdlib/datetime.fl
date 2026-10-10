@@ -1,0 +1,38 @@
+# datetime -- fixed dates, round trips, and the failure paths.
+#
+# the weekdays below are facts, not fixtures: 1970-01-01 was a Thursday,
+# 2000-01-01 and 2026-10-10 were Saturdays. today() is only asserted on
+# shape, because its value moves.
+
+import datetime
+
+print(datetime.format(datetime.from_epoch(0)))
+print(datetime.from_epoch(0).weekday)
+print(datetime.format(datetime.from_epoch(86400)))
+print(datetime.format(datetime.from_epoch(-1)))
+
+print(datetime.weekday_name(datetime.parse("2000-01-01")))
+print(datetime.to_epoch(datetime.parse("2000-01-01")))
+print(datetime.weekday_name(datetime.parse("2026-10-10")))
+print(datetime.format(datetime.parse("2026-10-10T12:34:56Z")))
+print(datetime.format(datetime.parse("2000-02-29 00:00:00")))
+
+# round trips both ways
+print(datetime.to_epoch(datetime.from_epoch(1791590400)))
+print(datetime.format(datetime.from_epoch(1791590400)))
+print(datetime.format(datetime.parse(datetime.format(
+                datetime.parse("2026-03-04 05:06:07")))))
+
+# impossible dates and non-dates are nil, not guesses
+print(datetime.parse("2026-02-30"))
+print(datetime.parse("2023-02-29"))
+print(datetime.parse("2026-13-01"))
+print(datetime.parse("2026-10-10T12:34:56+02:00"))
+print(datetime.parse("not a date"))
+print(datetime.to_epoch({year: 2026, month: 10, day: 10, hour: 25,
+            min: 0, sec: 0}))
+
+# today() moves, so only its shape is asserted
+let t = datetime.today()
+print(t.hour >= 0 and t.hour < 24)
+print(datetime.weekday(t) == t.weekday)

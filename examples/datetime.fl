@@ -1,0 +1,24 @@
+# datetime.fl -- dates as tables, in UTC.
+#
+# run it:  ./flint examples/datetime.fl
+#
+# a date is {year, month, day, hour, min, sec, weekday}. epoch seconds go
+# both ways, fixed strings parse, and impossible dates read as nil rather
+# than guessing. local time is absent on purpose: it depends on the
+# machine, and a formatter that depends on the machine is wrong on the
+# next one.
+
+import datetime
+
+print(datetime.format(datetime.today()))
+
+let launch = datetime.parse("2026-10-10T12:00:00Z")
+print(datetime.weekday_name(launch))   # Saturday
+print(datetime.to_epoch(launch))
+
+# a week later, through epoch arithmetic
+print(datetime.format(datetime.from_epoch(
+            datetime.to_epoch(launch) + 7 * 86400)))
+
+# malformed input is nil, not an exception
+print(datetime.parse("2026-02-30"))

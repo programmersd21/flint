@@ -885,6 +885,34 @@ none of these is a cipher. base64 is not encryption, and neither is hex.
 a malformed input is a runtime error naming the position, not a best
 effort: decoding `"zz"` as hex fails rather than returning half a byte.
 
+## csv
+
+```flint
+import csv
+
+let rows = csv.parse("name,age\namy,30\nbo,\n")
+print(rows)                    # [["name", "age"], ["amy", "30"], ["bo", ""]]
+print(csv.parse_objects("name,age\namy,30\n"))
+                               # [{name: amy, age: 30}]
+print(csv.stringify([["a", "b,c"]]))  # a,"b,c"
+```
+
+everything is strings: csv has no numbers, and guessing which fields are
+numeric is how a leading zero becomes a different value. lines end with
+`\n` or `\r\n`; a field wrapped in double quotes may hold commas,
+newlines, and doubled quotes (`"say ""hi"""` reads as `say "hi"`). a quote
+anywhere else is literal, because rejecting a file over a stray quote helps
+nobody.
+
+`parse` returns `[]` for empty text, and a trailing newline ends the last
+row rather than starting an empty one. an unterminated quoted field --
+the file ended mid-field -- returns nil, since there is no row to return.
+`parse_objects` reads the first row as a header and returns a list of
+tables; a short row reads nil for the missing columns and an extra column
+is ignored, because ragged csv is the common case. `stringify` quotes only
+the fields that need it and ends every row with `\n`, so
+`stringify(parse(text))` is text again whenever each line ends with `\n`.
+
 ## env
 
 ```flint

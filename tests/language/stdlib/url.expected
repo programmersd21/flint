@@ -1,0 +1,19 @@
+https
+user
+example.com
+8080
+/p
+q=1
+frag
+https://user@example.com:8080/p?q=1#frag
+file:///tmp/x
+mailto:foo@bar.com
+/just/a/path
+http://host
+[::1]
+80
+nil
+nil
+{a: 1, b: x y, flag: }
+a=1
+{}

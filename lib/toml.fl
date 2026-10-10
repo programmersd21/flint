@@ -1,0 +1,441 @@
+# toml -- read the configuration files flint itself reads.
+#
+#     import toml
+#     let cfg = toml.parse(read_file("flint.toml"))
+#     print(cfg.package.name)
+#
+# parse() turns text into nested tables, or nil when the text is not
+# valid. the grammar is the one the package manager parses -- [table]
+# and [[array]] sections, key = "string" lines, # comments, one-line
+# inline tables -- plus numbers, booleans, and single-line arrays, which
+# real configuration files need and the shape already allows. dotted
+# sections ([a.b]) nest; dotted keys do not exist, because the package
+# manager does not accept them either.
+#
+# two deliberate differences from the package manager's reader: inline
+# tables nest ({a = {b = "c"}} reads as tables in tables) instead of
+# flattening to key.sub, and a duplicate key or section is malformed
+# rather than last-wins. silent overwrites are how a typo becomes a
+# mystery.
+#
+# this is a reader only. writing toml back out is a formatter's job, and
+# there is already one of those in the tree.
+
+# --- cursor text ---
+
+# the parser state is indexes into the text, threaded through as return
+# values: flint strings are immutable, so a cursor struct would copy the
+# text on every advance. every function returns [value, next_index], and
+# nil in the value slot means "malformed from here".
+
+fn is_space(c) {
+    return c == " " or c == "\t"
+}
+
+fn is_key_char(c) {
+    let n = ord(c)
+    return (n >= 97 and n <= 122) or (n >= 65 and n <= 90) or
+    (n >= 48 and n <= 57) or n == 95 or n == 45
+}
+
+fn is_digit_char(c) {
+    let n = ord(c)
+    return n >= 48 and n <= 57
+}
+
+fn skip_spaces(text, i) {
+    while i < len(text) and is_space(text[i]) {
+        i += 1
+    }
+    return i
+}
+
+# a quoted string starting at text[i] (the opening quote). escapes are
+# \n, \t, and \<anything> meaning <anything>, exactly as the package
+# manager reads them. the string stays on one line: a newline before
+# the closing quote is malformed.
+fn read_string(text, i) {
+    let out = ""
+    let j = i + 1
+    while j < len(text) and text[j] != "\"" {
+        let c = text[j]
+        if c == "\n" {
+            return [nil, j]
+        }
+        if c == "\\" and j + 1 < len(text) {
+            let e = text[j + 1]
+            if e == "n" {
+                out += "\n"
+            } else if e == "t" {
+                out += "\t"
+            } else {
+                out += e
+            }
+            j += 2
+        } else {
+            out += c
+            j += 1
+        }
+    }
+    if j >= len(text) {
+        return [nil, j]
+    }
+    return [out, j + 1]
+}
+
+# a bare key starting at i: letters, digits, _ and -.
+fn read_key(text, i) {
+    let out = ""
+    let j = i
+    while j < len(text) and is_key_char(text[j]) {
+        out += text[j]
+        j += 1
+    }
+    if len(out) == 0 {
+        return [nil, i]
+    }
+    return [out, j]
+}
+
+# a number, boolean, string, inline table, or single-line array at i.
+fn read_value(text, i) {
+    let j = skip_spaces(text, i)
+    if j >= len(text) {
+        return [nil, j]
+    }
+    let c = text[j]
+    if c == "\"" {
+        return read_string(text, j)
+    }
+    if c == "{" {
+        return read_inline(text, j)
+    }
+    if c == "[" {
+        return read_array(text, j)
+    }
+    # true / false, which must end at a boundary: `truex` is a bare
+    # word, not a boolean followed by garbage.
+    if len(text) >= j + 4 and text[j] == "t" {
+        let word = ""
+        let k = 0
+        while k < 4 {
+            word += text[j + k]
+            k += 1
+        }
+        if word == "true" and (j + 4 >= len(text) or
+            is_key_char(text[j + 4]) == false) {
+            return [true, j + 4]
+        }
+    }
+    if len(text) >= j + 5 and text[j] == "f" {
+        let word = ""
+        let k = 0
+        while k < 5 {
+            word += text[j + k]
+            k += 1
+        }
+        if word == "false" and (j + 5 >= len(text) or
+            is_key_char(text[j + 5]) == false) {
+            return [false, j + 5]
+        }
+    }
+    # an integer or float: [+-]?digits[.digits]. the shape is checked
+    # here rather than left to num(), because num() throws on a bad
+    # string and a malformed document must read as nil, not raise.
+    # "3." and ".5" are rejected: toml wants digits on both sides of
+    # the dot, and the reader agrees with the format, not the prefix.
+    let k = j
+    if k < len(text) and (text[k] == "+" or text[k] == "-") {
+        k += 1
+    }
+    let before = 0
+    while k < len(text) and is_digit_char(text[k]) {
+        before += 1
+        k += 1
+    }
+    let after = 0
+    if k < len(text) and text[k] == "." {
+        k += 1
+        while k < len(text) and is_digit_char(text[k]) {
+            after += 1
+            k += 1
+        }
+        if after == 0 {
+            return [nil, j]
+        }
+    }
+    if before == 0 {
+        return [nil, j]
+    }
+    # flint numbers are doubles: past ~309 digits no value is
+    # representable, and num() throws on the unrepresentable. count
+    # first, so a number the language cannot hold reads as malformed
+    # rather than raising out of a function that promises nil.
+    if before + after > 309 {
+        return [nil, j]
+    }
+    if before > 0 {
+        let raw = ""
+        let m = j
+        while m < k {
+            raw += text[m]
+            m += 1
+        }
+        return [num(raw), k]
+    }
+    return [nil, j]
+}
+
+# { k = v, ... } on one line, into a table. nesting is allowed, because
+# a value here is any value; the package manager's reader accepts only
+# strings, which this accepts too.
+fn read_inline(text, i) {
+    let out = {}
+    let j = skip_spaces(text, i + 1)
+    if j < len(text) and text[j] == "}" {
+        return [out, j + 1]
+    }
+    while true {
+        let kr = read_key(text, skip_spaces(text, j))
+        if kr[0] == nil {
+            return [nil, j]
+        }
+        j = skip_spaces(text, kr[1])
+        if j >= len(text) or text[j] != "=" {
+            return [nil, j]
+        }
+        let vr = read_value(text, j + 1)
+        if vr[0] == nil {
+            return [nil, j]
+        }
+        if has_key(out, kr[0]) {
+            return [nil, j]
+        }
+        out[kr[0]] = vr[0]
+        j = skip_spaces(text, vr[1])
+        if j < len(text) and text[j] == "," {
+            j += 1
+        } else if j < len(text) and text[j] == "}" {
+            return [out, j + 1]
+        } else {
+            return [nil, j]
+        }
+    }
+}
+
+# [ v, ... ] on one line, into a list. newlines are not allowed inside:
+# a multi-line array is valid toml this reader rejects, and says so by
+# returning nil for the whole document.
+fn read_array(text, i) {
+    let out = []
+    let j = skip_spaces(text, i + 1)
+    if j < len(text) and text[j] == "]" {
+        return [out, j + 1]
+    }
+    while true {
+        let vr = read_value(text, j)
+        if vr[0] == nil {
+            return [nil, j]
+        }
+        push(out, vr[0])
+        j = skip_spaces(text, vr[1])
+        if j < len(text) and text[j] == "," {
+            j += 1
+        } else if j < len(text) and text[j] == "]" {
+            return [out, j + 1]
+        } else {
+            return [nil, j]
+        }
+    }
+}
+
+fn has_key(t, k) {
+    for existing in keys(t) {
+        if existing == k {
+            return true
+        }
+    }
+    return false
+}
+
+# walk (creating) the tables along a dotted path under root. the last
+# component is returned separately, so [[array]] can append a fresh
+# table to it. every component must be a table, or a table holding a
+# list whose last element is a table -- the shapes [a.b] and [[a.b]]
+# produce -- and anything else is a conflict, which is malformed.
+fn descend(root, parts) {
+    let node = root
+    let i = 0
+    while i < len(parts) - 1 {
+        let name = parts[i]
+        if has_key(node, name) == false {
+            node[name] = {}
+        }
+        node = node[name]
+        # [[a]] then [a.b]: node is the list's last table.
+        if is_list(node) {
+            if len(node) == 0 {
+                return [nil, ""]
+            }
+            node = node[len(node) - 1]
+        }
+        if is_table(node) == false {
+            return [nil, ""]
+        }
+        i += 1
+    }
+    return [node, parts[len(parts) - 1]]
+}
+
+fn is_list(v) {
+    return type(v) == "list"
+}
+
+fn is_table(v) {
+    return type(v) == "table"
+}
+
+# [name] or [[name]] at the start of a line (i is past the brackets).
+# returns [kind, parts, next] with kind "table" or "array".
+fn read_header(text, i, array) {
+    let parts = []
+    let j = skip_spaces(text, i)
+    while true {
+        let kr = read_key(text, j)
+        if kr[0] == nil {
+            return [nil, [], j]
+        }
+        push(parts, kr[0])
+        j = skip_spaces(text, kr[1])
+        if j < len(text) and text[j] == "." {
+            j = skip_spaces(text, j + 1)
+        } else {
+            break
+        }
+    }
+    if array {
+        if j + 1 >= len(text) or text[j] != "]" or text[j + 1] != "]" {
+            return [nil, [], j]
+        }
+        j += 2
+    } else {
+        if j >= len(text) or text[j] != "]" {
+            return [nil, [], j]
+        }
+        j += 1
+    }
+    j = skip_spaces(text, j)
+    if j >= len(text) or text[j] == "#" {
+        while j < len(text) and text[j] != "\n" {
+            j += 1
+        }
+    }
+    if j < len(text) and text[j] != "\n" {
+        return [nil, [], j]
+    }
+    if j < len(text) {
+        j += 1
+    }
+    if array {
+        return ["array", parts, j]
+    }
+    return ["table", parts, j]
+}
+
+# text -> nested tables, or nil when malformed. duplicate keys,
+# conflicting sections, and values that are not strings, numbers,
+# booleans, inline tables, or single-line arrays all fail the whole
+# document: a configuration that is half read is worse than none.
+export fn parse(text) {
+    let root = {}
+    let current = root
+    let i = 0
+    let n = len(text)
+    while i < n {
+        # blank lines and full-line comments carry nothing.
+        if text[i] == "\n" {
+            i += 1
+        } else if text[i] == "#" {
+            while i < n and text[i] != "\n" {
+                i += 1
+            }
+        } else if is_space(text[i]) {
+            let j = skip_spaces(text, i)
+            if j < n and text[j] != "\n" and text[j] != "#" {
+                return nil
+            }
+            i = j
+        } else if text[i] == "[" {
+            let array = i + 1 < n and text[i + 1] == "["
+            let start = i + 1
+            if array {
+                start = i + 2
+            }
+            let hr = read_header(text, start, array)
+            if hr[0] == nil {
+                return nil
+            }
+            if len(hr[1]) == 0 {
+                return nil
+            }
+            let dr = descend(root, hr[1])
+            if dr[0] == nil {
+                return nil
+            }
+            if hr[0] == "array" {
+                let name = dr[1]
+                if has_key(dr[0], name) == false {
+                    dr[0][name] = []
+                }
+                if is_list(dr[0][name]) == false {
+                    return nil
+                }
+                let fresh = {}
+                push(dr[0][name], fresh)
+                current = fresh
+            } else {
+                let name = dr[1]
+                if has_key(dr[0], name) {
+                    return nil
+                }
+                let fresh = {}
+                dr[0][name] = fresh
+                current = fresh
+            }
+            i = hr[2]
+        } else {
+            let kr = read_key(text, i)
+            if kr[0] == nil {
+                return nil
+            }
+            let j = skip_spaces(text, kr[1])
+            if j >= n or text[j] != "=" {
+                return nil
+            }
+            let vr = read_value(text, j + 1)
+            if vr[0] == nil {
+                return nil
+            }
+            # booleans and numbers read as [value, next]; a string
+            # that failed reads [nil, index], which the check above
+            # already refused. false is a value, not a failure: only
+            # nil fails.
+            j = skip_spaces(text, vr[1])
+            if j < n and text[j] != "\n" and text[j] != "#" {
+                return nil
+            }
+            if has_key(current, kr[0]) {
+                return nil
+            }
+            current[kr[0]] = vr[0]
+            while j < n and text[j] != "\n" {
+                j += 1
+            }
+            if j < n {
+                j += 1
+            }
+            i = j
+        }
+    }
+    return root
+}

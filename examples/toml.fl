@@ -1,0 +1,23 @@
+# toml.fl -- read the configuration files flint itself reads.
+#
+# run it:  ./flint examples/toml.fl
+#
+# parse() turns text into nested tables, or nil when the text is not
+# valid. the grammar is the package manager's -- [table] and [[array]]
+# sections, key = "string" lines, comments, inline tables -- plus the
+# numbers, booleans, and arrays a real configuration file needs.
+
+import toml
+
+let text = "[package]\nname = \"demo\"\nversion = \"0.1.0\"\n" +
+"[limits]\nworkers = 4\nratio = 0.75\nverbose = true\n" +
+"tags = [\"fast\", \"small\"]\n" +
+"[[mirror]]\nurl = \"https://a.example.com\"\n" +
+"[[mirror]]\nurl = \"https://b.example.com\"\n"
+
+let cfg = toml.parse(text)
+print(cfg.package.name)       # demo
+print(cfg.limits.workers)     # 4
+print(cfg.limits.tags[1])     # small
+print(cfg.mirror[0].url)
+print(cfg.mirror[1].url)

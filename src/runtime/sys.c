@@ -19,16 +19,24 @@
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
+#ifndef _WIN32
 #include <poll.h>
+#endif
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <sys/stat.h> /* stat, mkdir */
-#include <sys/wait.h>
+#ifndef _WIN32
+#	include <sys/wait.h>
+#endif
 #include <time.h>
 #include <unistd.h>
+#ifdef _WIN32
+#	include <direct.h> /* _mkdir, _chdir, _getcwd */
+#	include <windows.h> /* GetModuleFileNameA, GetCurrentProcessId */
+#endif
 
 /*
  * The command line, as one allocation.
@@ -189,6 +197,31 @@ static const char *stdlib_dir(void)
 	/* next to the binary: readlink on /proc/self/exe rather than argv[0],
 	 * because argv[0] is whatever the shell felt like and /proc is where
 	 * the truth is. if it is not there, the other two still work. */
+#ifdef _WIN32
+	{
+		char buf[4096];
+		DWORD n = GetModuleFileNameA(NULL, buf, sizeof(buf));
+		if (n > 0 && n < sizeof(buf)) {
+			buf[n] = '\0';
+			char *slash = strrchr(buf, '\\');
+			if (slash == NULL)
+				slash = strrchr(buf, '/');
+			if (slash != NULL) {
+				static char lib[4096];
+				size_t dirlen = (size_t)(slash - buf);
+				if (dirlen + 5 < sizeof(lib)) {
+					memcpy(lib, buf, dirlen);
+					memcpy(lib + dirlen, "\\lib", 5);
+					lib[dirlen + 4] = '\0';
+					if (access(lib, R_OK) == 0) {
+						cached = lib;
+						return cached;
+					}
+				}
+			}
+		}
+	}
+#else
 	{
 		char buf[4096];
 		ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
@@ -217,6 +250,7 @@ static const char *stdlib_dir(void)
 			}
 		}
 	}
+#endif
 
 	const char *home = getenv("HOME");
 	if (home != NULL) {
@@ -635,8 +669,18 @@ bool sys_make_dirs(const char *path)
 			continue;
 		char saved = work[i];
 		work[i] = '\0';
+		/* one call per platform, one error check: the NOLINT lives
+		 * here because EEXIST is used once, on the line below,
+		 * rather than once per branch where a suppression cannot
+		 * sit (a comment cannot precede a line inside an #ifdef
+		 * arm and still suppress it). */
+#ifdef _WIN32
+		int made = _mkdir(work);
+#else
+		int made = mkdir(work, 0755);
+#endif
 		/* NOLINTNEXTLINE(misc-include-cleaner) */
-		if (mkdir(work, 0755) != 0 && errno != EEXIST) {
+		if (made != 0 && errno != EEXIST) {
 			work[i] = saved;
 			return false;
 		}
@@ -661,6 +705,17 @@ bool sys_make_dirs(const char *path)
  */
 int sys_fetch_url(const char *url, const char *dest)
 {
+#ifdef _WIN32
+	/* No fork/exec here, so no downloader subprocess. curl.exe ships
+	 * with Windows but spawning it is unported; say so rather than
+	 * failing inside a fork that does not exist. */
+	(void)url;
+	(void)dest;
+	fprintf(stderr,
+	        "flint sync: downloads need a POSIX system in this "
+	        "release.\n");
+	return -1;
+#else
 	/* curl first, then wget. -f makes an HTTP error a failure instead of a
 	 * file full of "404: Not Found", which matters because the write
 	 * target is checked by compiling afterwards and a 404 body would be
@@ -751,6 +806,7 @@ int sys_fetch_url(const char *url, const char *dest)
 	        "library. Install one of them, or set FLINT_STDLIB to a\n"
 	        "directory you maintain yourself.\n");
 	return -1;
+#endif
 }
 
 /*
@@ -1445,6 +1501,16 @@ static Value write_file_native(VM *vm, int argc, Value *argv)
  */
 static Value process_run_native(VM *vm, int argc, Value *argv)
 {
+#ifdef _WIN32
+	/* No fork, no pipes, no child. One honest error, up front, the
+	 * same shape as exec() below: usage validation would only decide
+	 * which error a call that cannot run returns. */
+	(void)argc;
+	(void)argv;
+	vm_runtime_error(vm,
+	        "process.run() needs a POSIX system in this release.");
+	return NIL_VAL;
+#else
 	if (argc < 1 || argc > 2) {
 		vm_runtime_error(vm,
 		        "process.run() takes a command list and an optional "
@@ -1858,10 +1924,19 @@ static Value process_run_native(VM *vm, int argc, Value *argv)
 	vm_pop(vm); /* out_str */
 	vm_pop(vm); /* the result */
 	return OBJ_VAL(result);
+#endif
 }
 
 static Value exec_native(VM *vm, int argc, Value *argv)
 {
+#ifdef _WIN32
+	/* Replacing the process image is execvp, which is the same fork
+	 * family process.run() needs. One honest error, up front. */
+	(void)argc;
+	(void)argv;
+	vm_runtime_error(vm, "exec() needs a POSIX system in this release.");
+	return NIL_VAL;
+#else
 	if (argc < 1 || !IS_STRING(argv[0])) {
 		vm_runtime_error(vm,
 		        "exec() takes a command string and any number of "
@@ -1941,6 +2016,7 @@ static Value exec_native(VM *vm, int argc, Value *argv)
 		 * script is told to expect */
 		return NUMBER_VAL(128.0 + (double)WTERMSIG(status));
 	return NUMBER_VAL(1);
+#endif
 }
 
 /*
@@ -1993,7 +2069,11 @@ static Value mkdir_native(VM *vm, int argc, Value *argv)
 		vm_runtime_error(vm, "Argument to mkdir() must be a string.");
 		return NIL_VAL;
 	}
+#ifdef _WIN32
+	return _mkdir(AS_CSTRING(argv[0])) == 0 ? TRUE_VAL : FALSE_VAL;
+#else
 	return mkdir(AS_CSTRING(argv[0]), 0777) == 0 ? TRUE_VAL : FALSE_VAL;
+#endif
 }
 
 /* isdir(path) -> bool */
@@ -2238,8 +2318,15 @@ static Value time_str_native(VM *vm, int argc, Value *argv)
 	}
 	time_t t = (time_t)AS_NUMBER(argv[0]);
 	struct tm tm;
+#ifdef _WIN32
+	/* gmtime_s takes (out, in) and reports success as zero: the same
+	 * call with the arguments swapped and the sense inverted. */
+	if (gmtime_s(&tm, &t) != 0)
+		return STR_VAL(new_string(vm, "", 0));
+#else
 	if (gmtime_r(&t, &tm) == NULL)
 		return STR_VAL(new_string(vm, "", 0));
+#endif
 	char buf[64];
 	strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
 	return STR_VAL(new_string(vm, buf, (int)strlen(buf)));

@@ -1,0 +1,20 @@
+demo
+../libfoo
+^1.0.0
+1
+true
+1.5
+[1, 2]
+deep
+a
+b
+a
+b	\
+nil
+nil
+nil
+nil
+nil
+nil
+{}
+{}

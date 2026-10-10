@@ -1,0 +1,26 @@
+# url.fl -- take a URL apart, change a piece, put it back together.
+#
+# run it:  ./flint examples/url.fl
+#
+# parse() splits a URL into its seven parts, all strings. query_parse()
+# decodes the query layer into a table, and stringify() reassembles the
+# parts -- stringify(parse(text)) is text again, so editing through the
+# table is safe.
+
+import url
+
+let u = url.parse("https://user@example.com:8080/search?q=flint+lang#top")
+print(u.scheme)    # https
+print(u.host)      # example.com
+print(u.port)      # 8080
+print(u.path)      # /search
+
+# the query layer, decoded: + is a space down here
+let q = url.query_parse(u.query)
+print(q.q)         # flint lang
+
+# change the page and the query, keep everything else
+u["path"] = "/docs"
+u["query"] = url.query_stringify({q: "match arms"})
+u["fragment"] = ""
+print(url.stringify(u))
