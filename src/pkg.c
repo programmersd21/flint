@@ -27,6 +27,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -837,7 +838,7 @@ static bool pkg_satisfies(const char *requirement,
  * ours saying which URL it was for -- git already explains itself, and
  * wrapping that twice helps nobody.
  */
-static bool pkg_ensure_mirror(const char *mirror,
+static bool pkg_ensure_mirror_unlocked(const char *mirror,
         const char *url,
         bool fetch,
         const char *commit,
@@ -849,9 +850,38 @@ static bool pkg_ensure_mirror(const char *mirror,
 	if (snprintf(head, sizeof(head), "%s/HEAD", mirror) >=
 	        (int)sizeof(head)) {
 		snprintf(error, error_size, "path too long");
-		return NULL;
+		return false;
 	}
-	if (access(head, F_OK) != 0) {
+	struct stat mirror_stat;
+	bool mirror_is_link = lstat(mirror, &mirror_stat) == 0 &&
+	                      S_ISLNK(mirror_stat.st_mode);
+	if (mirror_is_link || access(head, F_OK) != 0) {
+		char staging[4352];
+		bool made_staging = false;
+		for (unsigned int attempt = 0; attempt < 100; attempt++) {
+			int n = snprintf(staging,
+			        sizeof(staging),
+			        "%s.tmp.%ld.%u",
+			        mirror,
+			        (long)getpid(),
+			        attempt);
+			if (n < 0 || (size_t)n >= sizeof(staging)) {
+				snprintf(error, error_size, "path too long");
+				return false;
+			}
+			if (mkdir(staging, 0700) == 0) {
+				made_staging = true;
+				break;
+			}
+			if (errno != EEXIST) {
+				snprintf(error, error_size, "cannot create mirror staging directory");
+				return false;
+			}
+		}
+		if (!made_staging) {
+			snprintf(error, error_size, "cannot create mirror staging directory");
+			return false;
+		}
 		char *argv[] = {"git",
 		        "-c",
 		        "protocol.file.allow=always",
@@ -859,11 +889,30 @@ static bool pkg_ensure_mirror(const char *mirror,
 		        "--mirror",
 		        "--",
 		        (char *)url,
-		        (char *)mirror,
+		        staging,
 		        NULL};
 		if (pkg_git(argv, NULL, 1) != 0) {
+			(void)pkg_remove_tree(staging);
 			snprintf(error, error_size, "cannot clone '%s'", url);
-			return NULL;
+			return false;
+		}
+
+		struct stat st;
+		if (lstat(mirror, &st) == 0) {
+			if (!pkg_remove_tree(mirror)) {
+				(void)pkg_remove_tree(staging);
+				snprintf(error, error_size, "cannot remove damaged mirror");
+				return false;
+			}
+		} else if (errno != ENOENT) {
+			(void)pkg_remove_tree(staging);
+			snprintf(error, error_size, "cannot inspect mirror");
+			return false;
+		}
+		if (rename(staging, mirror) != 0) {
+			(void)pkg_remove_tree(staging);
+			snprintf(error, error_size, "cannot publish mirror");
+			return false;
 		}
 		return true;
 	}
@@ -884,7 +933,7 @@ static bool pkg_ensure_mirror(const char *mirror,
 		        NULL};
 		if (pkg_git(argv, NULL, 1) != 0) {
 			snprintf(error, error_size, "cannot fetch '%s'", url);
-			return NULL;
+			return false;
 		}
 	}
 	return true;
@@ -895,6 +944,47 @@ static bool pkg_ensure_mirror(const char *mirror,
 	(void)commit;
 	snprintf(error, error_size, "git dependencies need a POSIX system");
 	return false;
+#endif
+}
+
+static bool pkg_ensure_mirror(const char *mirror,
+        const char *url,
+        bool fetch,
+        const char *commit,
+        char *error,
+        size_t error_size)
+{
+#ifndef _WIN32
+	char lock_path[4352];
+	if (snprintf(lock_path, sizeof(lock_path), "%s.lock", mirror) >=
+	        (int)sizeof(lock_path)) {
+		snprintf(error, error_size, "path too long");
+		return false;
+	}
+	int lock_fd = open(lock_path, O_CREAT | O_RDWR, 0600);
+	if (lock_fd < 0) {
+		snprintf(error, error_size, "cannot open mirror lock");
+		return false;
+	}
+	struct flock lock = {0};
+	lock.l_type = F_WRLCK;
+	lock.l_whence = SEEK_SET;
+	while (fcntl(lock_fd, F_SETLKW, &lock) != 0) {
+		if (errno == EINTR)
+			continue;
+		close(lock_fd);
+		snprintf(error, error_size, "cannot lock mirror");
+		return false;
+	}
+	bool ok = pkg_ensure_mirror_unlocked(
+	        mirror, url, fetch, commit, error, error_size);
+	lock.l_type = F_UNLCK;
+	(void)fcntl(lock_fd, F_SETLK, &lock);
+	close(lock_fd);
+	return ok;
+#else
+	return pkg_ensure_mirror_unlocked(
+	        mirror, url, fetch, commit, error, error_size);
 #endif
 }
 
@@ -1124,9 +1214,16 @@ static bool pkg_remove_entry(const char *child)
 
 static bool pkg_remove_tree(const char *path)
 {
+	struct stat st;
+	int sr = pkg_stat_entry(path, &st);
+	if (sr < 0)
+		return false;
+	if (sr != 0 || !S_ISDIR(st.st_mode))
+		return remove(path) == 0;
+
 	DIR *dir = opendir(path);
 	if (dir == NULL)
-		return remove(path) == 0;
+		return false;
 	bool ok = true;
 	struct dirent *entry;
 	while (ok && (entry = readdir(dir)) != NULL) {
